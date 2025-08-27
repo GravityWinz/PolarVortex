@@ -21,3 +21,21 @@ export async function sendCommand(cmd) {
     return { error: err.message };
   }
 }
+
+export async function uploadImage(formData, onProgress) {
+  try {
+    const response = await fetch(`${BASE_URL}/upload`, {
+      method: "POST",
+      body: formData,
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Upload failed: ${response.statusText}`);
+    }
+    
+    return await response.json();
+  } catch (err) {
+    console.error("Error uploading image:", err);
+    throw err;
+  }
+}

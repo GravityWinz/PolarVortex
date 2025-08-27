@@ -1,0 +1,17 @@
+# Windows-specific requirements with pre-compiled wheels
+# Use this if you encounter compilation issues on Windows
+
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pyserial==3.5
+python-multipart==0.0.6
+Pillow==10.1.0
+opencv-python-headless==4.8.1.78
+numpy==1.24.3
+python-dotenv==1.0.0
+websockets==12.0
+aiofiles==23.2.1
+
+# Alternative packages for Windows (uncomment if needed)
+# opencv-python==4.8.1.78
+# numpy==1.24.3

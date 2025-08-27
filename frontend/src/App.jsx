@@ -4,6 +4,7 @@ import { ArrowBack as ArrowBackIcon } from "@mui/icons-material";
 import LandingPage from "./components/LandingPage";
 import ControlPanel from "./components/ControlPanel";
 import StatusPanel from "./components/StatusPanel";
+import ImageUpload from "./components/ImageUpload";
 
 /**
  * Main App component for PolarVortex
@@ -92,7 +93,7 @@ function renderCurrentView(view) {
     case "settings":
       return <SettingsView />;
     case "upload":
-      return <UploadView />;
+      return <ImageUpload />;
     default:
       return <Typography>View not found</Typography>;
   }
@@ -159,27 +160,4 @@ function SettingsView() {
   );
 }
 
-/**
- * Upload view component
- */
-function UploadView() {
-  return (
-    <Box>
-      <Typography variant="h4" gutterBottom>
-        Image Upload
-      </Typography>
-      <Typography variant="body1" color="text.secondary" paragraph>
-        Upload and process images for plotting with your polargraph plotter.
-      </Typography>
-      
-      <Paper sx={{ p: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          Upload Area
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          Image upload functionality will be implemented here. This will allow you to upload images and convert them for plotting.
-        </Typography>
-      </Paper>
-    </Box>
-  );
-}
+
