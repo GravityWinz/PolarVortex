@@ -3,6 +3,8 @@
 
 # Core dependencies (from requirements.txt)
 -r requirements.txt
+#Needed for Cursor to attach to pythong
+debugpy
 
 # Development and Testing
 pytest==7.4.3

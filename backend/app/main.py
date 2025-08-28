@@ -205,6 +205,39 @@ async def root():
         "arduino_connected": current_status["connected"]
     }
 
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Docker"""
+    try:
+        # Basic health check
+        health_status = {
+            "status": "healthy",
+            "timestamp": datetime.now().isoformat(),
+            "version": "1.0.0",
+            "arduino_connected": current_status["connected"]
+        }
+        
+        # Check if Arduino is responding (if connected)
+        if arduino and arduino.is_open:
+            try:
+                arduino.write(b'PING\n')
+                response = arduino.readline().decode().strip()
+                health_status["arduino_response"] = response
+            except Exception as e:
+                health_status["arduino_response"] = f"error: {str(e)}"
+        
+        return health_status
+    except Exception as e:
+        logger.error(f"Health check error: {e}")
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unhealthy",
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+
 @app.get("/status")
 async def get_status():
     """Get current system status"""

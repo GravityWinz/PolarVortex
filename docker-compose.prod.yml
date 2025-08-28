@@ -4,26 +4,22 @@ services:
   frontend:
     build: 
       context: ./frontend
-      dockerfile: Dockerfile.dev
+      dockerfile: Dockerfile
     ports:
-      - "5173:5173"  # Vite dev server port
-      - "9229:9229"  # Node debug port
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules  # Preserve node_modules in container
+      - "80:80"  # Map to standard HTTP port
     environment:
-      - NODE_ENV=development
+      - NODE_ENV=production
       - VITE_API_BASE_URL=http://localhost:8000
       - VITE_WS_BASE_URL=ws://localhost:8000
     env_file:
-      - env.example
+      - .env.production
     depends_on:
       backend:
         condition: service_healthy
     networks:
       - polarvortex-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5173"]
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -34,29 +30,33 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
 
   backend:
     build: 
       context: ./backend
-      dockerfile: Dockerfile.dev
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
-      - "5678:5678"  # Python debugger
     volumes:
-      - ./backend:/app
-      - ./backend/uploads:/app/uploads
-      - ./backend/processed_images:/app/processed_images
-      - ./backend/logs:/app/logs
+      - ./backend/uploads:/app/uploads:rw
+      - ./backend/processed_images:/app/processed_images:rw
+      - ./backend/logs:/app/logs:rw
     environment:
       - PYTHONPATH=/app
       - BACKEND_HOST=0.0.0.0
       - BACKEND_PORT=8000
-      - DEBUG=true
-      - LOG_LEVEL=DEBUG
+      - DEBUG=false
+      - LOG_LEVEL=INFO
     env_file:
-      - env.example
-    # devices:
-    #   - "/dev/ttyUSB0:/dev/ttyUSB0"  # adjust for Arduino serial device
+      - .env.production
+    devices:
+      - "/dev/ttyUSB0:/dev/ttyUSB0"  # adjust for Arduino serial device
     networks:
       - polarvortex-network
     healthcheck:
@@ -71,8 +71,12 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
 
 networks:
   polarvortex-network:
     driver: bridge
-
