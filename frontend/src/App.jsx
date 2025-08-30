@@ -53,6 +53,14 @@ export default function App() {
             <Typography variant="h6" sx={{ flexGrow: 1 }}>
               PolarVortex - {getViewTitle(currentView)}
             </Typography>
+            <Button
+              variant="contained"
+              color="secondary"
+              onClick={() => handleNavigation("upload")}
+              sx={{ textTransform: "none" }}
+            >
+              Upload Image
+            </Button>
           </Stack>
         </Container>
       </Paper>

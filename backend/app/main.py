@@ -13,6 +13,7 @@ import numpy as np
 from PIL import Image
 import io
 import base64
+import re
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -27,7 +28,12 @@ app = FastAPI(
 # CORS middleware for frontend communication
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -93,6 +99,59 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 # Image processing functions
+def sanitize_filename(filename: str) -> str:
+    """Sanitize filename for use as directory name"""
+    # Remove file extension and replace invalid characters
+    name_without_ext = os.path.splitext(filename)[0]
+    # Replace invalid characters with underscore
+    sanitized = re.sub(r'[<>:"/\\|?*]', '_', name_without_ext)
+    # Remove leading/trailing spaces and dots
+    sanitized = sanitized.strip(' .')
+    # Ensure it's not empty
+    if not sanitized:
+        sanitized = "unnamed_image"
+    return sanitized
+
+def create_image_directory(image_name: str) -> str:
+    """Create directory structure for uploaded image"""
+    # Sanitize the image name for directory creation
+    sanitized_name = sanitize_filename(image_name)
+    
+    # Create the directory path
+    image_dir = os.path.join("local_storage", "images", sanitized_name)
+    os.makedirs(image_dir, exist_ok=True)
+    
+    return image_dir
+
+def save_original_image(image_data: bytes, image_name: str, image_dir: str) -> str:
+    """Save original image to the image directory"""
+    original_path = os.path.join(image_dir, image_name)
+    with open(original_path, "wb") as f:
+        f.write(image_data)
+    return original_path
+
+def create_thumbnail(image_data: bytes, image_dir: str, image_name: str) -> str:
+    """Create and save thumbnail of the image"""
+    try:
+        # Open image from bytes
+        image = Image.open(io.BytesIO(image_data))
+        
+        # Create thumbnail (max 200x200, maintaining aspect ratio)
+        image.thumbnail((200, 200), Image.Resampling.LANCZOS)
+        
+        # Generate thumbnail filename
+        name_without_ext = os.path.splitext(image_name)[0]
+        thumb_filename = f"thumb_{name_without_ext}.png"
+        thumb_path = os.path.join(image_dir, thumb_filename)
+        
+        # Save thumbnail
+        image.save(thumb_path, "PNG")
+        
+        return thumb_path
+    except Exception as e:
+        logger.error(f"Thumbnail creation error: {e}")
+        return None
+
 def process_image_for_plotting(image_data: bytes, settings: dict) -> dict:
     """Process uploaded image for polargraph plotting"""
     try:
@@ -132,9 +191,9 @@ def process_image_for_plotting(image_data: bytes, settings: dict) -> dict:
         # Convert back to PIL Image
         processed_image = Image.fromarray(binary)
         
-        # Save processed image
-        output_path = f"processed_images/processed_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-        os.makedirs("processed_images", exist_ok=True)
+        # Save processed image in the image directory (this will be passed from the upload function)
+        # For now, we'll save it in a temporary location and the upload function will move it
+        output_path = f"temp_processed_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
         processed_image.save(output_path)
         
         # Convert to base64 for preview
@@ -298,10 +357,31 @@ async def send_command(cmd: str):
         logger.error(f"Command error: {e}")
         return {"success": False, "error": str(e)}
 
+@app.get("/check-directory/{directory_name}")
+async def check_directory_exists(directory_name: str):
+    """Check if a directory with the given name already exists"""
+    try:
+        # Sanitize the directory name
+        sanitized_name = sanitize_filename(directory_name)
+        
+        # Check if directory exists
+        image_dir = os.path.join("local_storage", "images", sanitized_name)
+        exists = os.path.exists(image_dir)
+        
+        return {
+            "exists": exists,
+            "directory_name": sanitized_name,
+            "path": image_dir
+        }
+    except Exception as e:
+        logger.error(f"Check directory error: {e}")
+        return {"error": str(e)}
+
 @app.post("/upload")
 async def upload_image(
     file: UploadFile,
-    settings: str = Form(default="{}")
+    settings: str = Form(default="{}"),
+    directory_name: str = Form(default="")
 ):
     """Upload and process image for plotting"""
     try:
@@ -320,8 +400,32 @@ async def upload_image(
         except json.JSONDecodeError:
             processing_settings = {}
         
+        # Create image directory
+        image_name = file.filename
+        # Use provided directory name if available, otherwise use filename
+        dir_name = directory_name.strip() if directory_name.strip() else image_name
+        image_dir = create_image_directory(dir_name)
+        
+        # Save original image
+        original_path = save_original_image(contents, image_name, image_dir)
+        
+        # Create thumbnail
+        thumb_path = create_thumbnail(contents, image_dir, image_name)
+        
         # Process image
         result = process_image_for_plotting(contents, processing_settings)
+        
+        # Move processed image to the image directory if processing was successful
+        processed_path = None
+        if result["success"] and "output_path" in result:
+            # Move the temporary processed image to the image directory
+            temp_path = result["output_path"]
+            if os.path.exists(temp_path):
+                name_without_ext = os.path.splitext(image_name)[0]
+                processed_filename = f"processed_{name_without_ext}.png"
+                processed_path = os.path.join(image_dir, processed_filename)
+                os.rename(temp_path, processed_path)
+                result["output_path"] = processed_path
         
         if result["success"]:
             # Broadcast new image available
@@ -329,7 +433,10 @@ async def upload_image(
                 "type": "image_processed",
                 "filename": file.filename,
                 "processed_size": result["processed_size"],
-                "plotting_points": len(result["plotting_data"])
+                "plotting_points": len(result["plotting_data"]),
+                "original_path": original_path,
+                "thumbnail_path": thumb_path,
+                "processed_path": processed_path
             }))
             
             return {
@@ -338,7 +445,11 @@ async def upload_image(
                 "original_size": result["original_size"],
                 "processed_size": result["processed_size"],
                 "plotting_points": len(result["plotting_data"]),
-                "preview": result["preview"]
+                "preview": result["preview"],
+                "original_path": original_path,
+                "thumbnail_path": thumb_path,
+                "processed_path": processed_path,
+                "image_directory": image_dir
             }
         else:
             raise HTTPException(status_code=500, detail=result["error"])
@@ -351,21 +462,43 @@ async def upload_image(
 
 @app.get("/images")
 async def list_processed_images():
-    """List all processed images"""
+    """List all uploaded images with their directory structure"""
     try:
-        if not os.path.exists("processed_images"):
+        images_dir = os.path.join("local_storage", "images")
+        if not os.path.exists(images_dir):
             return {"images": []}
         
         images = []
-        for filename in os.listdir("processed_images"):
-            if filename.endswith(('.png', '.jpg', '.jpeg')):
-                file_path = os.path.join("processed_images", filename)
-                file_stat = os.stat(file_path)
-                images.append({
-                    "filename": filename,
-                    "size": file_stat.st_size,
-                    "created": datetime.fromtimestamp(file_stat.st_ctime).isoformat()
-                })
+        for image_dir_name in os.listdir(images_dir):
+            image_dir_path = os.path.join(images_dir, image_dir_name)
+            if os.path.isdir(image_dir_path):
+                # Get original image file
+                original_files = [f for f in os.listdir(image_dir_path) 
+                                if not f.startswith('thumb_') and not f.startswith('processed_')]
+                
+                if original_files:
+                    original_file = original_files[0]  # Take the first non-thumbnail file
+                    original_path = os.path.join(image_dir_path, original_file)
+                    file_stat = os.stat(original_path)
+                    
+                    # Check for thumbnail and processed versions
+                    thumb_file = f"thumb_{os.path.splitext(original_file)[0]}.png"
+                    processed_file = f"processed_{os.path.splitext(original_file)[0]}.png"
+                    
+                    thumb_path = os.path.join(image_dir_path, thumb_file)
+                    processed_path = os.path.join(image_dir_path, processed_file)
+                    
+                    images.append({
+                        "name": image_dir_name,
+                        "original_filename": original_file,
+                        "original_path": original_path,
+                        "thumbnail_path": thumb_path if os.path.exists(thumb_path) else None,
+                        "processed_path": processed_path if os.path.exists(processed_path) else None,
+                        "size": file_stat.st_size,
+                        "created": datetime.fromtimestamp(file_stat.st_ctime).isoformat(),
+                        "has_thumbnail": os.path.exists(thumb_path),
+                        "has_processed": os.path.exists(processed_path)
+                    })
         
         return {"images": images}
     except Exception as e:

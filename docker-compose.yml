@@ -44,8 +44,7 @@ services:
       - "5678:5678"  # Python debugger
     volumes:
       - ./backend:/app
-      - ./backend/uploads:/app/uploads
-      - ./backend/processed_images:/app/processed_images
+      - ./backend/local_storage:/app/local_storage
       - ./backend/logs:/app/logs
     environment:
       - PYTHONPATH=/app

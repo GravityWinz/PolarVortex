@@ -1,41 +1,41 @@
-import React, { useState, useCallback } from "react";
 import {
+  CheckCircle as CheckCircleIcon,
+  CloudUpload as CloudUploadIcon,
+  Delete as DeleteIcon,
+  FileUpload as FileUploadIcon,
+  Image as ImageIcon,
+  PlayArrow as PlayIcon,
+  Settings as SettingsIcon
+} from "@mui/icons-material";
+import {
+  Alert,
   Box,
-  Typography,
-  Paper,
   Button,
-  Grid,
   Card,
   CardContent,
   CardMedia,
   Chip,
-  Stack,
-  LinearProgress,
-  Alert,
-  IconButton,
   Dialog,
-  DialogTitle,
-  DialogContent,
   DialogActions,
-  TextField,
+  DialogContent,
+  DialogTitle,
   FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Slider,
   FormControlLabel,
+  Grid,
+  IconButton,
+  InputLabel,
+  LinearProgress,
+  MenuItem,
+  Paper,
+  Select,
+  Slider,
+  Stack,
   Switch,
+  TextField,
+  Typography,
 } from "@mui/material";
-import {
-  CloudUpload as CloudUploadIcon,
-  Delete as DeleteIcon,
-  Settings as SettingsIcon,
-  PlayArrow as PlayIcon,
-  Image as ImageIcon,
-  FileUpload as FileUploadIcon,
-  CheckCircle as CheckCircleIcon,
-  Error as ErrorIcon,
-} from "@mui/icons-material";
+import React, { useCallback, useState } from "react";
+import { uploadImage } from "../services/apiService";
 
 /**
  * Image Upload component for PolarVortex
@@ -56,6 +56,8 @@ export default function ImageUpload() {
     maxWidth: 800,
     maxHeight: 600,
   });
+  const [directoryName, setDirectoryName] = useState("");
+  const [nameCollision, setNameCollision] = useState(false);
 
   // Handle file selection
   const handleFileSelect = useCallback((event) => {
@@ -96,12 +98,41 @@ export default function ImageUpload() {
     setErrorMessage("");
     setUploadStatus("idle");
 
+    // Set default directory name to image name (without extension)
+    const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
+    setDirectoryName(nameWithoutExt);
+
     // Create preview
     const reader = new FileReader();
     reader.onload = (e) => {
       setPreviewUrl(e.target.result);
     };
     reader.readAsDataURL(file);
+  };
+
+  // Check for name collision
+  const checkNameCollision = async (name) => {
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || "http://localhost:8000"}/check-directory/${encodeURIComponent(name)}`);
+      const result = await response.json();
+      return result.exists;
+    } catch (error) {
+      console.error("Error checking directory name:", error);
+      return false;
+    }
+  };
+
+  // Handle directory name change
+  const handleDirectoryNameChange = async (event) => {
+    const newName = event.target.value;
+    setDirectoryName(newName);
+
+    if (newName.trim()) {
+      const collision = await checkNameCollision(newName);
+      setNameCollision(collision);
+    } else {
+      setNameCollision(false);
+    }
   };
 
   // Remove selected file
@@ -122,42 +153,24 @@ export default function ImageUpload() {
 
     try {
       const formData = new FormData();
-      formData.append("image", selectedFile);
+      // Backend expects field name 'file' and 'settings'
+      formData.append("file", selectedFile);
       formData.append("settings", JSON.stringify(processingSettings));
+      formData.append("directory_name", directoryName); // Add directory name
 
-      // Simulate upload progress
-      const progressInterval = setInterval(() => {
-        setUploadProgress((prev) => {
-          if (prev >= 90) {
-            clearInterval(progressInterval);
-            return 90;
-          }
-          return prev + 10;
-        });
-      }, 200);
+      const response = await uploadImage(formData);
 
-      // TODO: Replace with actual API call
-      // const response = await fetch("/api/upload", {
-      //   method: "POST",
-      //   body: formData,
-      // });
-
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-
-      clearInterval(progressInterval);
       setUploadProgress(100);
       setUploadStatus("success");
 
-      // Reset after success
-      setTimeout(() => {
-        setUploadProgress(0);
-        setUploadStatus("idle");
-      }, 2000);
+      // If backend returns preview, update preview to processed image
+      if (response?.preview) {
+        setPreviewUrl(response.preview);
+      }
 
     } catch (error) {
       setUploadStatus("error");
-      setErrorMessage("Upload failed. Please try again.");
+      setErrorMessage(error?.message || "Upload failed. Please try again.");
       setUploadProgress(0);
     }
   };
@@ -228,19 +241,35 @@ export default function ImageUpload() {
               ) : (
                 <CloudUploadIcon sx={{ fontSize: 48, color: "primary.main", mb: 2 }} />
               )}
-              
+
               <Typography variant="h6" gutterBottom>
                 {selectedFile ? "File Selected" : "Drop image here or click to browse"}
               </Typography>
-              
+
               <Typography variant="body2" color="text.secondary">
-                {selectedFile 
+                {selectedFile
                   ? `${selectedFile.name} (${getFileSize(selectedFile.size)})`
                   : "Supports JPEG, PNG, GIF up to 10MB"
                 }
               </Typography>
             </Box>
           </Paper>
+
+          {/* Directory Name Input */}
+          {selectedFile && (
+            <Box sx={{ mt: 2 }}>
+              <TextField
+                fullWidth
+                label="Directory Name"
+                value={directoryName}
+                onChange={handleDirectoryNameChange}
+                error={nameCollision}
+                helperText={nameCollision ? "A directory with this name already exists. Please choose a different name." : "This will be the name of the directory where your image is stored."}
+                disabled={uploadStatus === "uploading"}
+                sx={{ mb: 2 }}
+              />
+            </Box>
+          )}
 
           {/* File Actions */}
           {selectedFile && (
@@ -249,7 +278,7 @@ export default function ImageUpload() {
                 variant="contained"
                 startIcon={<PlayIcon />}
                 onClick={handleUpload}
-                disabled={uploadStatus === "uploading"}
+                disabled={uploadStatus === "uploading" || nameCollision || !directoryName.trim()}
                 fullWidth
               >
                 Process & Upload
@@ -308,7 +337,7 @@ export default function ImageUpload() {
               <Typography variant="h6" gutterBottom>
                 Preview
               </Typography>
-              
+
               {previewUrl ? (
                 <Box sx={{ position: "relative" }}>
                   <CardMedia
@@ -323,7 +352,7 @@ export default function ImageUpload() {
                       borderRadius: 1,
                     }}
                   />
-                  
+
                   {/* File Info */}
                   <Box sx={{ mt: 2 }}>
                     <Stack direction="row" spacing={1} flexWrap="wrap">
