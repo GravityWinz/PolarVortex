@@ -1,9 +1,11 @@
 from fastapi import FastAPI, UploadFile, WebSocket, WebSocketDisconnect, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from contextlib import asynccontextmanager
 import serial
 import json
 import os
+import shutil
 import asyncio
 import logging
 from typing import List, Optional
@@ -19,10 +21,33 @@ import re
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Global variables
+arduino = None
+websocket_connections: List[WebSocket] = []
+current_status = {
+    "connected": False,
+    "drawing": False,
+    "progress": 0,
+    "current_command": None,
+    "last_update": None
+}
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("Starting PolarVortex API...")
+    setup_arduino()
+    yield
+    # Shutdown
+    logger.info("Shutting down PolarVortex API...")
+    if arduino and arduino.is_open:
+        arduino.close()
+
 app = FastAPI(
     title="PolarVortex API",
     description="Backend API for Polargraph Plotter Control System",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # CORS middleware for frontend communication
@@ -38,17 +63,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Global variables
-arduino = None
-websocket_connections: List[WebSocket] = []
-current_status = {
-    "connected": False,
-    "drawing": False,
-    "progress": 0,
-    "current_command": None,
-    "last_update": None
-}
 
 # Arduino connection setup
 def setup_arduino():
@@ -424,8 +438,26 @@ async def upload_image(
                 name_without_ext = os.path.splitext(image_name)[0]
                 processed_filename = f"processed_{name_without_ext}.png"
                 processed_path = os.path.join(image_dir, processed_filename)
-                os.rename(temp_path, processed_path)
-                result["output_path"] = processed_path
+                
+                try:
+                    # Copy the file first
+                    shutil.copy2(temp_path, processed_path)
+                    # Verify the copy was successful
+                    if os.path.exists(processed_path) and os.path.getsize(processed_path) == os.path.getsize(temp_path):
+                        # Delete the original file only if copy was successful
+                        os.remove(temp_path)
+                        result["output_path"] = processed_path
+                        logger.info(f"Successfully moved processed image from {temp_path} to {processed_path}")
+                    else:
+                        logger.error(f"Copy verification failed: sizes don't match or file doesn't exist")
+                        # Keep the original file and use the temp path
+                        processed_path = temp_path
+                        result["output_path"] = temp_path
+                except Exception as e:
+                    logger.error(f"Failed to move processed image from {temp_path} to {processed_path}: {e}")
+                    # Keep the original file and use the temp path
+                    processed_path = temp_path
+                    result["output_path"] = temp_path
         
         if result["success"]:
             # Broadcast new image available
@@ -535,19 +567,7 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.error(f"WebSocket error: {e}")
         manager.disconnect(websocket)
 
-# Startup and shutdown events
-@app.on_event("startup")
-async def startup_event():
-    """Initialize Arduino connection on startup"""
-    logger.info("Starting PolarVortex API...")
-    setup_arduino()
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Clean up resources on shutdown"""
-    logger.info("Shutting down PolarVortex API...")
-    if arduino and arduino.is_open:
-        arduino.close()
 
 # Error handlers
 @app.exception_handler(Exception)

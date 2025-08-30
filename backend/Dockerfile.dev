@@ -8,5 +8,9 @@ COPY requirements.txt ./
 RUN pip install -r requirements.txt
 COPY . .
 
+# Set environment variable to disable frozen modules validation
+ENV PYDEVD_DISABLE_FILE_VALIDATION=1
+
+# Start command that allows debugging but doesn't wait for client
 CMD ["python", "-Xfrozen_modules=off", "-m", "debugpy", "--listen", "0.0.0.0:5678", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
