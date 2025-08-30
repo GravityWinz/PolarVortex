@@ -5,17 +5,12 @@ from contextlib import asynccontextmanager
 import serial
 import json
 import os
-import shutil
 import asyncio
 import logging
 from typing import List, Optional
 from datetime import datetime
-import cv2
-import numpy as np
-from PIL import Image
-import io
-import base64
 import re
+from .image_processor import ImageHelper
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -31,6 +26,9 @@ current_status = {
     "current_command": None,
     "last_update": None
 }
+
+# Initialize ImageHelper
+image_helper = ImageHelper()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -112,160 +110,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-# Image processing functions
-def sanitize_filename(filename: str) -> str:
-    """Sanitize filename for use as directory name"""
-    # Remove file extension and replace invalid characters
-    name_without_ext = os.path.splitext(filename)[0]
-    # Replace invalid characters with underscore
-    sanitized = re.sub(r'[<>:"/\\|?*]', '_', name_without_ext)
-    # Remove leading/trailing spaces and dots
-    sanitized = sanitized.strip(' .')
-    # Ensure it's not empty
-    if not sanitized:
-        sanitized = "unnamed_image"
-    return sanitized
-
-def create_image_directory(image_name: str) -> str:
-    """Create directory structure for uploaded image"""
-    # Sanitize the image name for directory creation
-    sanitized_name = sanitize_filename(image_name)
-    
-    # Create the directory path
-    image_dir = os.path.join("local_storage", "images", sanitized_name)
-    os.makedirs(image_dir, exist_ok=True)
-    
-    return image_dir
-
-def save_original_image(image_data: bytes, image_name: str, image_dir: str) -> str:
-    """Save original image to the image directory"""
-    original_path = os.path.join(image_dir, image_name)
-    with open(original_path, "wb") as f:
-        f.write(image_data)
-    return original_path
-
-def create_thumbnail(image_data: bytes, image_dir: str, image_name: str) -> str:
-    """Create and save thumbnail of the image"""
-    try:
-        # Open image from bytes
-        image = Image.open(io.BytesIO(image_data))
-        
-        # Create thumbnail (max 200x200, maintaining aspect ratio)
-        image.thumbnail((200, 200), Image.Resampling.LANCZOS)
-        
-        # Generate thumbnail filename
-        name_without_ext = os.path.splitext(image_name)[0]
-        thumb_filename = f"thumb_{name_without_ext}.png"
-        thumb_path = os.path.join(image_dir, thumb_filename)
-        
-        # Save thumbnail
-        image.save(thumb_path, "PNG")
-        
-        return thumb_path
-    except Exception as e:
-        logger.error(f"Thumbnail creation error: {e}")
-        return None
-
-def process_image_for_plotting(image_data: bytes, settings: dict) -> dict:
-    """Process uploaded image for polargraph plotting"""
-    try:
-        # Convert bytes to PIL Image
-        image = Image.open(io.BytesIO(image_data))
-        
-        # Convert to grayscale
-        if image.mode != 'L':
-            image = image.convert('L')
-        
-        # Resize based on settings
-        resolution_map = {
-            "low": (400, 300),
-            "medium": (800, 600),
-            "high": (1200, 900),
-            "custom": (settings.get("maxWidth", 800), settings.get("maxHeight", 600))
-        }
-        
-        target_size = resolution_map.get(settings.get("resolution", "medium"))
-        image = image.resize(target_size, Image.Resampling.LANCZOS)
-        
-        # Convert to numpy array for OpenCV processing
-        img_array = np.array(image)
-        
-        # Apply threshold
-        threshold = settings.get("threshold", 128)
-        _, binary = cv2.threshold(img_array, threshold, 255, cv2.THRESH_BINARY)
-        
-        # Invert if requested
-        if settings.get("invert", False):
-            binary = cv2.bitwise_not(binary)
-        
-        # Apply dithering if requested
-        if settings.get("dither", True):
-            binary = apply_floyd_steinberg_dithering(img_array)
-        
-        # Convert back to PIL Image
-        processed_image = Image.fromarray(binary)
-        
-        # Save processed image in the image directory (this will be passed from the upload function)
-        # For now, we'll save it in a temporary location and the upload function will move it
-        output_path = f"temp_processed_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-        processed_image.save(output_path)
-        
-        # Convert to base64 for preview
-        buffer = io.BytesIO()
-        processed_image.save(buffer, format='PNG')
-        img_base64 = base64.b64encode(buffer.getvalue()).decode()
-        
-        return {
-            "success": True,
-            "original_size": image.size,
-            "processed_size": processed_image.size,
-            "output_path": output_path,
-            "preview": f"data:image/png;base64,{img_base64}",
-            "plotting_data": convert_to_plotting_data(binary)
-        }
-        
-    except Exception as e:
-        logger.error(f"Image processing error: {e}")
-        return {"success": False, "error": str(e)}
-
-def apply_floyd_steinberg_dithering(image):
-    """Apply Floyd-Steinberg dithering to image"""
-    img = image.astype(float)
-    height, width = img.shape
-    
-    for y in range(height):
-        for x in range(width):
-            old_pixel = img[y, x]
-            new_pixel = 255 if old_pixel > 127 else 0
-            img[y, x] = new_pixel
-            
-            error = old_pixel - new_pixel
-            
-            if x + 1 < width:
-                img[y, x + 1] += error * 7 / 16
-            if x - 1 >= 0 and y + 1 < height:
-                img[y + 1, x - 1] += error * 3 / 16
-            if y + 1 < height:
-                img[y + 1, x] += error * 5 / 16
-            if x + 1 < width and y + 1 < height:
-                img[y + 1, x + 1] += error * 1 / 16
-    
-    return img.astype(np.uint8)
-
-def convert_to_plotting_data(binary_image):
-    """Convert binary image to plotting coordinates"""
-    height, width = binary_image.shape
-    plotting_points = []
-    
-    for y in range(height):
-        for x in range(width):
-            if binary_image[y, x] == 0:  # Black pixel
-                # Convert to plotter coordinates
-                plot_x = (x / width) * 100  # Scale to 0-100
-                plot_y = (y / height) * 100
-                plotting_points.append((plot_x, plot_y))
-    
-    return plotting_points
+# Image processing is now handled by ImageHelper class
 
 # API Endpoints
 @app.get("/")
@@ -376,7 +221,7 @@ async def check_directory_exists(directory_name: str):
     """Check if a directory with the given name already exists"""
     try:
         # Sanitize the directory name
-        sanitized_name = sanitize_filename(directory_name)
+        sanitized_name = image_helper.sanitize_filename(directory_name)
         
         # Check if directory exists
         image_dir = os.path.join("local_storage", "images", sanitized_name)
@@ -399,93 +244,32 @@ async def upload_image(
 ):
     """Upload and process image for plotting"""
     try:
-        # Validate file
-        if not file.content_type.startswith('image/'):
-            raise HTTPException(status_code=400, detail="File must be an image")
-        
         # Read file content
         contents = await file.read()
-        if len(contents) > 10 * 1024 * 1024:  # 10MB limit
-            raise HTTPException(status_code=400, detail="File too large (max 10MB)")
         
-        # Parse settings
-        try:
-            processing_settings = json.loads(settings)
-        except json.JSONDecodeError:
-            processing_settings = {}
+        # Process upload using ImageHelper
+        result = image_helper.process_upload(
+            file_content=contents,
+            file_content_type=file.content_type,
+            file_size=len(contents),
+            file_name=file.filename,
+            settings_json=settings,
+            directory_name=directory_name
+        )
         
-        # Create image directory
-        image_name = file.filename
-        # Use provided directory name if available, otherwise use filename
-        dir_name = directory_name.strip() if directory_name.strip() else image_name
-        image_dir = create_image_directory(dir_name)
+        # Broadcast new image available
+        await manager.broadcast(json.dumps({
+            "type": "image_processed",
+            "filename": file.filename,
+            "processed_size": result["processed_size"],
+            "plotting_points": result["plotting_points"],
+            "original_path": result["original_path"],
+            "thumbnail_path": result["thumbnail_path"],
+            "processed_path": result["processed_path"]
+        }))
         
-        # Save original image
-        original_path = save_original_image(contents, image_name, image_dir)
+        return result
         
-        # Create thumbnail
-        thumb_path = create_thumbnail(contents, image_dir, image_name)
-        
-        # Process image
-        result = process_image_for_plotting(contents, processing_settings)
-        
-        # Move processed image to the image directory if processing was successful
-        processed_path = None
-        if result["success"] and "output_path" in result:
-            # Move the temporary processed image to the image directory
-            temp_path = result["output_path"]
-            if os.path.exists(temp_path):
-                name_without_ext = os.path.splitext(image_name)[0]
-                processed_filename = f"processed_{name_without_ext}.png"
-                processed_path = os.path.join(image_dir, processed_filename)
-                
-                try:
-                    # Copy the file first
-                    shutil.copy2(temp_path, processed_path)
-                    # Verify the copy was successful
-                    if os.path.exists(processed_path) and os.path.getsize(processed_path) == os.path.getsize(temp_path):
-                        # Delete the original file only if copy was successful
-                        os.remove(temp_path)
-                        result["output_path"] = processed_path
-                        logger.info(f"Successfully moved processed image from {temp_path} to {processed_path}")
-                    else:
-                        logger.error(f"Copy verification failed: sizes don't match or file doesn't exist")
-                        # Keep the original file and use the temp path
-                        processed_path = temp_path
-                        result["output_path"] = temp_path
-                except Exception as e:
-                    logger.error(f"Failed to move processed image from {temp_path} to {processed_path}: {e}")
-                    # Keep the original file and use the temp path
-                    processed_path = temp_path
-                    result["output_path"] = temp_path
-        
-        if result["success"]:
-            # Broadcast new image available
-            await manager.broadcast(json.dumps({
-                "type": "image_processed",
-                "filename": file.filename,
-                "processed_size": result["processed_size"],
-                "plotting_points": len(result["plotting_data"]),
-                "original_path": original_path,
-                "thumbnail_path": thumb_path,
-                "processed_path": processed_path
-            }))
-            
-            return {
-                "success": True,
-                "filename": file.filename,
-                "original_size": result["original_size"],
-                "processed_size": result["processed_size"],
-                "plotting_points": len(result["plotting_data"]),
-                "preview": result["preview"],
-                "original_path": original_path,
-                "thumbnail_path": thumb_path,
-                "processed_path": processed_path,
-                "image_directory": image_dir
-            }
-        else:
-            raise HTTPException(status_code=500, detail=result["error"])
-            
     except HTTPException:
         raise
     except Exception as e:
@@ -496,43 +280,7 @@ async def upload_image(
 async def list_processed_images():
     """List all uploaded images with their directory structure"""
     try:
-        images_dir = os.path.join("local_storage", "images")
-        if not os.path.exists(images_dir):
-            return {"images": []}
-        
-        images = []
-        for image_dir_name in os.listdir(images_dir):
-            image_dir_path = os.path.join(images_dir, image_dir_name)
-            if os.path.isdir(image_dir_path):
-                # Get original image file
-                original_files = [f for f in os.listdir(image_dir_path) 
-                                if not f.startswith('thumb_') and not f.startswith('processed_')]
-                
-                if original_files:
-                    original_file = original_files[0]  # Take the first non-thumbnail file
-                    original_path = os.path.join(image_dir_path, original_file)
-                    file_stat = os.stat(original_path)
-                    
-                    # Check for thumbnail and processed versions
-                    thumb_file = f"thumb_{os.path.splitext(original_file)[0]}.png"
-                    processed_file = f"processed_{os.path.splitext(original_file)[0]}.png"
-                    
-                    thumb_path = os.path.join(image_dir_path, thumb_file)
-                    processed_path = os.path.join(image_dir_path, processed_file)
-                    
-                    images.append({
-                        "name": image_dir_name,
-                        "original_filename": original_file,
-                        "original_path": original_path,
-                        "thumbnail_path": thumb_path if os.path.exists(thumb_path) else None,
-                        "processed_path": processed_path if os.path.exists(processed_path) else None,
-                        "size": file_stat.st_size,
-                        "created": datetime.fromtimestamp(file_stat.st_ctime).isoformat(),
-                        "has_thumbnail": os.path.exists(thumb_path),
-                        "has_processed": os.path.exists(processed_path)
-                    })
-        
-        return {"images": images}
+        return image_helper.list_processed_images()
     except Exception as e:
         logger.error(f"List images error: {e}")
         return {"error": str(e)}
