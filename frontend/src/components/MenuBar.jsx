@@ -1,11 +1,10 @@
 import {
     ControlCamera as ControlIcon,
-    Image as ImageIcon,
+    Folder as FolderIcon,
     Menu as MenuIcon,
     Monitor as MonitorIcon,
     Settings as SettingsIcon,
     Timeline as TimelineIcon,
-    Upload as UploadIcon,
 } from "@mui/icons-material";
 import {
     AppBar,
@@ -37,14 +36,9 @@ export default function MenuBar({ currentView, onNavigate }) {
 
   const menuItems = [
     {
-      text: "Thumbnails",
-      icon: <ImageIcon />,
-      destination: "thumbnails",
-    },
-    {
-      text: "Image Upload",
-      icon: <UploadIcon />,
-      destination: "upload",
+      text: "Projects",
+      icon: <FolderIcon />,
+      destination: "projects",
     },
     {
       text: "Graph Preparation",

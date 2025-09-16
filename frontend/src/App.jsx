@@ -3,10 +3,9 @@ import React, { useState } from "react";
 import logoImage from "./assets/PolarVortexLogo_small.png";
 import ControlPanel from "./components/ControlPanel";
 import GraphPreparation from "./components/GraphPreparation";
-import ImageUpload from "./components/ImageUpload";
 import MenuBar from "./components/MenuBar";
+import ProjectList from "./components/ProjectList";
 import StatusPanel from "./components/StatusPanel";
-import ThumbnailView from "./components/ThumbnailView";
 
 // Create a custom theme for PolarVortex
 const theme = createTheme({
@@ -62,23 +61,32 @@ const theme = createTheme({
  * Clean design with menu bar and thumbnail view
  */
 export default function App() {
-  const [currentView, setCurrentView] = useState("thumbnails");
+  const [currentView, setCurrentView] = useState("projects");
+  const [selectedProject, setSelectedProject] = useState(null);
   const [selectedImage, setSelectedImage] = useState(null);
 
   const handleNavigation = (destination) => {
     setCurrentView(destination);
   };
 
-  const handleImageSelect = (image) => {
-    setSelectedImage(image);
-    // You can navigate to preparation view when an image is selected
-    // setCurrentView("preparation");
+  const handleProjectSelect = (project) => {
+    setSelectedProject(project);
+    // Project selection now handled within ProjectList component
+  };
+
+  const handleImageSelect = (project) => {
+    setSelectedImage(project);
+    setCurrentView("preparation");
+  };
+
+  const handleUploadComplete = (project, response) => {
+    // Refresh project list or update current project
+    setCurrentView("projects");
+    setSelectedProject(null);
   };
 
   const renderCurrentView = () => {
     switch (currentView) {
-      case "upload":
-        return <ImageUpload />;
       case "preparation":
         return <GraphPreparation selectedImage={selectedImage} />;
       case "control":
@@ -87,9 +95,13 @@ export default function App() {
         return <StatusPanel />;
       case "settings":
         return <SettingsView />;
-      case "thumbnails":
+      case "projects":
       default:
-        return <ThumbnailView onImageSelect={handleImageSelect} />;
+        return (
+          <ProjectList 
+            onProjectSelect={handleProjectSelect}
+          />
+        );
     }
   };
 

@@ -10,16 +10,24 @@ import logging
 from typing import List, Tuple, Dict, Any, Optional
 from datetime import datetime
 from fastapi import HTTPException
+from pathlib import Path
+
+from .config import config
 
 logger = logging.getLogger(__name__)
 
 class ImageHelper:
     """Helper class for image processing and file management"""
     
-    def __init__(self, base_storage_path: str = "local_storage"):
-        self.base_storage_path = base_storage_path
-        self.images_dir = os.path.join(base_storage_path, "images")
-        self.max_file_size = 10 * 1024 * 1024  # 10MB
+    def __init__(self):
+        """Initialize ImageHelper with configuration from config system"""
+        self.project_storage_path = Path(config.project_storage)
+        self.max_file_size = config.max_file_size
+        self.allowed_image_types = config.allowed_image_types
+        self.resolution_presets = config.resolution_presets
+        self.default_threshold = config.default_threshold
+        self.default_dither = config.default_dither
+        self.default_invert = config.default_invert
         
     def sanitize_filename(self, filename: str) -> str:
         """Sanitize filename for use as directory name"""
@@ -34,25 +42,21 @@ class ImageHelper:
             sanitized = "unnamed_image"
         return sanitized
     
-    def create_image_directory(self, image_name: str) -> str:
-        """Create directory structure for uploaded image"""
-        # Sanitize the image name for directory creation
-        sanitized_name = self.sanitize_filename(image_name)
-        
-        # Create the directory path
-        image_dir = os.path.join(self.images_dir, sanitized_name)
-        os.makedirs(image_dir, exist_ok=True)
-        
-        return image_dir
+    def get_project_directory(self, project_id: str) -> Path:
+        """Get the project directory path for a given project ID"""
+        return self.project_storage_path / project_id
     
-    def save_original_image(self, image_data: bytes, image_name: str, image_dir: str) -> str:
-        """Save original image to the image directory"""
-        original_path = os.path.join(image_dir, image_name)
+    def save_original_image(self, image_data: bytes, image_name: str, project_id: str) -> str:
+        """Save original image to the project directory"""
+        project_dir = self.get_project_directory(project_id)
+        project_dir.mkdir(parents=True, exist_ok=True)
+        
+        original_path = project_dir / image_name
         with open(original_path, "wb") as f:
             f.write(image_data)
-        return original_path
+        return str(original_path)
     
-    def create_thumbnail(self, image_data: bytes, image_dir: str, image_name: str) -> Optional[str]:
+    def create_thumbnail(self, image_data: bytes, image_name: str, project_id: str) -> Optional[str]:
         """Create and save thumbnail of the image"""
         try:
             # Open image from bytes
@@ -64,20 +68,22 @@ class ImageHelper:
             # Generate thumbnail filename
             name_without_ext = os.path.splitext(image_name)[0]
             thumb_filename = f"thumb_{name_without_ext}.png"
-            thumb_path = os.path.join(image_dir, thumb_filename)
+            
+            project_dir = self.get_project_directory(project_id)
+            thumb_path = project_dir / thumb_filename
             
             # Save thumbnail
             image.save(thumb_path, "PNG")
             
-            return thumb_path
+            return str(thumb_path)
         except Exception as e:
             logger.error(f"Thumbnail creation error: {e}")
             return None
     
     def validate_upload(self, file_content_type: str, file_size: int) -> None:
-        """Validate uploaded file"""
-        if not file_content_type.startswith('image/'):
-            raise HTTPException(status_code=400, detail="File must be an image")
+        """Validate uploaded file using configuration settings"""
+        if file_content_type not in self.allowed_image_types:
+            raise HTTPException(status_code=400, detail=f"File type not allowed. Allowed types: {self.allowed_image_types}")
         
         if file_size > self.max_file_size:
             raise HTTPException(status_code=400, detail=f"File too large (max {self.max_file_size // (1024*1024)}MB)")
@@ -91,7 +97,7 @@ class ImageHelper:
             return {}
     
     def process_image_for_plotting(self, image_data: bytes, settings: Dict[str, Any], 
-                                 image_dir: Optional[str] = None, 
+                                 project_id: Optional[str] = None, 
                                  image_name: Optional[str] = None) -> Dict[str, Any]:
         """Process uploaded image for polargraph plotting"""
         try:
@@ -102,52 +108,56 @@ class ImageHelper:
             if image.mode != 'L':
                 image = image.convert('L')
             
-            # Resize based on settings
-            resolution_map = {
-                "low": (400, 300),
-                "medium": (800, 600),
-                "high": (1200, 900),
-                "custom": (settings.get("maxWidth", 800), settings.get("maxHeight", 600))
-            }
+            # Resize based on settings using config resolution presets
+            resolution = settings.get("resolution", "medium")
+            if resolution in self.resolution_presets:
+                target_size = tuple(self.resolution_presets[resolution])
+            elif resolution == "custom":
+                target_size = (settings.get("maxWidth", 800), settings.get("maxHeight", 600))
+            else:
+                target_size = tuple(self.resolution_presets["medium"])
             
-            target_size = resolution_map.get(settings.get("resolution", "medium"))
             image = image.resize(target_size, Image.Resampling.LANCZOS)
             
             # Convert to numpy array for OpenCV processing
             img_array = np.array(image)
             
-            # Apply threshold
-            threshold = settings.get("threshold", 128)
+            # Apply threshold using config defaults
+            threshold = settings.get("threshold", self.default_threshold)
             _, binary = cv2.threshold(img_array, threshold, 255, cv2.THRESH_BINARY)
             
-            # Invert if requested
-            if settings.get("invert", False):
+            # Invert if requested using config defaults
+            if settings.get("invert", self.default_invert):
                 binary = cv2.bitwise_not(binary)
             
-            # Apply dithering if requested
-            if settings.get("dither", True):
+            # Apply dithering if requested using config defaults
+            if settings.get("dither", self.default_dither):
                 binary = self._apply_floyd_steinberg_dithering(img_array)
             
             # Convert back to PIL Image
             processed_image = Image.fromarray(binary)
             
-            # Save processed image directly to the image directory if provided
+            # Save processed image to project directory if provided
             output_path = None
-            if image_dir and image_name:
+            if project_id and image_name:
                 name_without_ext = os.path.splitext(image_name)[0]
                 processed_filename = f"processed_{name_without_ext}.png"
-                output_path = os.path.join(image_dir, processed_filename)
+                
+                project_dir = self.get_project_directory(project_id)
+                project_dir.mkdir(parents=True, exist_ok=True)
+                output_path = project_dir / processed_filename
                 
                 try:
                     processed_image.save(output_path)
                     logger.info(f"Successfully saved processed image to {output_path}")
+                    output_path = str(output_path)
                 except Exception as e:
                     logger.error(f"Failed to save processed image to {output_path}: {e}")
                     # Fallback to temporary location
                     output_path = f"temp_processed_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
                     processed_image.save(output_path)
             else:
-                # Fallback to temporary location if no directory provided
+                # Fallback to temporary location if no project provided
                 output_path = f"temp_processed_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
                 processed_image.save(output_path)
             
@@ -208,52 +218,10 @@ class ImageHelper:
         
         return plotting_points
     
-    def list_processed_images(self) -> Dict[str, Any]:
-        """List all uploaded images with their directory structure"""
-        try:
-            if not os.path.exists(self.images_dir):
-                return {"images": []}
-            
-            images = []
-            for image_dir_name in os.listdir(self.images_dir):
-                image_dir_path = os.path.join(self.images_dir, image_dir_name)
-                if os.path.isdir(image_dir_path):
-                    # Get original image file
-                    original_files = [f for f in os.listdir(image_dir_path) 
-                                    if not f.startswith('thumb_') and not f.startswith('processed_')]
-                    
-                    if original_files:
-                        original_file = original_files[0]  # Take the first non-thumbnail file
-                        original_path = os.path.join(image_dir_path, original_file)
-                        file_stat = os.stat(original_path)
-                        
-                        # Check for thumbnail and processed versions
-                        thumb_file = f"thumb_{os.path.splitext(original_file)[0]}.png"
-                        processed_file = f"processed_{os.path.splitext(original_file)[0]}.png"
-                        
-                        thumb_path = os.path.join(image_dir_path, thumb_file)
-                        processed_path = os.path.join(image_dir_path, processed_file)
-                        
-                        images.append({
-                            "name": image_dir_name,
-                            "original_filename": original_file,
-                            "original_path": original_path,
-                            "thumbnail_path": thumb_path if os.path.exists(thumb_path) else None,
-                            "processed_path": processed_path if os.path.exists(processed_path) else None,
-                            "size": file_stat.st_size,
-                            "created": datetime.fromtimestamp(file_stat.st_ctime).isoformat(),
-                            "has_thumbnail": os.path.exists(thumb_path),
-                            "has_processed": os.path.exists(processed_path)
-                        })
-            
-            return {"images": images}
-        except Exception as e:
-            logger.error(f"List images error: {e}")
-            return {"error": str(e)}
     
     def process_upload(self, file_content: bytes, file_content_type: str, file_size: int, 
-                      file_name: str, settings_json: str, directory_name: str = "") -> Dict[str, Any]:
-        """Complete upload processing workflow"""
+                      file_name: str, settings_json: str, project_id: str) -> Dict[str, Any]:
+        """Complete upload processing workflow for a specific project"""
         try:
             # Validate file
             self.validate_upload(file_content_type, file_size)
@@ -261,18 +229,18 @@ class ImageHelper:
             # Parse settings
             processing_settings = self.parse_processing_settings(settings_json)
             
-            # Create image directory
-            dir_name = directory_name.strip() if directory_name.strip() else file_name
-            image_dir = self.create_image_directory(dir_name)
+            # Ensure project directory exists
+            project_dir = self.get_project_directory(project_id)
+            project_dir.mkdir(parents=True, exist_ok=True)
             
             # Save original image
-            original_path = self.save_original_image(file_content, file_name, image_dir)
+            original_path = self.save_original_image(file_content, file_name, project_id)
             
             # Create thumbnail
-            thumb_path = self.create_thumbnail(file_content, image_dir, file_name)
+            thumb_path = self.create_thumbnail(file_content, file_name, project_id)
             
             # Process image
-            result = self.process_image_for_plotting(file_content, processing_settings, image_dir, file_name)
+            result = self.process_image_for_plotting(file_content, processing_settings, project_id, file_name)
             
             # Get the processed image path from the result
             processed_path = result.get("output_path") if result["success"] else None
@@ -288,7 +256,7 @@ class ImageHelper:
                     "original_path": original_path,
                     "thumbnail_path": thumb_path,
                     "processed_path": processed_path,
-                    "image_directory": image_dir
+                    "project_id": project_id
                 }
             else:
                 raise HTTPException(status_code=500, detail=result["error"])
@@ -443,6 +411,52 @@ class ImageHelper:
             logger.error(f"Command export error: {e}")
             return {"success": False, "error": str(e)}
 
+    def get_project_images(self, project_id: str) -> Dict[str, Any]:
+        """Get all images associated with a specific project"""
+        try:
+            project_dir = self.get_project_directory(project_id)
+            
+            if not project_dir.exists():
+                logger.warning(f"Project directory not found: {project_dir}")
+                return {"images": [], "error": "Project not found"}
+            
+            images = []
+            
+            # Get all files in the project directory
+            for file_path in project_dir.iterdir():
+                if file_path.is_file():
+                    file_stat = file_path.stat()
+                    
+                    # Skip project.yaml file
+                    if file_path.name == "project.yaml":
+                        continue
+                    
+                    # Determine file type
+                    is_original = not file_path.name.startswith('thumb_') and not file_path.name.startswith('processed_')
+                    is_thumbnail = file_path.name.startswith('thumb_')
+                    is_processed = file_path.name.startswith('processed_')
+                    
+                    images.append({
+                        "filename": file_path.name,
+                        "path": str(file_path),
+                        "size": file_stat.st_size,
+                        "created": datetime.fromtimestamp(file_stat.st_ctime).isoformat(),
+                        "modified": datetime.fromtimestamp(file_stat.st_mtime).isoformat(),
+                        "is_original": is_original,
+                        "is_thumbnail": is_thumbnail,
+                        "is_processed": is_processed
+                    })
+            
+            # Sort by creation time (newest first)
+            images.sort(key=lambda x: x["created"], reverse=True)
+            
+            logger.info(f"Found {len(images)} files in project {project_id}")
+            return {"images": images, "project_id": project_id}
+            
+        except Exception as e:
+            logger.error(f"Error getting project images for {project_id}: {e}")
+            return {"images": [], "error": str(e)}
+    
     def get_vectorization_settings_presets(self) -> Dict[str, Dict[str, Any]]:
         """Get predefined vectorization settings presets"""
         return {
@@ -495,4 +509,8 @@ class ImageHelper:
                 "enable_noise_reduction": True
             }
         }
+
+
+# Create global instance
+image_helper = ImageHelper()
 

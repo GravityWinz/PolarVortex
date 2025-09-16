@@ -1,4 +1,5 @@
 import {
+    CloudUpload as CloudUploadIcon,
     Delete as DeleteIcon,
     Download as DownloadIcon,
     Edit as EditIcon,
@@ -20,111 +21,79 @@ import {
 } from "@mui/material";
 import React, { useEffect, useState } from "react";
 import logoImage from "../assets/PolarVortexLogo_small.png";
+import { deleteProject, getProjectThumbnailUrl, getProjects } from "../services/apiService";
 
 /**
- * ThumbnailView component for displaying uploaded images
- * Shows thumbnails of all uploaded images in a grid layout
+ * ThumbnailView component for displaying projects with their images
+ * Shows thumbnails of all projects in a grid layout
  */
-export default function ThumbnailView({ onImageSelect }) {
-  const [images, setImages] = useState([]);
+export default function ThumbnailView({ onProjectSelect }) {
+  const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [failedThumbnails, setFailedThumbnails] = useState(new Set());
 
-  // Mock data for demonstration - replace with actual API call
+  // Fetch projects from API
   useEffect(() => {
-    const fetchImages = async () => {
+    const fetchProjects = async () => {
       try {
         setLoading(true);
-        // TODO: Replace with actual API call to backend
-        // const response = await fetch('/api/projects');
-        // const data = await response.json();
-        
-        // Note: When backend is configured to serve static files, use:
-        // thumbnail: "http://localhost:8000/projects/dog/thumb_dog.png"
-        // original: "http://localhost:8000/projects/dog/dog.jpg"
-        
-        // Mock data for now
-        const mockImages = [
-          {
-            id: 1,
-            name: "dog.jpg",
-            thumbnail: "https://via.placeholder.com/200x200/f0f0f0/666666?text=Dog+Image",
-            original: "https://via.placeholder.com/400x300/f0f0f0/666666?text=Dog+Original",
-            processed: "https://via.placeholder.com/400x300/e8f5e8/2e7d32?text=Dog+Processed",
-            status: "processed",
-            uploadDate: "2024-01-15",
-          },
-          {
-            id: 2,
-            name: "wheaton.jfif",
-            thumbnail: "https://via.placeholder.com/200x200/f0f0f0/666666?text=Wheaton+Image",
-            original: "https://via.placeholder.com/400x300/f0f0f0/666666?text=Wheaton+Original",
-            processed: "https://via.placeholder.com/400x300/e8f5e8/2e7d32?text=Wheaton+Processed",
-            status: "processed",
-            uploadDate: "2024-01-14",
-          },
-          {
-            id: 3,
-            name: "Recipe.PNG",
-            thumbnail: "https://via.placeholder.com/200x200/f0f0f0/666666?text=Recipe+Image",
-            original: "https://via.placeholder.com/400x300/f0f0f0/666666?text=Recipe+Original",
-            processed: null,
-            status: "uploaded",
-            uploadDate: "2024-01-13",
-          },
-        ];
-        
-        setImages(mockImages);
+        const response = await getProjects();
+        if (response.error) {
+          setError(response.error);
+        } else {
+          // Filter projects that have thumbnails
+          const projectsWithImages = (response.projects || []).filter(project => project.thumbnail_image);
+          setProjects(projectsWithImages);
+        }
         setLoading(false);
       } catch (err) {
-        setError("Failed to load images");
+        setError("Failed to load projects");
         setLoading(false);
       }
     };
 
-    fetchImages();
+    fetchProjects();
   }, []);
 
-  const handleImageSelect = (image) => {
-    if (onImageSelect) {
-      onImageSelect(image);
+  const handleProjectSelect = (project) => {
+    if (onProjectSelect) {
+      onProjectSelect(project);
     }
   };
 
-  const handleDelete = async (imageId) => {
+  const handleDelete = async (projectId) => {
+    if (!window.confirm("Are you sure you want to delete this project? This will also delete any associated images.")) {
+      return;
+    }
+
     try {
-      // TODO: Implement actual delete API call
-      // await fetch(`/api/projects/${imageId}`, { method: 'DELETE' });
-      setImages(images.filter(img => img.id !== imageId));
+      await deleteProject(projectId);
+      setProjects(projects.filter(project => project.id !== projectId));
     } catch (err) {
-      console.error("Failed to delete image:", err);
+      setError("Failed to delete project");
+      console.error("Failed to delete project:", err);
     }
   };
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case "processed":
-        return "success";
-      case "processing":
-        return "warning";
-      case "uploaded":
-        return "info";
-      default:
-        return "default";
+  const getStatusColor = (project) => {
+    // Determine status based on project data
+    if (project.thumbnail_image) {
+      return "success";
     }
+    return "default";
   };
 
-  const getStatusText = (status) => {
-    switch (status) {
-      case "processed":
-        return "Ready";
-      case "processing":
-        return "Processing";
-      case "uploaded":
-        return "Uploaded";
-      default:
-        return "Unknown";
+  const getStatusText = (project) => {
+    // Determine status text based on project data
+    if (project.thumbnail_image) {
+      return "Ready";
     }
+    return "Empty";
+  };
+
+  const handleThumbnailError = (projectId) => {
+    setFailedThumbnails(prev => new Set([...prev, projectId]));
   };
 
   if (loading) {
@@ -143,17 +112,17 @@ export default function ThumbnailView({ onImageSelect }) {
     );
   }
 
-  if (images.length === 0) {
+  if (projects.length === 0) {
     return (
       <Paper sx={{ p: 4, textAlign: "center", mt: 2 }}>
         <Typography variant="h6" color="text.secondary" gutterBottom>
-          No images uploaded yet
+          No projects with images yet
         </Typography>
         <Typography variant="body2" color="text.secondary" paragraph>
-          Upload your first image to get started with plotting
+          Create a project and upload an image to get started with plotting
         </Typography>
         <Button variant="contained" color="primary">
-          Upload Image
+          Create Project
         </Button>
       </Paper>
     );
@@ -169,13 +138,13 @@ export default function ThumbnailView({ onImageSelect }) {
           style={{ height: "32px", width: "auto", marginRight: "12px" }} 
         />
         <Typography variant="h5" gutterBottom sx={{ mb: 0 }}>
-          Uploaded Images ({images.length})
+          Projects with Images ({projects.length})
         </Typography>
       </Box>
       
       <Grid container spacing={3}>
-        {images.map((image) => (
-          <Grid item xs={12} sm={6} md={4} lg={3} key={image.id}>
+        {projects.map((project) => (
+          <Grid item xs={12} sm={6} md={4} lg={3} key={project.id}>
             <Card
               sx={{
                 height: "100%",
@@ -188,30 +157,90 @@ export default function ThumbnailView({ onImageSelect }) {
                   boxShadow: 4,
                 },
               }}
-              onClick={() => handleImageSelect(image)}
+              onClick={() => handleProjectSelect(project)}
             >
               <CardMedia
-                component="img"
+                component="div"
                 height="200"
-                image={image.thumbnail}
-                alt={image.name}
-                sx={{ objectFit: "cover" }}
-              />
+                sx={{ 
+                  objectFit: "cover",
+                  position: "relative",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: "grey.100"
+                }}
+              >
+                {project.thumbnail_image && !failedThumbnails.has(project.id) ? (
+                  // Show actual thumbnail if it exists and hasn't failed
+                  <img
+                    src={getProjectThumbnailUrl(project.id)}
+                    alt={project.name}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                    }}
+                    onError={() => handleThumbnailError(project.id)}
+                  />
+                ) : (
+                  // Show watermark for projects without thumbnails or failed thumbnails
+                  <>
+                    {/* Watermark background */}
+                    <img
+                      src={logoImage}
+                      alt="PolarVortex Watermark"
+                      style={{
+                        width: "60%",
+                        height: "60%",
+                        objectFit: "contain",
+                        opacity: 0.3,
+                        filter: "grayscale(100%)",
+                      }}
+                    />
+                    
+                    {/* Upload placeholder overlay */}
+                    <Box
+                      sx={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backgroundColor: "rgba(255, 255, 255, 0.8)",
+                        backdropFilter: "blur(2px)",
+                      }}
+                    >
+                      <CloudUploadIcon sx={{ fontSize: 48, color: "text.secondary", mb: 1 }} />
+                      <Typography variant="body2" color="text.secondary" sx={{ textAlign: "center" }}>
+                        Click to upload image
+                      </Typography>
+                    </Box>
+                  </>
+                )}
+              </CardMedia>
               
               <CardContent sx={{ flexGrow: 1, p: 2 }}>
                 <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", mb: 1 }}>
                   <Typography variant="subtitle2" component="div" noWrap sx={{ maxWidth: "70%" }}>
-                    {image.name}
+                    {project.name}
                   </Typography>
                   <Chip
-                    label={getStatusText(image.status)}
-                    color={getStatusColor(image.status)}
+                    label={getStatusText(project)}
+                    color={getStatusColor(project)}
                     size="small"
                   />
                 </Box>
                 
                 <Typography variant="caption" color="text.secondary" display="block">
-                  Uploaded: {new Date(image.uploadDate).toLocaleDateString()}
+                  Created: {new Date(project.created_at).toLocaleDateString()}
                 </Typography>
                 
                 <Box sx={{ display: "flex", justifyContent: "space-between", mt: 2 }}>
@@ -219,14 +248,14 @@ export default function ThumbnailView({ onImageSelect }) {
                     size="small"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleImageSelect(image);
+                      handleProjectSelect(project);
                     }}
                     sx={{ color: "primary.main" }}
                   >
                     <EditIcon />
                   </IconButton>
                   
-                  {image.processed && (
+                  {project.thumbnail_image && (
                     <IconButton
                       size="small"
                       onClick={(e) => {
@@ -254,7 +283,7 @@ export default function ThumbnailView({ onImageSelect }) {
                     size="small"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleDelete(image.id);
+                      handleDelete(project.id);
                     }}
                     sx={{ color: "error.main" }}
                   >

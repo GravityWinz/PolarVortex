@@ -182,6 +182,33 @@ class ProjectService:
             logger.error(f"Failed to update project {project_id}: {e}")
             return None
     
+    def update_project_thumbnail(self, project_id: str, thumbnail_filename: str) -> Optional[ProjectResponse]:
+        """Update project with thumbnail image filename"""
+        try:
+            # Get existing project
+            existing_project = self.get_project(project_id)
+            if not existing_project:
+                return None
+            
+            # Create updated project with thumbnail info
+            updated_project = Project(
+                id=project_id,
+                name=existing_project.name,
+                created_at=existing_project.created_at,
+                updated_at=datetime.now(),
+                thumbnail_image=thumbnail_filename
+            )
+            
+            # Save updated project
+            self._save_project_yaml(updated_project)
+            
+            logger.info(f"Updated project thumbnail: {project_id} - {thumbnail_filename}")
+            return ProjectResponse(**updated_project.dict())
+            
+        except Exception as e:
+            logger.error(f"Failed to update project thumbnail {project_id}: {e}")
+            return None
+    
     def delete_project(self, project_id: str) -> bool:
         """Delete a project and its directory"""
         try:

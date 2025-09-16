@@ -1,6 +1,6 @@
 from fastapi import FastAPI, UploadFile, WebSocket, WebSocketDisconnect, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from contextlib import asynccontextmanager
 import serial
 import json
@@ -220,32 +220,107 @@ async def send_command(cmd: str):
         logger.error(f"Command error: {e}")
         return {"success": False, "error": str(e)}
 
-@app.get("/check-directory/{directory_name}")
-async def check_directory_exists(directory_name: str):
-    """Check if a directory with the given name already exists"""
+@app.get("/projects/{project_id}/images")
+async def get_project_images(project_id: str):
+    """Get all images associated with a specific project"""
     try:
-        # Sanitize the directory name
-        sanitized_name = image_helper.sanitize_filename(directory_name)
+        # Verify project exists
+        project = project_service.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
         
-        # Check if directory exists
-        image_dir = os.path.join("local_storage", "images", sanitized_name)
-        exists = os.path.exists(image_dir)
+        # Get images from image helper
+        result = image_helper.get_project_images(project_id)
         
-        return {
-            "exists": exists,
-            "directory_name": sanitized_name,
-            "path": image_dir
-        }
+        return result
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Check directory error: {e}")
+        logger.error(f"Get project images error: {e}")
         return {"error": str(e)}
+
+@app.get("/projects/{project_id}/thumbnail")
+async def get_project_thumbnail(project_id: str):
+    """Get the thumbnail image for a specific project"""
+    try:
+        # Verify project exists
+        project = project_service.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        # Check if project has a thumbnail
+        if not project.thumbnail_image:
+            raise HTTPException(status_code=404, detail="No thumbnail available for this project")
+        
+        # Get the project directory and construct thumbnail path
+        project_dir = project_service._get_project_directory(project_id)
+        thumbnail_path = project_dir / project.thumbnail_image
+        
+        # Check if thumbnail file exists
+        if not thumbnail_path.exists():
+            logger.warning(f"Thumbnail file not found: {thumbnail_path}")
+            raise HTTPException(status_code=404, detail="Thumbnail file not found")
+        
+        # Return the image file
+        return FileResponse(
+            path=str(thumbnail_path),
+            media_type="image/png",
+            filename=project.thumbnail_image
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get project thumbnail error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/projects/{project_id}/images/{filename}")
+async def get_project_image(project_id: str, filename: str):
+    """Get a specific image file from a project"""
+    try:
+        # Verify project exists
+        project = project_service.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        # Get the project directory and construct image path
+        project_dir = project_service._get_project_directory(project_id)
+        image_path = project_dir / filename
+        
+        # Check if image file exists
+        if not image_path.exists():
+            logger.warning(f"Image file not found: {image_path}")
+            raise HTTPException(status_code=404, detail="Image file not found")
+        
+        # Determine media type based on file extension
+        file_extension = filename.lower().split('.')[-1]
+        media_type_map = {
+            'png': 'image/png',
+            'jpg': 'image/jpeg',
+            'jpeg': 'image/jpeg',
+            'gif': 'image/gif',
+            'bmp': 'image/bmp'
+        }
+        media_type = media_type_map.get(file_extension, 'application/octet-stream')
+        
+        # Return the image file
+        return FileResponse(
+            path=str(image_path),
+            media_type=media_type,
+            filename=filename
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get project image error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/projects/{project_id}/image_upload")
 async def upload_image_to_project(
     project_id: str,
     file: UploadFile,
-    settings: str = Form(default="{}"),
-    directory_name: str = Form(default="")
+    settings: str = Form(default="{}")
 ):
     """Upload and process image for a specific project"""
     try:
@@ -257,19 +332,21 @@ async def upload_image_to_project(
         # Read file content
         contents = await file.read()
         
-        # Use project directory as the base directory for uploads
-        project_directory = project_service._get_project_directory(project_id)
-        project_directory_name = str(project_directory.name) if directory_name == "" else directory_name
-        
-        # Process upload using ImageHelper
+        # Process upload using ImageHelper with project_id
         result = image_helper.process_upload(
             file_content=contents,
             file_content_type=file.content_type,
             file_size=len(contents),
             file_name=file.filename,
             settings_json=settings,
-            directory_name=project_directory_name
+            project_id=project_id
         )
+        
+        # Update project with thumbnail information if upload was successful
+        if result.get("success") and result.get("thumbnail_path"):
+            # Extract just the filename from the thumbnail path
+            thumbnail_filename = os.path.basename(result["thumbnail_path"])
+            project_service.update_project_thumbnail(project_id, thumbnail_filename)
         
         # Broadcast new image available for this project
         await manager.broadcast(json.dumps({

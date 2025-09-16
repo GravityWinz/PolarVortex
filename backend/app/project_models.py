@@ -15,6 +15,7 @@ class Project(BaseModel):
     name: str = Field(..., description="User-readable project name")
     created_at: datetime = Field(default_factory=datetime.now, description="Project creation timestamp")
     updated_at: datetime = Field(default_factory=datetime.now, description="Last update timestamp")
+    thumbnail_image: Optional[str] = Field(default=None, description="Local filename of the thumbnail image")
 
 
 class ProjectResponse(BaseModel):
@@ -23,6 +24,7 @@ class ProjectResponse(BaseModel):
     name: str
     created_at: datetime
     updated_at: datetime
+    thumbnail_image: Optional[str] = None
     
     class Config:
         json_encoders = {

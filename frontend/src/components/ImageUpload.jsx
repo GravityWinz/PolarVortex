@@ -36,13 +36,13 @@ import {
 } from "@mui/material";
 import React, { useCallback, useState } from "react";
 import logoImage from "../assets/PolarVortexLogo_small.png";
-import { uploadImage } from "../services/apiService";
+import { uploadImageToProject } from "../services/apiService";
 
 /**
  * Image Upload component for PolarVortex
- * Handles file selection, image processing, and upload to backend
+ * Handles file selection, image processing, and upload to backend for a specific project
  */
-export default function ImageUpload() {
+export default function ImageUpload({ project, onUploadComplete }) {
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -147,7 +147,7 @@ export default function ImageUpload() {
 
   // Upload file to backend
   const handleUpload = async () => {
-    if (!selectedFile) return;
+    if (!selectedFile || !project) return;
 
     setUploadStatus("uploading");
     setUploadProgress(0);
@@ -159,7 +159,7 @@ export default function ImageUpload() {
       formData.append("settings", JSON.stringify(processingSettings));
       formData.append("directory_name", directoryName); // Add directory name
 
-      const response = await uploadImage(formData);
+      const response = await uploadImageToProject(project.id, formData);
 
       setUploadProgress(100);
       setUploadStatus("success");
@@ -167,6 +167,11 @@ export default function ImageUpload() {
       // If backend returns preview, update preview to processed image
       if (response?.preview) {
         setPreviewUrl(response.preview);
+      }
+
+      // Notify parent component of successful upload
+      if (onUploadComplete) {
+        onUploadComplete(project, response);
       }
 
     } catch (error) {
@@ -210,10 +215,13 @@ export default function ImageUpload() {
         />
         <Box>
           <Typography variant="h4" gutterBottom sx={{ mb: 0 }}>
-            Image Upload
+            {project ? `Upload to ${project.name}` : "Image Upload"}
           </Typography>
           <Typography variant="body1" color="text.secondary" paragraph sx={{ mb: 0 }}>
-            Upload and process images for plotting with your polargraph plotter.
+            {project 
+              ? `Upload and process an image for the "${project.name}" project.`
+              : "Please select a project to upload images."
+            }
           </Typography>
         </Box>
       </Box>
@@ -289,7 +297,7 @@ export default function ImageUpload() {
                 variant="contained"
                 startIcon={<PlayIcon />}
                 onClick={handleUpload}
-                disabled={uploadStatus === "uploading" || nameCollision || !directoryName.trim()}
+                disabled={uploadStatus === "uploading" || nameCollision || !directoryName.trim() || !project}
                 fullWidth
               >
                 Process & Upload
