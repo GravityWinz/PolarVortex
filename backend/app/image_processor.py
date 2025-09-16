@@ -221,45 +221,31 @@ class ImageHelper:
     
     def process_upload(self, file_content: bytes, file_content_type: str, file_size: int, 
                       file_name: str, settings_json: str, project_id: str) -> Dict[str, Any]:
-        """Complete upload processing workflow for a specific project"""
+        """Complete upload processing workflow for a specific project - simplified to skip processing"""
         try:
             # Validate file
             self.validate_upload(file_content_type, file_size)
-            
-            # Parse settings
-            processing_settings = self.parse_processing_settings(settings_json)
             
             # Ensure project directory exists
             project_dir = self.get_project_directory(project_id)
             project_dir.mkdir(parents=True, exist_ok=True)
             
-            # Save original image
+            # Save original image with original filename
             original_path = self.save_original_image(file_content, file_name, project_id)
             
             # Create thumbnail
             thumb_path = self.create_thumbnail(file_content, file_name, project_id)
             
-            # Process image
-            result = self.process_image_for_plotting(file_content, processing_settings, project_id, file_name)
-            
-            # Get the processed image path from the result
-            processed_path = result.get("output_path") if result["success"] else None
-            
-            if result["success"]:
-                return {
-                    "success": True,
-                    "filename": file_name,
-                    "original_size": result["original_size"],
-                    "processed_size": result["processed_size"],
-                    "plotting_points": len(result["plotting_data"]),
-                    "preview": result["preview"],
-                    "original_path": original_path,
-                    "thumbnail_path": thumb_path,
-                    "processed_path": processed_path,
-                    "project_id": project_id
-                }
-            else:
-                raise HTTPException(status_code=500, detail=result["error"])
+            # Return simplified result without processing
+            return {
+                "success": True,
+                "filename": file_name,
+                "original_size": file_size,
+                "original_path": original_path,
+                "thumbnail_path": thumb_path,
+                "project_id": project_id,
+                "message": "Image uploaded successfully without processing"
+            }
                 
         except HTTPException:
             raise

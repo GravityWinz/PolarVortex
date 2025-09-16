@@ -45,6 +45,7 @@ class VectorizationResult:
     total_paths: int
     processing_time: float
     settings_used: VectorizationSettings
+    svg_path: Optional[str] = None
 
 class PolargraphVectorizer:
     """
@@ -59,13 +60,15 @@ class PolargraphVectorizer:
         """Update vectorization settings"""
         self.settings = settings
     
-    def vectorize_image(self, image_data: bytes, settings: Optional[VectorizationSettings] = None) -> VectorizationResult:
+    def vectorize_image(self, image_data: bytes, settings: Optional[VectorizationSettings] = None, 
+                       output_dir: Optional[str] = None) -> VectorizationResult:
         """
         Main vectorization method - converts raster image to vector paths
         
         Args:
             image_data: Raw image bytes
             settings: Optional custom settings
+            output_dir: Optional directory to save SVG file (if None, no SVG is saved)
             
         Returns:
             VectorizationResult containing all vector paths and metadata
@@ -102,7 +105,8 @@ class PolargraphVectorizer:
             
             processing_time = (datetime.now() - start_time).total_seconds()
             
-            return VectorizationResult(
+            # Create result object
+            result = VectorizationResult(
                 paths=all_paths,
                 original_size=original_size,
                 processed_size=processed_size,
@@ -111,6 +115,30 @@ class PolargraphVectorizer:
                 processing_time=processing_time,
                 settings_used=self.settings
             )
+            
+            # Automatically create SVG file if output directory is provided
+            svg_path = None
+            if output_dir and all_paths:
+                import os
+                from pathlib import Path
+                
+                # Ensure output directory exists
+                output_path = Path(output_dir)
+                output_path.mkdir(parents=True, exist_ok=True)
+                
+                # Generate unique SVG filename with timestamp
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                svg_filename = f"vectorized_{timestamp}.svg"
+                svg_path = str(output_path / svg_filename)
+                
+                # Export SVG
+                if self.export_to_svg(result, svg_path):
+                    result.svg_path = svg_path
+                    logger.info(f"SVG file created: {svg_path}")
+                else:
+                    logger.warning(f"Failed to create SVG file: {svg_path}")
+            
+            return result
             
         except Exception as e:
             logger.error(f"Vectorization error: {e}")
@@ -272,6 +300,49 @@ class PolargraphVectorizer:
             logger.error(f"SVG export error: {e}")
             return False
     
+    def create_svg_for_project(self, result: VectorizationResult, project_id: str, 
+                              base_filename: str = None) -> Optional[str]:
+        """
+        Create SVG file for a specific project with organized naming
+        
+        Args:
+            result: VectorizationResult to export
+            project_id: Project identifier for directory structure
+            base_filename: Base filename (without extension) - if None, uses timestamp
+            
+        Returns:
+            Path to created SVG file, or None if failed
+        """
+        try:
+            from pathlib import Path
+            
+            # Create project-specific directory structure
+            project_dir = Path("local_storage/projects") / project_id
+            project_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Generate filename
+            if base_filename:
+                # Use provided base filename
+                svg_filename = f"{base_filename}.svg"
+            else:
+                # Use timestamp
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                svg_filename = f"vectorized_{timestamp}.svg"
+            
+            svg_path = project_dir / svg_filename
+            
+            # Export SVG
+            if self.export_to_svg(result, str(svg_path)):
+                logger.info(f"Project SVG created: {svg_path}")
+                return str(svg_path)
+            else:
+                logger.error(f"Failed to create project SVG: {svg_path}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Project SVG creation error: {e}")
+            return None
+    
     def _generate_svg_content(self, result: VectorizationResult) -> str:
         """Generate SVG content from vectorization result"""
         width, height = result.processed_size
@@ -376,7 +447,8 @@ class PolargraphVectorizer:
 def quick_vectorize(image_data: bytes, 
                    blur: int = 1, 
                    posterize: int = 5, 
-                   simplify: float = 2.0) -> VectorizationResult:
+                   simplify: float = 2.0,
+                   output_dir: Optional[str] = None) -> VectorizationResult:
     """
     Quick vectorization with minimal settings
     
@@ -385,6 +457,7 @@ def quick_vectorize(image_data: bytes,
         blur: Blur radius for noise reduction
         posterize: Number of color levels
         simplify: Contour simplification threshold
+        output_dir: Optional directory to save SVG file
     
     Returns:
         VectorizationResult
@@ -396,5 +469,5 @@ def quick_vectorize(image_data: bytes,
         simplification_threshold=simplify
     )
     
-    return vectorizer.vectorize_image(image_data, settings)
+    return vectorizer.vectorize_image(image_data, settings, output_dir)
 

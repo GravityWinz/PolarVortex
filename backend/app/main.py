@@ -14,6 +14,7 @@ from .image_processor import ImageHelper
 from .config import Config
 from .project_models import ProjectCreate, ProjectResponse, ProjectListResponse
 from .project_service import project_service
+from .vectorizer import PolargraphVectorizer, VectorizationSettings
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -342,23 +343,26 @@ async def upload_image_to_project(
             project_id=project_id
         )
         
-        # Update project with thumbnail information if upload was successful
-        if result.get("success") and result.get("thumbnail_path"):
+        # Update project with thumbnail and source image information if upload was successful
+        if result.get("success"):
             # Extract just the filename from the thumbnail path
-            thumbnail_filename = os.path.basename(result["thumbnail_path"])
-            project_service.update_project_thumbnail(project_id, thumbnail_filename)
+            if result.get("thumbnail_path"):
+                thumbnail_filename = os.path.basename(result["thumbnail_path"])
+                project_service.update_project_thumbnail(project_id, thumbnail_filename)
+            
+            # Update source image filename
+            if result.get("filename"):
+                project_service.update_project_source_image(project_id, result["filename"])
         
         # Broadcast new image available for this project
         await manager.broadcast(json.dumps({
-            "type": "image_processed",
+            "type": "image_uploaded",
             "project_id": project_id,
             "project_name": project.name,
             "filename": file.filename,
-            "processed_size": result["processed_size"],
-            "plotting_points": result["plotting_points"],
+            "original_size": result["original_size"],
             "original_path": result["original_path"],
-            "thumbnail_path": result["thumbnail_path"],
-            "processed_path": result["processed_path"]
+            "thumbnail_path": result["thumbnail_path"]
         }))
         
         return result
@@ -438,6 +442,250 @@ async def delete_project(project_id: str):
         raise
     except Exception as e:
         logger.error(f"Delete project error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/projects/{project_id}/vectorize")
+async def vectorize_project_image(project_id: str, 
+                                 blur_radius: int = 1,
+                                 posterize_levels: int = 5,
+                                 simplification_threshold: float = 2.0,
+                                 min_contour_area: int = 10,
+                                 color_tolerance: int = 10,
+                                 enable_color_separation: bool = True,
+                                 enable_contour_simplification: bool = True,
+                                 enable_noise_reduction: bool = True):
+    """Vectorize the source image of a project"""
+    try:
+        # Verify project exists
+        project = project_service.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        # Check if project has a source image
+        if not project.source_image:
+            raise HTTPException(status_code=400, detail="Project has no source image to vectorize")
+        
+        # Get project directory
+        project_dir = image_helper.get_project_directory(project_id)
+        source_image_path = project_dir / project.source_image
+        
+        # Check if source image file exists
+        if not source_image_path.exists():
+            raise HTTPException(status_code=404, detail="Source image file not found")
+        
+        # Read the source image
+        with open(source_image_path, 'rb') as f:
+            image_data = f.read()
+        
+        # Create vectorization settings
+        settings = VectorizationSettings(
+            blur_radius=blur_radius,
+            posterize_levels=posterize_levels,
+            simplification_threshold=simplification_threshold,
+            min_contour_area=min_contour_area,
+            color_tolerance=color_tolerance,
+            enable_color_separation=enable_color_separation,
+            enable_contour_simplification=enable_contour_simplification,
+            enable_noise_reduction=enable_noise_reduction
+        )
+        
+        # Initialize vectorizer
+        vectorizer = PolargraphVectorizer()
+        
+        # Vectorize the image with SVG creation in project directory
+        result = vectorizer.vectorize_image(image_data, settings, str(project_dir))
+        
+        # Generate plotting commands
+        machine_settings = {
+            "width": 1000,
+            "height": 1000,
+            "mm_per_rev": 95.0,
+            "steps_per_rev": 200.0
+        }
+        plotting_commands = vectorizer.export_to_plotting_commands(result, machine_settings)
+        
+        # Generate preview
+        preview = vectorizer.get_vectorization_preview(result)
+        
+        # Broadcast vectorization completion
+        await manager.broadcast(json.dumps({
+            "type": "image_vectorized",
+            "project_id": project_id,
+            "project_name": project.name,
+            "total_paths": result.total_paths,
+            "colors_detected": result.colors_detected,
+            "processing_time": result.processing_time,
+            "svg_path": result.svg_path
+        }))
+        
+        return {
+            "success": True,
+            "project_id": project_id,
+            "source_image": project.source_image,
+            "vectorization_result": {
+                "total_paths": result.total_paths,
+                "colors_detected": result.colors_detected,
+                "processing_time": result.processing_time,
+                "original_size": result.original_size,
+                "processed_size": result.processed_size
+            },
+            "svg_path": result.svg_path,
+            "plotting_commands": plotting_commands,
+            "preview": preview,
+            "settings_used": {
+                "blur_radius": settings.blur_radius,
+                "posterize_levels": settings.posterize_levels,
+                "simplification_threshold": settings.simplification_threshold,
+                "min_contour_area": settings.min_contour_area,
+                "color_tolerance": settings.color_tolerance,
+                "enable_color_separation": settings.enable_color_separation,
+                "enable_contour_simplification": settings.enable_contour_simplification,
+                "enable_noise_reduction": settings.enable_noise_reduction
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Vectorization error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/projects/{project_id}/vectorize/export-svg")
+async def export_project_vectorization_svg(project_id: str):
+    """Export the vectorization SVG for a specific project"""
+    try:
+        # Verify project exists
+        project = project_service.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        # Get project directory
+        project_dir = image_helper.get_project_directory(project_id)
+        
+        # Look for SVG files in the project directory
+        svg_files = list(project_dir.glob("*.svg"))
+        
+        if not svg_files:
+            raise HTTPException(status_code=404, detail="No vectorization SVG found for this project")
+        
+        # Get the most recent SVG file
+        latest_svg = max(svg_files, key=lambda f: f.stat().st_mtime)
+        
+        # Return the SVG file
+        return FileResponse(
+            path=str(latest_svg),
+            media_type="image/svg+xml",
+            filename=latest_svg.name
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Export SVG error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/projects/{project_id}/vectorize/commands")
+async def get_project_vectorization_commands(project_id: str, 
+                                           width: int = 1000,
+                                           height: int = 1000,
+                                           mm_per_rev: float = 95.0,
+                                           steps_per_rev: float = 200.0):
+    """Get plotting commands for the vectorization of a specific project"""
+    try:
+        # Verify project exists
+        project = project_service.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        # Check if project has a source image
+        if not project.source_image:
+            raise HTTPException(status_code=400, detail="Project has no source image to vectorize")
+        
+        # Get project directory
+        project_dir = image_helper.get_project_directory(project_id)
+        source_image_path = project_dir / project.source_image
+        
+        # Check if source image file exists
+        if not source_image_path.exists():
+            raise HTTPException(status_code=404, detail="Source image file not found")
+        
+        # Read the source image
+        with open(source_image_path, 'rb') as f:
+            image_data = f.read()
+        
+        # Use default vectorization settings
+        settings = VectorizationSettings()
+        
+        # Initialize vectorizer
+        vectorizer = PolargraphVectorizer()
+        
+        # Vectorize the image
+        result = vectorizer.vectorize_image(image_data, settings)
+        
+        # Generate plotting commands
+        machine_settings = {
+            "width": width,
+            "height": height,
+            "mm_per_rev": mm_per_rev,
+            "steps_per_rev": steps_per_rev
+        }
+        plotting_commands = vectorizer.export_to_plotting_commands(result, machine_settings)
+        
+        return {
+            "success": True,
+            "project_id": project_id,
+            "commands": plotting_commands,
+            "total_commands": len(plotting_commands),
+            "machine_settings": machine_settings,
+            "vectorization_info": {
+                "total_paths": result.total_paths,
+                "colors_detected": result.colors_detected,
+                "processing_time": result.processing_time
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get vectorization commands error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/projects/{project_id}/svg")
+async def get_project_svg(project_id: str):
+    """Get the SVG file for a specific project"""
+    try:
+        # Verify project exists
+        project = project_service.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        # Get project directory
+        project_dir = image_helper.get_project_directory(project_id)
+        
+        # Look for SVG files in the project directory
+        svg_files = list(project_dir.glob("*.svg"))
+        
+        if not svg_files:
+            raise HTTPException(status_code=404, detail="No SVG files found for this project")
+        
+        # Get the most recent SVG file
+        latest_svg = max(svg_files, key=lambda f: f.stat().st_mtime)
+        
+        # Return the SVG file
+        return FileResponse(
+            path=str(latest_svg),
+            media_type="image/svg+xml",
+            filename=latest_svg.name
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get SVG error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.websocket("/ws")
@@ -530,74 +778,6 @@ async def quick_vectorize_image(
         logger.error(f"Quick vectorization error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/vectorize/export-svg")
-async def export_vectorization_to_svg(
-    file: UploadFile,
-    output_filename: str = Form(...),
-    settings: str = Form(default="{}")
-):
-    """Vectorize image and export to SVG file"""
-    try:
-        # Read file content
-        contents = await file.read()
-        
-        # Parse vectorization settings
-        vectorization_settings = json.loads(settings) if settings else {}
-        
-        # Create output path
-        output_path = os.path.join("local_storage", "exports", output_filename)
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        
-        # Create a temporary ImageHelper instance with vectorizer
-        temp_helper = ImageHelper()
-        
-        # Export to SVG
-        result = temp_helper.export_vectorization_to_svg(contents, output_path, vectorization_settings)
-        
-        return result
-        
-    except Exception as e:
-        logger.error(f"SVG export error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/vectorize/export-commands")
-async def export_vectorization_to_commands(
-    file: UploadFile,
-    machine_width: float = Form(default=1000.0),
-    machine_height: float = Form(default=1000.0),
-    mm_per_rev: float = Form(default=95.0),
-    steps_per_rev: float = Form(default=200.0),
-    settings: str = Form(default="{}")
-):
-    """Vectorize image and export to polargraph plotting commands"""
-    try:
-        # Read file content
-        contents = await file.read()
-        
-        # Parse vectorization settings
-        vectorization_settings = json.loads(settings) if settings else {}
-        
-        # Machine settings
-        machine_settings = {
-            "width": machine_width,
-            "height": machine_height,
-            "mm_per_rev": mm_per_rev,
-            "steps_per_rev": steps_per_rev
-        }
-        
-        # Create a temporary ImageHelper instance with vectorizer
-        temp_helper = ImageHelper()
-        
-        # Export to plotting commands
-        result = temp_helper.export_vectorization_to_commands(
-            contents, machine_settings, vectorization_settings
-        )
-        
-        return result
-        
-    except Exception as e:
-        logger.error(f"Command export error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/vectorize/presets")
 async def get_vectorization_presets():

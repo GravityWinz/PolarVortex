@@ -196,7 +196,8 @@ class ProjectService:
                 name=existing_project.name,
                 created_at=existing_project.created_at,
                 updated_at=datetime.now(),
-                thumbnail_image=thumbnail_filename
+                thumbnail_image=thumbnail_filename,
+                source_image=existing_project.source_image
             )
             
             # Save updated project
@@ -207,6 +208,34 @@ class ProjectService:
             
         except Exception as e:
             logger.error(f"Failed to update project thumbnail {project_id}: {e}")
+            return None
+    
+    def update_project_source_image(self, project_id: str, source_filename: str) -> Optional[ProjectResponse]:
+        """Update a project's source image filename"""
+        try:
+            # Get existing project
+            existing_project = self.get_project(project_id)
+            if not existing_project:
+                return None
+            
+            # Create updated project with source image info
+            updated_project = Project(
+                id=project_id,
+                name=existing_project.name,
+                created_at=existing_project.created_at,
+                updated_at=datetime.now(),
+                thumbnail_image=existing_project.thumbnail_image,
+                source_image=source_filename
+            )
+            
+            # Save updated project
+            self._save_project_yaml(updated_project)
+            
+            logger.info(f"Updated project source image: {project_id} - {source_filename}")
+            return ProjectResponse(**updated_project.dict())
+            
+        except Exception as e:
+            logger.error(f"Failed to update project source image {project_id}: {e}")
             return None
     
     def delete_project(self, project_id: str) -> bool:

@@ -3,7 +3,8 @@ import {
     CloudUpload as CloudUploadIcon,
     Delete as DeleteIcon,
     Edit as EditIcon,
-    Folder as FolderIcon
+    Folder as FolderIcon,
+    AutoGraph as VectorizeIcon
 } from "@mui/icons-material";
 import {
     Alert,
@@ -28,6 +29,7 @@ import {
 import React, { useEffect, useState } from "react";
 import logoImage from "../assets/PolarVortexLogo_small.png";
 import { createProject, deleteProject, getProjectThumbnailUrl, getProjects, uploadImageToProject } from "../services/apiService";
+import VectorizeDialog from "./VectorizeDialog";
 
 /**
  * ProjectList component for displaying and managing projects
@@ -43,6 +45,8 @@ export default function ProjectList({ onProjectSelect }) {
     const [uploadingProjects, setUploadingProjects] = useState(new Set());
     const [uploadProgress, setUploadProgress] = useState({});
     const [failedThumbnails, setFailedThumbnails] = useState(new Set());
+    const [vectorizeDialogOpen, setVectorizeDialogOpen] = useState(false);
+    const [selectedProjectForVectorize, setSelectedProjectForVectorize] = useState(null);
 
     // Fetch projects from API
     useEffect(() => {
@@ -178,6 +182,16 @@ export default function ProjectList({ onProjectSelect }) {
 
     const handleThumbnailError = (projectId) => {
         setFailedThumbnails(prev => new Set([...prev, projectId]));
+    };
+
+    const handleVectorizeProject = (project) => {
+        setSelectedProjectForVectorize(project);
+        setVectorizeDialogOpen(true);
+    };
+
+    const handleCloseVectorizeDialog = () => {
+        setVectorizeDialogOpen(false);
+        setSelectedProjectForVectorize(null);
     };
 
     if (loading) {
@@ -391,10 +405,10 @@ export default function ProjectList({ onProjectSelect }) {
                                                             backdropFilter: "blur(2px)",
                                                         }}
                                                     >
-                                                        <CloudUploadIcon sx={{ fontSize: 48, color: "text.secondary", mb: 1 }} />
+                                            <CloudUploadIcon sx={{ fontSize: 48, color: "text.secondary", mb: 1 }} />
                                                         <Typography variant="body2" color="text.secondary" sx={{ textAlign: "center" }}>
-                                                            Click to upload image
-                                                        </Typography>
+                                                Click to upload image
+                                            </Typography>
                                                     </Box>
                                                 </Box>
                                             )}
@@ -429,6 +443,20 @@ export default function ProjectList({ onProjectSelect }) {
                                         >
                                             <EditIcon />
                                         </IconButton>
+                                        
+                                        {project.source_image && (
+                                        <IconButton
+                                            size="small"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                    handleVectorizeProject(project);
+                                            }}
+                                                sx={{ color: "secondary.main" }}
+                                                title="Vectorize Image"
+                                        >
+                                                <VectorizeIcon />
+                                        </IconButton>
+                                        )}
                                         
                                         <IconButton
                                             size="small"
@@ -489,6 +517,13 @@ export default function ProjectList({ onProjectSelect }) {
                     </Button>
                 </DialogActions>
             </Dialog>
+
+            {/* Vectorization Dialog */}
+            <VectorizeDialog
+                open={vectorizeDialogOpen}
+                onClose={handleCloseVectorizeDialog}
+                project={selectedProjectForVectorize}
+            />
         </Box>
     );
 }

@@ -108,3 +108,59 @@ export function getProjectThumbnailUrl(projectId) {
 export function getProjectImageUrl(projectId, filename) {
   return `${BASE_URL}/projects/${projectId}/images/${filename}`;
 }
+
+// Vectorization API
+export async function vectorizeProjectImage(projectId, vectorizationSettings) {
+  try {
+    const params = new URLSearchParams();
+    
+    // Add all vectorization parameters
+    Object.entries(vectorizationSettings).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        params.append(key, value.toString());
+      }
+    });
+    
+    const response = await fetch(`${BASE_URL}/projects/${projectId}/vectorize?${params}`, {
+      method: "POST",
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Vectorization failed: ${response.statusText}`);
+    }
+    
+    return await response.json();
+  } catch (err) {
+    console.error("Error vectorizing image:", err);
+    throw err;
+  }
+}
+
+export async function getProjectVectorizationCommands(projectId, machineSettings = {}) {
+  try {
+    const params = new URLSearchParams();
+    
+    // Add machine settings parameters
+    Object.entries(machineSettings).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        params.append(key, value.toString());
+      }
+    });
+    
+    const response = await fetch(`${BASE_URL}/projects/${projectId}/vectorize/commands?${params}`);
+    
+    if (!response.ok) {
+      throw new Error(`Failed to get vectorization commands: ${response.statusText}`);
+    }
+    
+    return await response.json();
+  } catch (err) {
+    console.error("Error getting vectorization commands:", err);
+    throw err;
+  }
+}
+
+export function getProjectVectorizationSvgUrl(projectId) {
+  return `${BASE_URL}/projects/${projectId}/vectorize/export-svg`;
+}
+
