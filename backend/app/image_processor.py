@@ -299,3 +299,200 @@ class ImageHelper:
             logger.error(f"Upload processing error: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
+    def vectorize_image(self, image_data: bytes, vectorization_settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Vectorize an image using the polargraph vectorizer"""
+        try:
+            from .vectorizer import PolargraphVectorizer, VectorizationSettings
+            vectorizer = PolargraphVectorizer()
+            
+            if vectorization_settings:
+                settings = VectorizationSettings(
+                    blur_radius=vectorization_settings.get("blur_radius", 1),
+                    posterize_levels=vectorization_settings.get("posterize_levels", 5),
+                    simplification_threshold=vectorization_settings.get("simplification_threshold", 2.0),
+                    simplification_iterations=vectorization_settings.get("simplification_iterations", 3),
+                    min_contour_points=vectorization_settings.get("min_contour_points", 3),
+                    min_contour_area=vectorization_settings.get("min_contour_area", 10),
+                    color_tolerance=vectorization_settings.get("color_tolerance", 10),
+                    enable_color_separation=vectorization_settings.get("enable_color_separation", True),
+                    enable_contour_simplification=vectorization_settings.get("enable_contour_simplification", True),
+                    enable_noise_reduction=vectorization_settings.get("enable_noise_reduction", True)
+                )
+            else:
+                settings = VectorizationSettings()
+            
+            result = vectorizer.vectorize_image(image_data, settings)
+            preview = vectorizer.get_vectorization_preview(result)
+            
+            return {
+                "success": True,
+                "vectorization_result": {
+                    "total_paths": result.total_paths,
+                    "colors_detected": result.colors_detected,
+                    "original_size": result.original_size,
+                    "processed_size": result.processed_size,
+                    "processing_time": result.processing_time,
+                    "preview": preview
+                },
+                "settings_used": {
+                    "blur_radius": settings.blur_radius,
+                    "posterize_levels": settings.posterize_levels,
+                    "simplification_threshold": settings.simplification_threshold,
+                    "simplification_iterations": settings.simplification_iterations,
+                    "min_contour_points": settings.min_contour_points,
+                    "min_contour_area": settings.min_contour_area,
+                    "color_tolerance": settings.color_tolerance,
+                    "enable_color_separation": settings.enable_color_separation,
+                    "enable_contour_simplification": settings.enable_contour_simplification,
+                    "enable_noise_reduction": settings.enable_noise_reduction
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Vectorization error: {e}")
+            return {"success": False, "error": str(e)}
+
+    def quick_vectorize(self, image_data: bytes, blur: int = 1, posterize: int = 5, simplify: float = 2.0) -> Dict[str, Any]:
+        """Quick vectorization with minimal settings"""
+        try:
+            from .vectorizer import quick_vectorize as qv, PolargraphVectorizer
+            
+            result = qv(image_data, blur, posterize, simplify)
+            vectorizer = PolargraphVectorizer()
+            preview = vectorizer.get_vectorization_preview(result)
+            
+            return {
+                "success": True,
+                "vectorization_result": {
+                    "total_paths": result.total_paths,
+                    "colors_detected": result.colors_detected,
+                    "original_size": result.original_size,
+                    "processed_size": result.processed_size,
+                    "processing_time": result.processing_time,
+                    "preview": preview
+                },
+                "settings_used": {
+                    "blur_radius": blur,
+                    "posterize_levels": posterize,
+                    "simplification_threshold": simplify
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Quick vectorization error: {e}")
+            return {"success": False, "error": str(e)}
+
+    def export_vectorization_to_svg(self, image_data: bytes, output_path: str, 
+                                  vectorization_settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Vectorize image and export to SVG file"""
+        try:
+            from .vectorizer import PolargraphVectorizer, VectorizationSettings
+            vectorizer = PolargraphVectorizer()
+            
+            # Vectorize image
+            vectorization_result = self.vectorize_image(image_data, vectorization_settings)
+            
+            if not vectorization_result["success"]:
+                return vectorization_result
+            
+            # Get the vectorization result
+            result = vectorizer.vectorize_image(image_data)
+            
+            # Export to SVG
+            svg_success = vectorizer.export_to_svg(result, output_path)
+            
+            if svg_success:
+                return {
+                    "success": True,
+                    "svg_path": output_path,
+                    "vectorization_info": vectorization_result["vectorization_result"]
+                }
+            else:
+                return {"success": False, "error": "Failed to export SVG"}
+                
+        except Exception as e:
+            logger.error(f"SVG export error: {e}")
+            return {"success": False, "error": str(e)}
+
+    def export_vectorization_to_commands(self, image_data: bytes, 
+                                       machine_settings: Dict[str, Any],
+                                       vectorization_settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Vectorize image and export to polargraph plotting commands"""
+        try:
+            from .vectorizer import PolargraphVectorizer
+            vectorizer = PolargraphVectorizer()
+            
+            # Vectorize image
+            result = vectorizer.vectorize_image(image_data)
+            
+            # Export to plotting commands
+            commands = vectorizer.export_to_plotting_commands(result, machine_settings)
+            
+            return {
+                "success": True,
+                "commands": commands,
+                "total_commands": len(commands),
+                "vectorization_info": {
+                    "total_paths": result.total_paths,
+                    "colors_detected": result.colors_detected,
+                    "processing_time": result.processing_time
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Command export error: {e}")
+            return {"success": False, "error": str(e)}
+
+    def get_vectorization_settings_presets(self) -> Dict[str, Dict[str, Any]]:
+        """Get predefined vectorization settings presets"""
+        return {
+            "quick": {
+                "blur_radius": 1,
+                "posterize_levels": 5,
+                "simplification_threshold": 2.0,
+                "simplification_iterations": 2,
+                "min_contour_points": 3,
+                "min_contour_area": 5,
+                "color_tolerance": 15,
+                "enable_color_separation": True,
+                "enable_contour_simplification": True,
+                "enable_noise_reduction": True
+            },
+            "detailed": {
+                "blur_radius": 0,
+                "posterize_levels": 8,
+                "simplification_threshold": 1.0,
+                "simplification_iterations": 1,
+                "min_contour_points": 2,
+                "min_contour_area": 2,
+                "color_tolerance": 5,
+                "enable_color_separation": True,
+                "enable_contour_simplification": False,
+                "enable_noise_reduction": False
+            },
+            "smooth": {
+                "blur_radius": 3,
+                "posterize_levels": 3,
+                "simplification_threshold": 5.0,
+                "simplification_iterations": 5,
+                "min_contour_points": 5,
+                "min_contour_area": 20,
+                "color_tolerance": 25,
+                "enable_color_separation": True,
+                "enable_contour_simplification": True,
+                "enable_noise_reduction": True
+            },
+            "monochrome": {
+                "blur_radius": 1,
+                "posterize_levels": 2,
+                "simplification_threshold": 3.0,
+                "simplification_iterations": 3,
+                "min_contour_points": 3,
+                "min_contour_area": 10,
+                "color_tolerance": 50,
+                "enable_color_separation": False,
+                "enable_contour_simplification": True,
+                "enable_noise_reduction": True
+            }
+        }
+

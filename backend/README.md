@@ -132,7 +132,7 @@ Once the server is running, visit:
 
 #### Image Processing
 - `POST /upload` - Upload and process image
-- `GET /images` - List processed images
+- `GET /projects` - List processed images
 
 #### WebSocket
 - `WS /ws` - Real-time status updates

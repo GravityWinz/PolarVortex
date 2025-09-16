@@ -1,145 +1,111 @@
+import { Box, Container, CssBaseline, Paper, ThemeProvider, Typography, createTheme } from "@mui/material";
 import React, { useState } from "react";
-import { Box, Container, Paper, Typography, Button, Stack } from "@mui/material";
-import { ArrowBack as ArrowBackIcon } from "@mui/icons-material";
-import LandingPage from "./components/LandingPage";
+import logoImage from "./assets/PolarVortexLogo_small.png";
 import ControlPanel from "./components/ControlPanel";
-import StatusPanel from "./components/StatusPanel";
+import GraphPreparation from "./components/GraphPreparation";
 import ImageUpload from "./components/ImageUpload";
+import MenuBar from "./components/MenuBar";
+import StatusPanel from "./components/StatusPanel";
+import ThumbnailView from "./components/ThumbnailView";
+
+// Create a custom theme for PolarVortex
+const theme = createTheme({
+  palette: {
+    primary: {
+      main: "#1976d2",
+      light: "#42a5f5",
+      dark: "#1565c0",
+    },
+    secondary: {
+      main: "#dc004e",
+      light: "#ff5983",
+      dark: "#9a0036",
+    },
+    background: {
+      default: "#f5f5f5",
+      paper: "#ffffff",
+    },
+  },
+  typography: {
+    fontFamily: '"Roboto", "Helvetica", "Arial", sans-serif',
+    h4: {
+      fontWeight: 600,
+    },
+    h5: {
+      fontWeight: 600,
+    },
+    h6: {
+      fontWeight: 600,
+    },
+  },
+  components: {
+    MuiCard: {
+      styleOverrides: {
+        root: {
+          boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+          borderRadius: 8,
+        },
+      },
+    },
+    MuiPaper: {
+      styleOverrides: {
+        root: {
+          borderRadius: 8,
+        },
+      },
+    },
+  },
+});
 
 /**
  * Main App component for PolarVortex
- * Handles navigation between different sections of the application
+ * Clean design with menu bar and thumbnail view
  */
 export default function App() {
-  const [currentView, setCurrentView] = useState("landing");
+  const [currentView, setCurrentView] = useState("thumbnails");
+  const [selectedImage, setSelectedImage] = useState(null);
 
   const handleNavigation = (destination) => {
     setCurrentView(destination);
   };
 
-  const handleBackToLanding = () => {
-    setCurrentView("landing");
+  const handleImageSelect = (image) => {
+    setSelectedImage(image);
+    // You can navigate to preparation view when an image is selected
+    // setCurrentView("preparation");
   };
 
-  // Render the landing page
-  if (currentView === "landing") {
-    return <LandingPage onNavigate={handleNavigation} />;
-  }
-
-  // Render other views with navigation header
-  return (
-    <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
-      {/* Navigation Header */}
-      <Paper 
-        elevation={1} 
-        sx={{ 
-          p: 2, 
-          mb: 3, 
-          bgcolor: "primary.main", 
-          color: "white",
-          borderRadius: 0
-        }}
-      >
-        <Container maxWidth="lg">
-          <Stack direction="row" alignItems="center" spacing={2}>
-            <Button
-              variant="text"
-              startIcon={<ArrowBackIcon />}
-              onClick={handleBackToLanding}
-              sx={{ color: "white", textTransform: "none" }}
-            >
-              Back to Home
-            </Button>
-            <Typography variant="h6" sx={{ flexGrow: 1 }}>
-              PolarVortex - {getViewTitle(currentView)}
-            </Typography>
-            <Button
-              variant="contained"
-              color="secondary"
-              onClick={() => handleNavigation("upload")}
-              sx={{ textTransform: "none" }}
-            >
-              Upload Image
-            </Button>
-          </Stack>
-        </Container>
-      </Paper>
-
-      {/* Main Content */}
-      <Container maxWidth="lg" sx={{ pb: 4 }}>
-        {renderCurrentView(currentView)}
-      </Container>
-    </Box>
-  );
-}
-
-/**
- * Get the title for the current view
- */
-function getViewTitle(view) {
-  const titles = {
-    control: "Control Panel",
-    status: "Status Monitor",
-    dashboard: "Dashboard",
-    settings: "Settings",
-    upload: "Image Upload",
+  const renderCurrentView = () => {
+    switch (currentView) {
+      case "upload":
+        return <ImageUpload />;
+      case "preparation":
+        return <GraphPreparation selectedImage={selectedImage} />;
+      case "control":
+        return <ControlPanel />;
+      case "status":
+        return <StatusPanel />;
+      case "settings":
+        return <SettingsView />;
+      case "thumbnails":
+      default:
+        return <ThumbnailView onImageSelect={handleImageSelect} />;
+    }
   };
-  return titles[view] || "Unknown View";
-}
 
-/**
- * Render the appropriate component based on current view
- */
-function renderCurrentView(view) {
-  switch (view) {
-    case "control":
-      return <ControlPanel />;
-    case "status":
-      return <StatusPanel />;
-    case "dashboard":
-      return <DashboardView />;
-    case "settings":
-      return <SettingsView />;
-    case "upload":
-      return <ImageUpload />;
-    default:
-      return <Typography>View not found</Typography>;
-  }
-}
-
-/**
- * Dashboard view component
- */
-function DashboardView() {
   return (
-    <Box>
-      <Typography variant="h4" gutterBottom>
-        Dashboard
-      </Typography>
-      <Typography variant="body1" color="text.secondary" paragraph>
-        Welcome to the PolarVortex dashboard. Here you can monitor your polargraph plotter's status and access all controls.
-      </Typography>
-      
-      <Stack spacing={3}>
-        <Paper sx={{ p: 3 }}>
-          <Typography variant="h6" gutterBottom>
-            Quick Overview
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            System is ready for plotting operations. All components are connected and functioning properly.
-          </Typography>
-        </Paper>
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
+        {/* Menu Bar */}
+        <MenuBar currentView={currentView} onNavigate={handleNavigation} />
         
-        <Paper sx={{ p: 3 }}>
-          <Typography variant="h6" gutterBottom>
-            Recent Activity
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            No recent plotting activity. Start a new project to begin plotting.
-          </Typography>
-        </Paper>
-      </Stack>
-    </Box>
+        {/* Main Content */}
+        <Container maxWidth="xl" sx={{ py: 3 }}>
+          {renderCurrentView()}
+        </Container>
+      </Box>
+    </ThemeProvider>
   );
 }
 
@@ -148,14 +114,24 @@ function DashboardView() {
  */
 function SettingsView() {
   return (
-    <Box>
-      <Typography variant="h4" gutterBottom>
-        Settings
-      </Typography>
-      <Typography variant="body1" color="text.secondary" paragraph>
-        Configure your polargraph plotter settings and system preferences.
-      </Typography>
-      
+    <Box sx={{ p: 3 }}>
+      {/* Header with Logo */}
+      <Box sx={{ display: "flex", alignItems: "center", mb: 3 }}>
+        <img 
+          src={logoImage} 
+          alt="PolarVortex Logo" 
+          style={{ height: "40px", width: "auto", marginRight: "16px" }} 
+        />
+        <Box>
+          <Typography variant="h4" gutterBottom sx={{ mb: 0 }}>
+            Settings
+          </Typography>
+          <Typography variant="body1" color="text.secondary" paragraph sx={{ mb: 0 }}>
+            Configure your polargraph plotter settings and system preferences.
+          </Typography>
+        </Box>
+      </Box>
+
       <Paper sx={{ p: 3 }}>
         <Typography variant="h6" gutterBottom>
           Plotter Configuration

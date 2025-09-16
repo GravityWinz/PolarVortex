@@ -276,7 +276,7 @@ async def upload_image(
         logger.error(f"Upload error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/images")
+@app.get("/projects")
 async def list_processed_images():
     """List all uploaded images with their directory structure"""
     try:
@@ -315,6 +315,147 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.error(f"WebSocket error: {e}")
         manager.disconnect(websocket)
 
+
+# Vectorization endpoints
+@app.post("/vectorize")
+async def vectorize_image(
+    file: UploadFile,
+    settings: str = Form(default="{}")
+):
+    """Vectorize an uploaded image"""
+    try:
+        # Read file content
+        contents = await file.read()
+        
+        # Parse vectorization settings
+        vectorization_settings = json.loads(settings) if settings else {}
+        
+        # Create a temporary ImageHelper instance with vectorizer
+        temp_helper = ImageHelper()
+        
+        # Perform vectorization
+        result = temp_helper.vectorize_image(contents, vectorization_settings)
+        
+        # Broadcast vectorization complete
+        await manager.broadcast(json.dumps({
+            "type": "vectorization_complete",
+            "filename": file.filename,
+            "total_paths": result.get("vectorization_result", {}).get("total_paths", 0),
+            "colors_detected": result.get("vectorization_result", {}).get("colors_detected", 0),
+            "processing_time": result.get("vectorization_result", {}).get("processing_time", 0)
+        }))
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Vectorization error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/quick-vectorize")
+async def quick_vectorize_image(
+    file: UploadFile,
+    blur: int = Form(default=1),
+    posterize: int = Form(default=5),
+    simplify: float = Form(default=2.0)
+):
+    """Quick vectorization with minimal settings"""
+    try:
+        # Read file content
+        contents = await file.read()
+        
+        # Create a temporary ImageHelper instance with vectorizer
+        temp_helper = ImageHelper()
+        
+        # Perform quick vectorization
+        result = temp_helper.quick_vectorize(contents, blur, posterize, simplify)
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Quick vectorization error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/vectorize/export-svg")
+async def export_vectorization_to_svg(
+    file: UploadFile,
+    output_filename: str = Form(...),
+    settings: str = Form(default="{}")
+):
+    """Vectorize image and export to SVG file"""
+    try:
+        # Read file content
+        contents = await file.read()
+        
+        # Parse vectorization settings
+        vectorization_settings = json.loads(settings) if settings else {}
+        
+        # Create output path
+        output_path = os.path.join("local_storage", "exports", output_filename)
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        
+        # Create a temporary ImageHelper instance with vectorizer
+        temp_helper = ImageHelper()
+        
+        # Export to SVG
+        result = temp_helper.export_vectorization_to_svg(contents, output_path, vectorization_settings)
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"SVG export error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/vectorize/export-commands")
+async def export_vectorization_to_commands(
+    file: UploadFile,
+    machine_width: float = Form(default=1000.0),
+    machine_height: float = Form(default=1000.0),
+    mm_per_rev: float = Form(default=95.0),
+    steps_per_rev: float = Form(default=200.0),
+    settings: str = Form(default="{}")
+):
+    """Vectorize image and export to polargraph plotting commands"""
+    try:
+        # Read file content
+        contents = await file.read()
+        
+        # Parse vectorization settings
+        vectorization_settings = json.loads(settings) if settings else {}
+        
+        # Machine settings
+        machine_settings = {
+            "width": machine_width,
+            "height": machine_height,
+            "mm_per_rev": mm_per_rev,
+            "steps_per_rev": steps_per_rev
+        }
+        
+        # Create a temporary ImageHelper instance with vectorizer
+        temp_helper = ImageHelper()
+        
+        # Export to plotting commands
+        result = temp_helper.export_vectorization_to_commands(
+            contents, machine_settings, vectorization_settings
+        )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Command export error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/vectorize/presets")
+async def get_vectorization_presets():
+    """Get predefined vectorization settings presets"""
+    try:
+        # Create a temporary ImageHelper instance with vectorizer
+        temp_helper = ImageHelper()
+        
+        return temp_helper.get_vectorization_settings_presets()
+        
+    except Exception as e:
+        logger.error(f"Presets error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # Error handlers

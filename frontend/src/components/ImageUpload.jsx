@@ -1,40 +1,41 @@
 import {
-  CheckCircle as CheckCircleIcon,
-  CloudUpload as CloudUploadIcon,
-  Delete as DeleteIcon,
-  FileUpload as FileUploadIcon,
-  Image as ImageIcon,
-  PlayArrow as PlayIcon,
-  Settings as SettingsIcon
+    CheckCircle as CheckCircleIcon,
+    CloudUpload as CloudUploadIcon,
+    Delete as DeleteIcon,
+    FileUpload as FileUploadIcon,
+    Image as ImageIcon,
+    PlayArrow as PlayIcon,
+    Settings as SettingsIcon
 } from "@mui/icons-material";
 import {
-  Alert,
-  Box,
-  Button,
-  Card,
-  CardContent,
-  CardMedia,
-  Chip,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  FormControl,
-  FormControlLabel,
-  Grid,
-  IconButton,
-  InputLabel,
-  LinearProgress,
-  MenuItem,
-  Paper,
-  Select,
-  Slider,
-  Stack,
-  Switch,
-  TextField,
-  Typography,
+    Alert,
+    Box,
+    Button,
+    Card,
+    CardContent,
+    CardMedia,
+    Chip,
+    Dialog,
+    DialogActions,
+    DialogContent,
+    DialogTitle,
+    FormControl,
+    FormControlLabel,
+    Grid,
+    IconButton,
+    InputLabel,
+    LinearProgress,
+    MenuItem,
+    Paper,
+    Select,
+    Slider,
+    Stack,
+    Switch,
+    TextField,
+    Typography,
 } from "@mui/material";
 import React, { useCallback, useState } from "react";
+import logoImage from "../assets/PolarVortexLogo_small.png";
 import { uploadImage } from "../services/apiService";
 
 /**
@@ -200,12 +201,22 @@ export default function ImageUpload() {
 
   return (
     <Box>
-      <Typography variant="h4" gutterBottom>
-        Image Upload
-      </Typography>
-      <Typography variant="body1" color="text.secondary" paragraph>
-        Upload and process images for plotting with your polargraph plotter.
-      </Typography>
+      {/* Header with Logo */}
+      <Box sx={{ display: "flex", alignItems: "center", mb: 2 }}>
+        <img 
+          src={logoImage} 
+          alt="PolarVortex Logo" 
+          style={{ height: "40px", width: "auto", marginRight: "16px" }} 
+        />
+        <Box>
+          <Typography variant="h4" gutterBottom sx={{ mb: 0 }}>
+            Image Upload
+          </Typography>
+          <Typography variant="body1" color="text.secondary" paragraph sx={{ mb: 0 }}>
+            Upload and process images for plotting with your polargraph plotter.
+          </Typography>
+        </Box>
+      </Box>
 
       <Grid container spacing={3}>
         {/* File Upload Area */}
