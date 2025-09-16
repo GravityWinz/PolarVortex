@@ -10,7 +10,8 @@ import logging
 from typing import List, Optional
 from datetime import datetime
 import re
-from .image_processor import ImageHelper
+from image_processor import ImageHelper
+from config import Config
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -29,6 +30,7 @@ current_status = {
 
 # Initialize ImageHelper
 image_helper = ImageHelper()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

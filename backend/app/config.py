@@ -103,17 +103,13 @@ class Config:
         
         if not config_file_path:
             # If no config file specified, use default location
-            config_file_path = "local_storage/config/config.yaml"
+            config_file_path = "/app/local_storage/config/config.yaml"
         
         config_path = Path(config_file_path)
         
         if not config_path.exists():
-            if config_file_path == "local_storage/config/config.yaml":
-                # Create the default config file with defaults
                 self._create_default_config_file(config_path)
-            else:
-                raise FileNotFoundError(f"Configuration file not found: {config_file_path}")
-        
+
         try:
             with open(config_path, 'r', encoding='utf-8') as file:
                 self._config_data = yaml.safe_load(file) or {}
