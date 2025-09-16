@@ -185,6 +185,8 @@ class Config:
                 }
             },
             "storage": {
+                "local_storage": "/app/local_storage",
+                "project_storage": "/app/local_storage/projects",
                 "processed_images_dir": "processed_images",
                 "uploads_dir": "uploads"
             },
@@ -215,23 +217,28 @@ class Config:
         except (KeyError, TypeError):
             return default
     
-    def get_api_title(self) -> str:
+    @property
+    def api_title(self) -> str:
         """Get API title"""
         return self.get('api.title', 'PolarVortex API')
     
-    def get_api_version(self) -> str:
+    @property
+    def api_version(self) -> str:
         """Get API version"""
         return self.get('api.version', '1.0.0')
     
-    def get_api_host(self) -> str:
+    @property
+    def api_host(self) -> str:
         """Get API host"""
         return self.get('api.host', '0.0.0.0')
     
-    def get_api_port(self) -> int:
+    @property
+    def api_port(self) -> int:
         """Get API port"""
         return self.get('api.port', 8000)
     
-    def get_cors_origins(self) -> List[str]:
+    @property
+    def cors_origins(self) -> List[str]:
         """Get CORS origins"""
         return self.get('cors.origins', [
             "http://localhost:3000",
@@ -240,15 +247,18 @@ class Config:
             "http://127.0.0.1:5173"
         ])
     
-    def get_arduino_baudrate(self) -> int:
+    @property
+    def arduino_baudrate(self) -> int:
         """Get Arduino baudrate"""
         return self.get('arduino.baudrate', 9600)
     
-    def get_arduino_timeout(self) -> int:
+    @property
+    def arduino_timeout(self) -> int:
         """Get Arduino timeout"""
         return self.get('arduino.timeout', 1)
     
-    def get_arduino_ports(self) -> List[str]:
+    @property
+    def arduino_ports(self) -> List[str]:
         """Get Arduino ports"""
         return self.get('arduino.ports', [
             '/dev/ttyUSB0',
@@ -261,11 +271,13 @@ class Config:
             'COM8'
         ])
     
-    def get_max_file_size(self) -> int:
+    @property
+    def max_file_size(self) -> int:
         """Get maximum file size"""
         return self.get('image_processing.max_file_size', 10485760)
     
-    def get_allowed_image_types(self) -> List[str]:
+    @property
+    def allowed_image_types(self) -> List[str]:
         """Get allowed image types"""
         return self.get('image_processing.allowed_types', [
             'image/jpeg',
@@ -275,7 +287,8 @@ class Config:
             'image/bmp'
         ])
     
-    def get_resolution_presets(self) -> Dict[str, List[int]]:
+    @property
+    def resolution_presets(self) -> Dict[str, List[int]]:
         """Get resolution presets"""
         return self.get('image_processing.resolution_presets', {
             "low": [400, 300],
@@ -284,39 +297,58 @@ class Config:
             "ultra": [1600, 1200]
         })
     
-    def get_processed_images_dir(self) -> str:
+    @property
+    def local_storage(self) -> str:
+        """Get local storage directory"""
+        return self.get('storage.local_storage', '/app/local_storage')
+    
+    @property
+    def project_storage(self) -> str:
+        """Get project storage directory"""
+        return self.get('storage.project_storage', '/app/local_storage/projects')
+    
+    @property
+    def processed_images_dir(self) -> str:
         """Get processed images directory"""
         return self.get('storage.processed_images_dir', 'processed_images')
     
-    def get_uploads_dir(self) -> str:
+    @property
+    def uploads_dir(self) -> str:
         """Get uploads directory"""
         return self.get('storage.uploads_dir', 'uploads')
     
-    def get_log_level(self) -> str:
+    @property
+    def log_level(self) -> str:
         """Get log level"""
         return self.get('logging.level', 'INFO')
     
-    def get_log_format(self) -> str:
+    @property
+    def log_format(self) -> str:
         """Get log format"""
         return self.get('logging.format', '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     
-    def get_ws_ping_interval(self) -> int:
+    @property
+    def ws_ping_interval(self) -> int:
         """Get WebSocket ping interval"""
         return self.get('websocket.ping_interval', 30)
     
-    def get_ws_ping_timeout(self) -> int:
+    @property
+    def ws_ping_timeout(self) -> int:
         """Get WebSocket ping timeout"""
         return self.get('websocket.ping_timeout', 10)
     
-    def get_default_threshold(self) -> int:
+    @property
+    def default_threshold(self) -> int:
         """Get default threshold"""
         return self.get('plotting.default_threshold', 128)
     
-    def get_default_dither(self) -> bool:
+    @property
+    def default_dither(self) -> bool:
         """Get default dither setting"""
         return self.get('plotting.default_dither', True)
     
-    def get_default_invert(self) -> bool:
+    @property
+    def default_invert(self) -> bool:
         """Get default invert setting"""
         return self.get('plotting.default_invert', False)
     

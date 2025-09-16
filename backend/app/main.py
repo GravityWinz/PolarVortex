@@ -10,8 +10,10 @@ import logging
 from typing import List, Optional
 from datetime import datetime
 import re
-from image_processor import ImageHelper
-from config import Config
+from .image_processor import ImageHelper
+from .config import Config
+from .project_models import ProjectCreate, ProjectResponse, ProjectListResponse
+from .project_service import project_service
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -238,16 +240,26 @@ async def check_directory_exists(directory_name: str):
         logger.error(f"Check directory error: {e}")
         return {"error": str(e)}
 
-@app.post("/upload")
-async def upload_image(
+@app.post("/projects/{project_id}/image_upload")
+async def upload_image_to_project(
+    project_id: str,
     file: UploadFile,
     settings: str = Form(default="{}"),
     directory_name: str = Form(default="")
 ):
-    """Upload and process image for plotting"""
+    """Upload and process image for a specific project"""
     try:
+        # Verify project exists
+        project = project_service.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
         # Read file content
         contents = await file.read()
+        
+        # Use project directory as the base directory for uploads
+        project_directory = project_service._get_project_directory(project_id)
+        project_directory_name = str(project_directory.name) if directory_name == "" else directory_name
         
         # Process upload using ImageHelper
         result = image_helper.process_upload(
@@ -256,12 +268,14 @@ async def upload_image(
             file_size=len(contents),
             file_name=file.filename,
             settings_json=settings,
-            directory_name=directory_name
+            directory_name=project_directory_name
         )
         
-        # Broadcast new image available
+        # Broadcast new image available for this project
         await manager.broadcast(json.dumps({
             "type": "image_processed",
+            "project_id": project_id,
+            "project_name": project.name,
             "filename": file.filename,
             "processed_size": result["processed_size"],
             "plotting_points": result["plotting_points"],
@@ -278,14 +292,76 @@ async def upload_image(
         logger.error(f"Upload error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/projects")
-async def list_processed_images():
-    """List all uploaded images with their directory structure"""
+# Project Management Endpoints
+@app.post("/projects", response_model=ProjectResponse)
+async def create_project(project_data: ProjectCreate):
+    """Create a new project"""
     try:
-        return image_helper.list_processed_images()
+        project = project_service.create_project(project_data)
+        
+        # Broadcast project creation
+        await manager.broadcast(json.dumps({
+            "type": "project_created",
+            "project_id": project.id,
+            "project_name": project.name
+        }))
+        
+        return project
+        
     except Exception as e:
-        logger.error(f"List images error: {e}")
-        return {"error": str(e)}
+        logger.error(f"Create project error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/projects", response_model=ProjectListResponse)
+async def list_projects():
+    """List all projects"""
+    try:
+        projects = project_service.list_projects()
+        return ProjectListResponse(projects=projects, total=len(projects))
+        
+    except Exception as e:
+        logger.error(f"List projects error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/projects/{project_id}", response_model=ProjectResponse)
+async def get_project(project_id: str):
+    """Get a project by ID"""
+    try:
+        project = project_service.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return project
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get project error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/projects/{project_id}")
+async def delete_project(project_id: str):
+    """Delete a project by ID"""
+    try:
+        success = project_service.delete_project(project_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        # Broadcast project deletion
+        await manager.broadcast(json.dumps({
+            "type": "project_deleted",
+            "project_id": project_id
+        }))
+        
+        return {"success": True, "message": f"Project {project_id} deleted successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Delete project error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

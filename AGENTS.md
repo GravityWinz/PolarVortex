@@ -67,3 +67,6 @@ This project is built using:
 ### Deployment (Docker + Raspberry Pi)
 - Dockerized services for easy deployment on Raspberry Pi.
 
+### All execution will be done via docker. There is no expectation that the local environment will run the application
+- the docker-compose.yaml will be use to start the applicaiotn
+
