@@ -1,9 +1,11 @@
-import { Box, Container, CssBaseline, Paper, ThemeProvider, Typography, createTheme } from "@mui/material";
+import { Box, Container, CssBaseline, Paper, Tab, Tabs, ThemeProvider, Typography, createTheme } from "@mui/material";
 import React, { useState } from "react";
 import logoImage from "./assets/PolarVortexLogo_small.png";
 import ControlPanel from "./components/ControlPanel";
 import GraphPreparation from "./components/GraphPreparation";
 import MenuBar from "./components/MenuBar";
+import PaperConfiguration from "./components/PaperConfiguration";
+import PlotterConfiguration from "./components/PlotterConfiguration";
 import ProjectList from "./components/ProjectList";
 import StatusPanel from "./components/StatusPanel";
 
@@ -125,6 +127,12 @@ export default function App() {
  * Settings view component
  */
 function SettingsView() {
+  const [activeTab, setActiveTab] = useState(0);
+
+  const handleTabChange = (event, newValue) => {
+    setActiveTab(newValue);
+  };
+
   return (
     <Box sx={{ p: 3 }}>
       {/* Header with Logo */}
@@ -144,13 +152,15 @@ function SettingsView() {
         </Box>
       </Box>
 
+      {/* Configuration Tabs */}
       <Paper sx={{ p: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          Plotter Configuration
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          Settings configuration will be implemented here. This will include plotter dimensions, motor settings, and other parameters.
-        </Typography>
+        <Tabs value={activeTab} onChange={handleTabChange} sx={{ mb: 3 }}>
+          <Tab label="Paper Configuration" />
+          <Tab label="Plotter Configuration" />
+        </Tabs>
+
+        {activeTab === 0 && <PaperConfiguration />}
+        {activeTab === 1 && <PlotterConfiguration />}
       </Paper>
     </Box>
   );

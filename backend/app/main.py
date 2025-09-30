@@ -15,6 +15,12 @@ from .config import Config
 from .project_models import ProjectCreate, ProjectResponse, ProjectListResponse
 from .project_service import project_service
 from .vectorizer import PolargraphVectorizer, VectorizationSettings
+from .config_models import (
+    PlotterCreate, PlotterUpdate, PlotterResponse, PlotterListResponse,
+    PaperCreate, PaperUpdate, PaperResponse, PaperListResponse,
+    ConfigurationResponse
+)
+from .config_service import config_service
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -790,6 +796,245 @@ async def get_vectorization_presets():
         
     except Exception as e:
         logger.error(f"Presets error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Configuration Endpoints
+@app.get("/config", response_model=ConfigurationResponse)
+async def get_all_configurations():
+    """Get all configuration settings (plotters and papers)"""
+    try:
+        return config_service.get_all_configurations()
+    except Exception as e:
+        logger.error(f"Get configurations error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Plotter Configuration Endpoints
+@app.post("/config/plotters", response_model=PlotterResponse)
+async def create_plotter(plotter_data: PlotterCreate):
+    """Create a new plotter configuration"""
+    try:
+        plotter = config_service.create_plotter(plotter_data)
+        
+        # Broadcast plotter creation
+        await manager.broadcast(json.dumps({
+            "type": "plotter_created",
+            "plotter_id": plotter.id,
+            "plotter_name": plotter.name
+        }))
+        
+        return plotter
+    except Exception as e:
+        logger.error(f"Create plotter error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/config/plotters", response_model=PlotterListResponse)
+async def list_plotters():
+    """List all plotter configurations"""
+    try:
+        return config_service.list_plotters()
+    except Exception as e:
+        logger.error(f"List plotters error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/config/plotters/{plotter_id}", response_model=PlotterResponse)
+async def get_plotter(plotter_id: str):
+    """Get a plotter configuration by ID"""
+    try:
+        plotter = config_service.get_plotter(plotter_id)
+        if not plotter:
+            raise HTTPException(status_code=404, detail="Plotter not found")
+        return plotter
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get plotter error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/config/plotters/{plotter_id}", response_model=PlotterResponse)
+async def update_plotter(plotter_id: str, plotter_data: PlotterUpdate):
+    """Update a plotter configuration"""
+    try:
+        plotter = config_service.update_plotter(plotter_id, plotter_data)
+        if not plotter:
+            raise HTTPException(status_code=404, detail="Plotter not found")
+        
+        # Broadcast plotter update
+        await manager.broadcast(json.dumps({
+            "type": "plotter_updated",
+            "plotter_id": plotter.id,
+            "plotter_name": plotter.name
+        }))
+        
+        return plotter
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Update plotter error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/config/plotters/{plotter_id}")
+async def delete_plotter(plotter_id: str):
+    """Delete a plotter configuration"""
+    try:
+        success = config_service.delete_plotter(plotter_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Plotter not found")
+        
+        # Broadcast plotter deletion
+        await manager.broadcast(json.dumps({
+            "type": "plotter_deleted",
+            "plotter_id": plotter_id
+        }))
+        
+        return {"success": True, "message": f"Plotter {plotter_id} deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Delete plotter error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/config/plotters/default", response_model=PlotterResponse)
+async def get_default_plotter():
+    """Get the default plotter configuration"""
+    try:
+        plotter = config_service.get_default_plotter()
+        if not plotter:
+            raise HTTPException(status_code=404, detail="No default plotter found")
+        return plotter
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get default plotter error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Paper Configuration Endpoints
+@app.post("/config/papers", response_model=PaperResponse)
+async def create_paper(paper_data: PaperCreate):
+    """Create a new paper configuration"""
+    try:
+        paper = config_service.create_paper(paper_data)
+        
+        # Broadcast paper creation
+        await manager.broadcast(json.dumps({
+            "type": "paper_created",
+            "paper_id": paper.id,
+            "paper_name": paper.name
+        }))
+        
+        return paper
+    except Exception as e:
+        logger.error(f"Create paper error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/config/papers", response_model=PaperListResponse)
+async def list_papers():
+    """List all paper configurations"""
+    try:
+        return config_service.list_papers()
+    except Exception as e:
+        logger.error(f"List papers error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/config/papers/{paper_id}", response_model=PaperResponse)
+async def get_paper(paper_id: str):
+    """Get a paper configuration by ID"""
+    try:
+        paper = config_service.get_paper(paper_id)
+        if not paper:
+            raise HTTPException(status_code=404, detail="Paper not found")
+        return paper
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get paper error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/config/papers/{paper_id}", response_model=PaperResponse)
+async def update_paper(paper_id: str, paper_data: PaperUpdate):
+    """Update a paper configuration"""
+    try:
+        paper = config_service.update_paper(paper_id, paper_data)
+        if not paper:
+            raise HTTPException(status_code=404, detail="Paper not found")
+        
+        # Broadcast paper update
+        await manager.broadcast(json.dumps({
+            "type": "paper_updated",
+            "paper_id": paper.id,
+            "paper_name": paper.name
+        }))
+        
+        return paper
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Update paper error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/config/papers/{paper_id}")
+async def delete_paper(paper_id: str):
+    """Delete a paper configuration"""
+    try:
+        success = config_service.delete_paper(paper_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Paper not found")
+        
+        # Broadcast paper deletion
+        await manager.broadcast(json.dumps({
+            "type": "paper_deleted",
+            "paper_id": paper_id
+        }))
+        
+        return {"success": True, "message": f"Paper {paper_id} deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Delete paper error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/config/papers/default", response_model=PaperResponse)
+async def get_default_paper():
+    """Get the default paper configuration"""
+    try:
+        paper = config_service.get_default_paper()
+        if not paper:
+            raise HTTPException(status_code=404, detail="No default paper found")
+        return paper
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get default paper error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/config/rebuild")
+async def rebuild_configuration():
+    """Rebuild configuration with all default values"""
+    try:
+        success = config_service.rebuild_default_config()
+        
+        # Broadcast configuration rebuild
+        await manager.broadcast(json.dumps({
+            "type": "configuration_rebuilt",
+            "message": "Configuration has been rebuilt with default values"
+        }))
+        
+        return {"success": success, "message": "Configuration rebuilt successfully"}
+    except Exception as e:
+        logger.error(f"Rebuild configuration error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

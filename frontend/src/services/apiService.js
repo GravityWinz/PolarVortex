@@ -164,3 +164,212 @@ export function getProjectVectorizationSvgUrl(projectId) {
   return `${BASE_URL}/projects/${projectId}/vectorize/export-svg`;
 }
 
+// Configuration API
+export async function getAllConfigurations() {
+  try {
+    const response = await fetch(`${BASE_URL}/config`);
+    return await response.json();
+  } catch (err) {
+    console.error("Error fetching configurations:", err);
+    return { error: err.message };
+  }
+}
+
+// Paper Configuration API
+export async function getPapers() {
+  try {
+    const response = await fetch(`${BASE_URL}/config/papers`);
+    return await response.json();
+  } catch (err) {
+    console.error("Error fetching papers:", err);
+    return { error: err.message };
+  }
+}
+
+export async function getPaper(paperId) {
+  try {
+    const response = await fetch(`${BASE_URL}/config/papers/${paperId}`);
+    return await response.json();
+  } catch (err) {
+    console.error("Error fetching paper:", err);
+    return { error: err.message };
+  }
+}
+
+export async function createPaper(paperData) {
+  try {
+    const response = await fetch(`${BASE_URL}/config/papers`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(paperData),
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to create paper: ${response.statusText}`);
+    }
+    
+    return await response.json();
+  } catch (err) {
+    console.error("Error creating paper:", err);
+    throw err;
+  }
+}
+
+export async function updatePaper(paperId, paperData) {
+  try {
+    const response = await fetch(`${BASE_URL}/config/papers/${paperId}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(paperData),
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to update paper: ${response.statusText}`);
+    }
+    
+    return await response.json();
+  } catch (err) {
+    console.error("Error updating paper:", err);
+    throw err;
+  }
+}
+
+export async function deletePaper(paperId) {
+  try {
+    const response = await fetch(`${BASE_URL}/config/papers/${paperId}`, {
+      method: "DELETE",
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to delete paper: ${response.statusText}`);
+    }
+    
+    return await response.json();
+  } catch (err) {
+    console.error("Error deleting paper:", err);
+    throw err;
+  }
+}
+
+export async function getDefaultPaper() {
+  try {
+    const response = await fetch(`${BASE_URL}/config/papers/default`);
+    return await response.json();
+  } catch (err) {
+    console.error("Error fetching default paper:", err);
+    return { error: err.message };
+  }
+}
+
+// Plotter Configuration API
+export async function getPlotters() {
+  try {
+    const response = await fetch(`${BASE_URL}/config/plotters`);
+    return await response.json();
+  } catch (err) {
+    console.error("Error fetching plotters:", err);
+    return { error: err.message };
+  }
+}
+
+export async function getPlotter(plotterId) {
+  try {
+    const response = await fetch(`${BASE_URL}/config/plotters/${plotterId}`);
+    return await response.json();
+  } catch (err) {
+    console.error("Error fetching plotter:", err);
+    return { error: err.message };
+  }
+}
+
+export async function createPlotter(plotterData) {
+  try {
+    const response = await fetch(`${BASE_URL}/config/plotters`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(plotterData),
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to create plotter: ${response.statusText}`);
+    }
+    
+    return await response.json();
+  } catch (err) {
+    console.error("Error creating plotter:", err);
+    throw err;
+  }
+}
+
+export async function updatePlotter(plotterId, plotterData) {
+  try {
+    const response = await fetch(`${BASE_URL}/config/plotters/${plotterId}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(plotterData),
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to update plotter: ${response.statusText}`);
+    }
+    
+    return await response.json();
+  } catch (err) {
+    console.error("Error updating plotter:", err);
+    throw err;
+  }
+}
+
+export async function deletePlotter(plotterId) {
+  try {
+    const response = await fetch(`${BASE_URL}/config/plotters/${plotterId}`, {
+      method: "DELETE",
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to delete plotter: ${response.statusText}`);
+    }
+    
+    return await response.json();
+  } catch (err) {
+    console.error("Error deleting plotter:", err);
+    throw err;
+  }
+}
+
+export async function getDefaultPlotter() {
+  try {
+    const response = await fetch(`${BASE_URL}/config/plotters/default`);
+    return await response.json();
+  } catch (err) {
+    console.error("Error fetching default plotter:", err);
+    return { error: err.message };
+  }
+}
+
+// Configuration Management
+export async function rebuildConfiguration() {
+  try {
+    const response = await fetch(`${BASE_URL}/config/rebuild`, {
+      method: "POST",
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to rebuild configuration: ${response.statusText}`);
+    }
+    
+    return await response.json();
+  } catch (err) {
+    console.error("Error rebuilding configuration:", err);
+    throw err;
+  }
+}
+
