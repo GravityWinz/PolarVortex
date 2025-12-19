@@ -412,7 +412,8 @@ secrets.json
 *.backup
 *.old
 
-# IDE and editor files
+# IDE and editor filesexit
+
 .vscode/
 .idea/
 *.sublime-project

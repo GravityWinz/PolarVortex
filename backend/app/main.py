@@ -9,6 +9,7 @@ import asyncio
 import logging
 from typing import List, Optional
 from datetime import datetime
+from pathlib import Path
 import re
 from .image_processor import ImageHelper
 from .config import Config
@@ -513,6 +514,28 @@ async def vectorize_project_image(project_id: str,
         
         # Generate preview
         preview = vectorizer.get_vectorization_preview(result)
+        
+        # Update project with vectorization information
+        svg_filename = Path(result.svg_path).name if result.svg_path else None
+        vectorization_parameters = {
+            "blur_radius": settings.blur_radius,
+            "posterize_levels": settings.posterize_levels,
+            "simplification_threshold": settings.simplification_threshold,
+            "min_contour_area": settings.min_contour_area,
+            "color_tolerance": settings.color_tolerance,
+            "enable_color_separation": settings.enable_color_separation,
+            "enable_contour_simplification": settings.enable_contour_simplification,
+            "enable_noise_reduction": settings.enable_noise_reduction
+        }
+        
+        project_service.update_project_vectorization(
+            project_id=project_id,
+            svg_filename=svg_filename,
+            parameters=vectorization_parameters,
+            total_paths=result.total_paths,
+            colors_detected=result.colors_detected,
+            processing_time=result.processing_time
+        )
         
         # Broadcast vectorization completion
         await manager.broadcast(json.dumps({

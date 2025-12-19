@@ -6,7 +6,7 @@ from typing import List, Optional
 from datetime import datetime
 import logging
 
-from .project_models import Project, ProjectCreate, ProjectResponse
+from .project_models import Project, ProjectCreate, ProjectResponse, VectorizationInfo
 from .config import config
 
 logger = logging.getLogger(__name__)
@@ -236,6 +236,47 @@ class ProjectService:
             
         except Exception as e:
             logger.error(f"Failed to update project source image {project_id}: {e}")
+            return None
+    
+    def update_project_vectorization(self, project_id: str, svg_filename: str, 
+                                   parameters: dict, total_paths: int, 
+                                   colors_detected: int, processing_time: float) -> Optional[ProjectResponse]:
+        """Update a project's vectorization information"""
+        try:
+            # Get existing project
+            existing_project = self.get_project(project_id)
+            if not existing_project:
+                return None
+            
+            # Create vectorization info
+            vectorization_info = VectorizationInfo(
+                svg_filename=svg_filename,
+                vectorized_at=datetime.now(),
+                parameters=parameters,
+                total_paths=total_paths,
+                colors_detected=colors_detected,
+                processing_time=processing_time
+            )
+            
+            # Create updated project with vectorization info
+            updated_project = Project(
+                id=project_id,
+                name=existing_project.name,
+                created_at=existing_project.created_at,
+                updated_at=datetime.now(),
+                thumbnail_image=existing_project.thumbnail_image,
+                source_image=existing_project.source_image,
+                vectorization=vectorization_info
+            )
+            
+            # Save updated project
+            self._save_project_yaml(updated_project)
+            
+            logger.info(f"Updated project vectorization: {project_id} - {svg_filename}")
+            return ProjectResponse(**updated_project.dict())
+            
+        except Exception as e:
+            logger.error(f"Failed to update project vectorization {project_id}: {e}")
             return None
     
     def delete_project(self, project_id: str) -> bool:
