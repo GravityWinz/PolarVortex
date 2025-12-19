@@ -3,14 +3,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from contextlib import asynccontextmanager
 import serial
+import serial.tools.list_ports
 import json
 import os
 import asyncio
 import logging
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime
 from pathlib import Path
 import re
+from pydantic import BaseModel
 from .image_processor import ImageHelper
 from .config import Config
 from .project_models import ProjectCreate, ProjectResponse, ProjectListResponse
@@ -35,8 +37,12 @@ current_status = {
     "drawing": False,
     "progress": 0,
     "current_command": None,
-    "last_update": None
+    "last_update": None,
+    "port": None,
+    "baud_rate": None
 }
+# Command/response log (session-only)
+command_log: List[Dict] = []
 
 # Initialize ImageHelper
 image_helper = ImageHelper()
@@ -199,7 +205,7 @@ async def get_status():
 
 @app.post("/command/{cmd}")
 async def send_command(cmd: str):
-    """Send command to Arduino"""
+    """Send command to Arduino (legacy endpoint)"""
     try:
         if arduino and arduino.is_open:
             command = f"{cmd}\n".encode()
@@ -227,6 +233,186 @@ async def send_command(cmd: str):
     except Exception as e:
         logger.error(f"Command error: {e}")
         return {"success": False, "error": str(e)}
+
+# Plotter connection management endpoints
+@app.get("/plotter/ports")
+async def get_available_ports():
+    """Get list of available serial ports"""
+    try:
+        ports = []
+        for port in serial.tools.list_ports.comports():
+            ports.append({
+                "device": port.device,
+                "description": port.description,
+                "manufacturer": port.manufacturer if port.manufacturer else "",
+                "hwid": port.hwid
+            })
+        return {"ports": ports}
+    except Exception as e:
+        logger.error(f"Error listing ports: {e}")
+        return {"ports": [], "error": str(e)}
+
+class PlotterConnectRequest(BaseModel):
+    port: str
+    baud_rate: int = 9600
+
+@app.post("/plotter/connect")
+async def connect_plotter(request: PlotterConnectRequest):
+    """Connect to plotter with specified port and baud rate"""
+    global arduino
+    try:
+        # Disconnect if already connected
+        if arduino and arduino.is_open:
+            arduino.close()
+        
+        # Connect to specified port
+        arduino = serial.Serial(request.port, request.baud_rate, timeout=2)
+        logger.info(f"Connected to plotter on {request.port} at {request.baud_rate} baud")
+        
+        # Update status
+        current_status["connected"] = True
+        current_status["port"] = request.port
+        current_status["baud_rate"] = request.baud_rate
+        
+        # Clear any existing input buffer
+        arduino.reset_input_buffer()
+        
+        return {
+            "success": True,
+            "port": request.port,
+            "baud_rate": request.baud_rate,
+            "message": f"Connected to {request.port}"
+        }
+    except serial.SerialException as e:
+        logger.error(f"Serial connection error: {e}")
+        current_status["connected"] = False
+        return {"success": False, "error": f"Failed to connect: {str(e)}"}
+    except Exception as e:
+        logger.error(f"Connection error: {e}")
+        current_status["connected"] = False
+        return {"success": False, "error": str(e)}
+
+@app.post("/plotter/disconnect")
+async def disconnect_plotter():
+    """Disconnect from plotter"""
+    global arduino
+    try:
+        if arduino and arduino.is_open:
+            arduino.close()
+            logger.info("Disconnected from plotter")
+        
+        arduino = None
+        current_status["connected"] = False
+        current_status["port"] = None
+        current_status["baud_rate"] = None
+        
+        return {"success": True, "message": "Disconnected"}
+    except Exception as e:
+        logger.error(f"Disconnect error: {e}")
+        return {"success": False, "error": str(e)}
+
+@app.get("/plotter/connection")
+async def get_connection_status():
+    """Get current connection status"""
+    return {
+        "connected": current_status["connected"],
+        "port": current_status["port"],
+        "baud_rate": current_status["baud_rate"],
+        "is_open": arduino.is_open if arduino else False
+    }
+
+class GcodeRequest(BaseModel):
+    command: str
+
+async def read_arduino_response(timeout_seconds: float = 3.0) -> List[str]:
+    """Read response from Arduino until 'ok' or timeout"""
+    responses = []
+    if not arduino or not arduino.is_open:
+        return responses
+    
+    start_time = datetime.now()
+    while (datetime.now() - start_time).total_seconds() < timeout_seconds:
+        if arduino.in_waiting > 0:
+            try:
+                line = arduino.readline().decode('utf-8', errors='ignore').strip()
+                if line:
+                    responses.append(line)
+                    # Marlin typically responds with "ok" or "ok N"
+                    if line.lower().startswith('ok'):
+                        break
+            except Exception as e:
+                logger.warning(f"Error reading response: {e}")
+                break
+        else:
+            await asyncio.sleep(0.01)  # Small delay to avoid busy waiting
+    
+    return responses
+
+@app.post("/plotter/gcode")
+async def send_gcode_command(request: GcodeRequest):
+    """Send G-code command to plotter and read response"""
+    try:
+        if not arduino or not arduino.is_open:
+            return {"success": False, "error": "Plotter not connected"}
+        
+        gcode = request.command.strip()
+        if not gcode:
+            return {"success": False, "error": "Empty command"}
+        
+        # Send command
+        command_bytes = f"{gcode}\n".encode('utf-8')
+        arduino.write(command_bytes)
+        logger.info(f"Sent G-code: {gcode}")
+        
+        # Read response
+        responses = await read_arduino_response(timeout_seconds=3.0)
+        
+        # Combine multi-line responses
+        response_text = "\n".join(responses) if responses else "No response"
+        
+        # Log command/response
+        log_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "command": gcode,
+            "response": response_text
+        }
+        command_log.append(log_entry)
+        
+        # Keep log size manageable (last 1000 entries)
+        if len(command_log) > 1000:
+            command_log.pop(0)
+        
+        # Broadcast via WebSocket
+        await manager.broadcast(json.dumps({
+            "type": "gcode_response",
+            "command": gcode,
+            "response": response_text,
+            "timestamp": log_entry["timestamp"]
+        }))
+        
+        return {
+            "success": True,
+            "command": gcode,
+            "response": response_text,
+            "responses": responses,
+            "timestamp": log_entry["timestamp"]
+        }
+    except Exception as e:
+        logger.error(f"G-code command error: {e}")
+        error_msg = str(e)
+        return {"success": False, "error": error_msg, "command": request.command}
+
+@app.get("/plotter/log")
+async def get_command_log():
+    """Get command/response log (session-only)"""
+    return {"log": command_log, "count": len(command_log)}
+
+@app.post("/plotter/log/clear")
+async def clear_command_log():
+    """Clear command/response log"""
+    global command_log
+    command_log = []
+    return {"success": True, "message": "Log cleared"}
 
 @app.get("/projects/{project_id}/images")
 async def get_project_images(project_id: str):

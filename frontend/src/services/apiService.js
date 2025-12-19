@@ -373,3 +373,112 @@ export async function rebuildConfiguration() {
   }
 }
 
+// Plotter Control API
+export async function getAvailablePorts() {
+  try {
+    const response = await fetch(`${BASE_URL}/plotter/ports`);
+    return await response.json();
+  } catch (err) {
+    console.error("Error fetching ports:", err);
+    return { error: err.message, ports: [] };
+  }
+}
+
+export async function connectPlotter(port, baudRate) {
+  try {
+    const response = await fetch(`${BASE_URL}/plotter/connect`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ port, baud_rate: baudRate }),
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || `Failed to connect: ${response.statusText}`);
+    }
+    
+    return await response.json();
+  } catch (err) {
+    console.error("Error connecting plotter:", err);
+    throw err;
+  }
+}
+
+export async function disconnectPlotter() {
+  try {
+    const response = await fetch(`${BASE_URL}/plotter/disconnect`, {
+      method: "POST",
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to disconnect: ${response.statusText}`);
+    }
+    
+    return await response.json();
+  } catch (err) {
+    console.error("Error disconnecting plotter:", err);
+    throw err;
+  }
+}
+
+export async function getConnectionStatus() {
+  try {
+    const response = await fetch(`${BASE_URL}/plotter/connection`);
+    return await response.json();
+  } catch (err) {
+    console.error("Error fetching connection status:", err);
+    return { error: err.message, connected: false };
+  }
+}
+
+export async function sendGcodeCommand(gcode) {
+  try {
+    const response = await fetch(`${BASE_URL}/plotter/gcode`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ command: gcode }),
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || `Failed to send command: ${response.statusText}`);
+    }
+    
+    return await response.json();
+  } catch (err) {
+    console.error("Error sending G-code command:", err);
+    throw err;
+  }
+}
+
+export async function getCommandLog() {
+  try {
+    const response = await fetch(`${BASE_URL}/plotter/log`);
+    return await response.json();
+  } catch (err) {
+    console.error("Error fetching command log:", err);
+    return { error: err.message, log: [] };
+  }
+}
+
+export async function clearCommandLog() {
+  try {
+    const response = await fetch(`${BASE_URL}/plotter/log/clear`, {
+      method: "POST",
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to clear log: ${response.statusText}`);
+    }
+    
+    return await response.json();
+  } catch (err) {
+    console.error("Error clearing command log:", err);
+    throw err;
+  }
+}
+
