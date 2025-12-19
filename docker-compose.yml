@@ -54,8 +54,15 @@ services:
       - LOG_LEVEL=DEBUG
     env_file:
       - env.example
-    # devices:
-    #   - "/dev/ttyUSB0:/dev/ttyUSB0"  # adjust for Arduino serial device
+    # Serial port device access
+    # For Linux: Uncomment and adjust device path (e.g., /dev/ttyUSB0, /dev/ttyACM0)
+    # For Windows Docker Desktop: Use COM port mapping (see instructions below)
+    devices:
+      - /dev/ttyUSB0:/dev/ttyUSB0  # Common Linux Arduino port
+      - /dev/ttyACM0:/dev/ttyACM0  # Alternative Linux Arduino port
+    # Alternative: Use privileged mode if device access issues occur
+    # privileged: true
+    # Or add user to dialout group (Linux) - requires modifying Dockerfile
     networks:
       - polarvortex-network
     healthcheck:

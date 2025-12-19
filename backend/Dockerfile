@@ -9,7 +9,8 @@ RUN pip install -r requirements.txt
 COPY . .
 
 # Create non-root user for security
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+# Add user to dialout group for serial port access (Linux)
+RUN useradd -m -u 1000 -G dialout appuser && chown -R appuser:appuser /app
 USER appuser
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
