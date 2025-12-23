@@ -37,7 +37,7 @@ import VectorizeDialog from "./VectorizeDialog";
  * ProjectList component for displaying and managing projects
  * Shows all projects in a grid layout with project management actions
  */
-export default function ProjectList({ onProjectSelect, currentProject, onSetCurrentProject }) {
+export default function ProjectList({ onProjectSelect, currentProject, onSetCurrentProject, onNavigate }) {
     const [projects, setProjects] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -105,8 +105,14 @@ export default function ProjectList({ onProjectSelect, currentProject, onSetCurr
     };
 
     const handleProjectSelect = (project) => {
+        if (onSetCurrentProject) {
+            onSetCurrentProject(project);
+        }
         if (onProjectSelect) {
             onProjectSelect(project);
+        }
+        if (onNavigate) {
+            onNavigate("edit");
         }
     };
 
@@ -114,9 +120,10 @@ export default function ProjectList({ onProjectSelect, currentProject, onSetCurr
     const handleFileUpload = async (project, file) => {
         if (!file) return;
 
+        const isSvg = (file.name || "").toLowerCase().endsWith(".svg");
         // Validate file
-        if (!file.type.startsWith("image/")) {
-            setError("Please select a valid image file");
+        if (!file.type.startsWith("image/") && !isSvg) {
+            setError("Please select an image or SVG file");
             return;
         }
 
@@ -141,7 +148,7 @@ export default function ProjectList({ onProjectSelect, currentProject, onSetCurr
             }));
 
             // Upload file
-            const response = await uploadImageToProject(project.id, formData);
+            await uploadImageToProject(project.id, formData);
 
             // Update progress
             setUploadProgress(prev => ({ ...prev, [project.id]: 100 }));
@@ -162,7 +169,7 @@ export default function ProjectList({ onProjectSelect, currentProject, onSetCurr
             });
 
         } catch (err) {
-            setError("Failed to upload image");
+            setError("Failed to upload image/SVG");
             console.error("Error uploading image:", err);
             
             // Clear uploading state
@@ -212,6 +219,29 @@ export default function ProjectList({ onProjectSelect, currentProject, onSetCurr
                 return next;
             });
         }
+    };
+
+    const handleUploadAny = async (project, file) => {
+        if (!file) return;
+        const name = (file.name || "").toLowerCase();
+        const ext = name.match(/\.[^.]+$/)?.[0] || "";
+        const allowedGcode = [".gcode", ".nc", ".txt"];
+
+        // Route gcode-like to gcode upload
+        if (allowedGcode.includes(ext)) {
+            await handleGcodeUpload(project, file);
+            return;
+        }
+
+        // Route SVG or images to image upload
+        const isSvg = ext === ".svg";
+        const isImage = file.type.startsWith("image/") || isSvg;
+        if (isImage) {
+            await handleFileUpload(project, file);
+            return;
+        }
+
+        setError("Unsupported file type. Use image/SVG or G-code (.gcode/.nc/.txt).");
     };
 
     const formatDate = (dateString) => {
@@ -339,21 +369,23 @@ export default function ProjectList({ onProjectSelect, currentProject, onSetCurr
                                         }
                                     }}
                                 >
-                                    <input
-                                        id={`file-input-${project.id}`}
-                                        type="file"
-                                        accept="image/*"
-                                        onChange={(e) => {
-                                            const file = e.target.files[0];
-                                            if (file) {
-                                                handleFileUpload(project, file);
-                                            }
-                                        }}
-                                        style={{ display: "none" }}
-                                        disabled={uploadingProjects.has(project.id)}
-                                    />
+                                        <input
+                                            id={`file-input-${project.id}`}
+                                            type="file"
+                                            accept="image/*,.svg,.gcode,.nc,.txt"
+                                            multiple
+                                            onChange={async (e) => {
+                                                const files = Array.from(e.target.files || []);
+                                                for (const file of files) {
+                                                    await handleUploadAny(project, file);
+                                                }
+                                                e.target.value = "";
+                                            }}
+                                            style={{ display: "none" }}
+                                            disabled={uploadingProjects.has(project.id) || gcodeUploadingProjects.has(project.id)}
+                                        />
                                     
-                                    {uploadingProjects.has(project.id) ? (
+                                    {uploadingProjects.has(project.id) || gcodeUploadingProjects.has(project.id) ? (
                                         <Box sx={{ textAlign: "center", width: "100%", position: "absolute", zIndex: 2 }}>
                                             <CircularProgress size={40} sx={{ mb: 1 }} />
                                             <Typography variant="body2" color="text.secondary">
@@ -444,12 +476,14 @@ export default function ProjectList({ onProjectSelect, currentProject, onSetCurr
                                                             justifyContent: "center",
                                                             backgroundColor: "rgba(255, 255, 255, 0.8)",
                                                             backdropFilter: "blur(2px)",
+                                                            px: 1.5,
+                                                            textAlign: "center",
                                                         }}
                                                     >
-                                            <CloudUploadIcon sx={{ fontSize: 48, color: "text.secondary", mb: 1 }} />
-                                                        <Typography variant="body2" color="text.secondary" sx={{ textAlign: "center" }}>
-                                                Click to upload image
-                                            </Typography>
+                                                        <CloudUploadIcon sx={{ fontSize: 48, color: "text.secondary", mb: 1 }} />
+                                                        <Typography variant="body2" color="text.secondary">
+                                                            Click to upload image, SVG, or G-code
+                                                        </Typography>
                                                     </Box>
                                                 </Box>
                                             )}
@@ -487,9 +521,7 @@ export default function ProjectList({ onProjectSelect, currentProject, onSetCurr
                                             startIcon={currentProject?.id === project.id ? <StarIcon /> : <StarBorderIcon />}
                                             onClick={(e) => {
                                                 e.stopPropagation();
-                                                if (onSetCurrentProject) {
-                                                    onSetCurrentProject(project);
-                                                }
+                                                handleProjectSelect(project);
                                             }}
                                             sx={{ textTransform: "none" }}
                                         >

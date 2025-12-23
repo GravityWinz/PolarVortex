@@ -81,6 +81,61 @@ export async function deleteProject(projectId) {
   }
 }
 
+// Project assets API
+export async function getProjectAssets(projectId) {
+  try {
+    const response = await fetch(`${BASE_URL}/projects/${projectId}/images`);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || error.error || `Failed to fetch project assets: ${response.statusText}`);
+    }
+    return await response.json();
+  } catch (err) {
+    console.error("Error fetching project assets:", err);
+    return { images: [], error: err.message };
+  }
+}
+
+export function getProjectFileUrl(projectId, filename) {
+  const safePath = (filename || "").split("/").map(encodeURIComponent).join("/");
+  return `${BASE_URL}/projects/${projectId}/images/${safePath}`;
+}
+
+export async function getProjectFileText(projectId, filename) {
+  const safePath = (filename || "").split("/").map(encodeURIComponent).join("/");
+  const url = `${BASE_URL}/projects/${projectId}/images/${safePath}`;
+  const response = await fetch(url);
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`Failed to load file: ${response.statusText}`);
+  }
+  return text;
+}
+
+export async function deleteProjectFile(projectId, filename) {
+  const safePath = (filename || "").split("/").map(encodeURIComponent).join("/");
+  const url = `${BASE_URL}/projects/${projectId}/images/${safePath}`;
+  const response = await fetch(url, { method: "DELETE" });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.detail || data.error || `Failed to delete file: ${response.statusText}`);
+  }
+  return data;
+}
+
+export async function convertSvgToGcode(projectId, payload) {
+  const response = await fetch(`${BASE_URL}/projects/${projectId}/svg_to_gcode`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success === false) {
+    throw new Error(data.detail || data.error || data.message || "Failed to convert SVG to G-code");
+  }
+  return data;
+}
+
 // Image Upload API (now project-specific)
 export async function uploadImageToProject(projectId, formData, onProgress) {
   try {

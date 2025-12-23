@@ -338,6 +338,49 @@ class ProjectService:
             logger.error(f"Failed to add G-code file to project {project_id}: {e}")
             return None
 
+    def update_project_after_file_removal(
+        self,
+        project_id: str,
+        remove_thumbnail: bool = False,
+        remove_source_image: bool = False,
+        remove_vectorization_svg: bool = False,
+        remove_gcode_filename: Optional[str] = None,
+    ) -> Optional[ProjectResponse]:
+        """Update project metadata after a file has been removed"""
+        try:
+            existing_project = self.get_project(project_id)
+            if not existing_project:
+                return None
+
+            gcode_files = existing_project.gcode_files or []
+            if remove_gcode_filename:
+                gcode_files = [
+                    f for f in gcode_files
+                    if f != remove_gcode_filename and Path(f).name != Path(remove_gcode_filename).name
+                ]
+
+            vectorization = existing_project.vectorization
+            if remove_vectorization_svg and vectorization:
+                vectorization = None
+
+            updated_project = Project(
+                id=project_id,
+                name=existing_project.name,
+                created_at=existing_project.created_at,
+                updated_at=datetime.now(),
+                thumbnail_image=None if remove_thumbnail else existing_project.thumbnail_image,
+                source_image=None if remove_source_image else existing_project.source_image,
+                vectorization=vectorization,
+                gcode_files=gcode_files
+            )
+
+            self._save_project_yaml(updated_project)
+            logger.info(f"Updated project after file removal: {project_id}")
+            return ProjectResponse(**updated_project.dict())
+        except Exception as e:
+            logger.error(f"Failed to update project after file removal {project_id}: {e}")
+            return None
+
 
 # Create global instance
 project_service = ProjectService()

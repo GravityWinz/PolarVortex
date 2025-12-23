@@ -41,9 +41,9 @@ export default function MenuBar({ currentView, onNavigate, currentProject }) {
       destination: "projects",
     },
     {
-      text: "Graph Preparation",
+      text: "Edit Project",
       icon: <TimelineIcon />,
-      destination: "preparation",
+      destination: "edit",
     },
     {
       text: "Plotter Control",

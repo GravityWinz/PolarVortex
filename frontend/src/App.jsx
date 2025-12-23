@@ -2,7 +2,7 @@ import { Box, Container, CssBaseline, Paper, Tab, Tabs, ThemeProvider, Typograph
 import React, { useEffect, useState } from "react";
 import logoImage from "./assets/PolarVortexLogo_small.png";
 import ControlPanel from "./components/ControlPanel";
-import GraphPreparation from "./components/GraphPreparation";
+import EditProject from "./components/EditProject";
 import MenuBar from "./components/MenuBar";
 import PaperConfiguration from "./components/PaperConfiguration";
 import PlotterConfiguration from "./components/PlotterConfiguration";
@@ -65,8 +65,6 @@ const theme = createTheme({
  */
 export default function App() {
   const [currentView, setCurrentView] = useState("projects");
-  const [selectedProject, setSelectedProject] = useState(null);
-  const [selectedImage, setSelectedImage] = useState(null);
   const [currentProject, setCurrentProject] = useState(() => {
     try {
       const stored = localStorage.getItem("pv_current_project");
@@ -93,25 +91,14 @@ export default function App() {
   };
 
   const handleProjectSelect = (project) => {
-    setSelectedProject(project);
-    // Project selection now handled within ProjectList component
-  };
-
-  const handleImageSelect = (project) => {
-    setSelectedImage(project);
-    setCurrentView("preparation");
-  };
-
-  const handleUploadComplete = (project, response) => {
-    // Refresh project list or update current project
-    setCurrentView("projects");
-    setSelectedProject(null);
+    setCurrentProject(project);
+    setCurrentView("edit");
   };
 
   const renderCurrentView = () => {
     switch (currentView) {
-      case "preparation":
-        return <GraphPreparation selectedImage={selectedImage} />;
+      case "edit":
+        return <EditProject currentProject={currentProject} />;
       case "control":
         return <ControlPanel currentProject={currentProject} />;
       case "status":
@@ -125,6 +112,7 @@ export default function App() {
             onProjectSelect={handleProjectSelect}
             currentProject={currentProject}
             onSetCurrentProject={setCurrentProject}
+            onNavigate={handleNavigation}
           />
         );
     }

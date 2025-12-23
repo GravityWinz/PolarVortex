@@ -20,6 +20,7 @@ from .config import Config
 from .project_models import ProjectCreate, ProjectResponse, ProjectListResponse
 from .project_service import project_service
 from .vectorizer import PolargraphVectorizer, VectorizationSettings
+from .vpype_converter import convert_svg_to_gcode_file
 from .config_models import (
     PlotterCreate, PlotterUpdate, PlotterResponse, PlotterListResponse,
     PaperCreate, PaperUpdate, PaperResponse, PaperListResponse,
@@ -397,6 +398,12 @@ class GcodeRequest(BaseModel):
 class ProjectGcodeRunRequest(BaseModel):
     filename: str
 
+class SvgToGcodeRequest(BaseModel):
+    filename: str
+    paper_size: str = "A4"
+    fit_mode: str = "fit"  # fit | center
+    pen_mapping: Optional[str] = None
+
 async def read_arduino_response(timeout_seconds: float = 3.0) -> List[str]:
     """Read response from Arduino until 'ok' or timeout"""
     responses = []
@@ -568,7 +575,7 @@ async def get_project_thumbnail(project_id: str):
         logger.error(f"Get project thumbnail error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/projects/{project_id}/images/{filename}")
+@app.get("/projects/{project_id}/images/{filename:path}")
 async def get_project_image(project_id: str, filename: str):
     """Get a specific image file from a project"""
     try:
@@ -579,7 +586,11 @@ async def get_project_image(project_id: str, filename: str):
         
         # Get the project directory and construct image path
         project_dir = project_service._get_project_directory(project_id)
-        image_path = project_dir / filename
+        image_path = (project_dir / filename).resolve()
+        
+        # Prevent path traversal outside project directory
+        if project_dir not in image_path.parents and project_dir != image_path:
+            raise HTTPException(status_code=400, detail="Invalid file path")
         
         # Check if image file exists
         if not image_path.exists():
@@ -593,7 +604,8 @@ async def get_project_image(project_id: str, filename: str):
             'jpg': 'image/jpeg',
             'jpeg': 'image/jpeg',
             'gif': 'image/gif',
-            'bmp': 'image/bmp'
+            'bmp': 'image/bmp',
+            'svg': 'image/svg+xml',
         }
         media_type = media_type_map.get(file_extension, 'application/octet-stream')
         
@@ -608,6 +620,138 @@ async def get_project_image(project_id: str, filename: str):
         raise
     except Exception as e:
         logger.error(f"Get project image error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/projects/{project_id}/svg_to_gcode")
+async def convert_svg_to_gcode(project_id: str, request: SvgToGcodeRequest):
+    """Convert a project SVG file into G-code and store it on the project using vpype"""
+    try:
+        # #region agent log
+        from .vpype_converter import _dbg_log as vp_dbg  # local import to avoid circular
+        vp_dbg("H2", "main.py:1009", "convert_svg_to_gcode entry", {
+            "project_id": project_id,
+            "filename": request.filename,
+            "paper_size": request.paper_size,
+            "fit_mode": request.fit_mode,
+            "pen_mapping": request.pen_mapping,
+        })
+        # #endregion
+        project = project_service.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        project_dir = project_service._get_project_directory(project_id).resolve()
+        svg_path = (project_dir / request.filename).resolve()
+
+        # Prevent path traversal
+        if project_dir not in svg_path.parents and project_dir != svg_path:
+            raise HTTPException(status_code=400, detail="Invalid file path")
+
+        if not svg_path.exists() or not svg_path.is_file():
+            raise HTTPException(status_code=404, detail="SVG file not found")
+
+        if svg_path.suffix.lower() != ".svg":
+            raise HTTPException(status_code=400, detail="File is not an SVG")
+
+        gcode_dir = project_dir / "gcode"
+        gcode_dir.mkdir(parents=True, exist_ok=True)
+
+        base_name = svg_path.stem
+        gcode_filename = f"{base_name}_converted.gcode"
+        target_path = gcode_dir / gcode_filename
+        # Ensure unique filename
+        if target_path.exists():
+            gcode_filename = f"{base_name}_converted_{uuid.uuid4().hex[:8]}.gcode"
+            target_path = gcode_dir / gcode_filename
+
+        await convert_svg_to_gcode_file(
+            svg_path=svg_path,
+            output_path=target_path,
+            paper=request.paper_size,
+            fit_mode=request.fit_mode,
+            pen_mapping=request.pen_mapping,
+        )
+
+        stored_name = str(Path("gcode") / gcode_filename)
+        project_service.add_project_gcode_file(project_id, stored_name)
+
+        size_bytes = target_path.stat().st_size if target_path.exists() else 0
+        # #region agent log
+        vp_dbg("H2", "main.py:1046", "convert_svg_to_gcode success", {
+            "stored_name": stored_name,
+            "size": size_bytes,
+            "target_exists": target_path.exists(),
+        })
+        # #endregion
+
+        return {
+            "success": True,
+            "project_id": project_id,
+            "svg": request.filename,
+            "gcode_filename": gcode_filename,
+            "relative_path": stored_name,
+            "size": size_bytes,
+            "message": "SVG converted to G-code via vpype",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        # #region agent log
+        try:
+            vp_dbg("H2", "main.py:1060", "convert_svg_to_gcode error", {"error": str(e)})
+        except Exception:
+            pass
+        # #endregion
+        logger.error(f"SVG to G-code error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/projects/{project_id}/images/{filename:path}")
+async def delete_project_file(project_id: str, filename: str):
+    """Delete a specific file (image/SVG/G-code) from a project"""
+    try:
+        project = project_service.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        project_dir = project_service._get_project_directory(project_id).resolve()
+        file_path = (project_dir / filename).resolve()
+
+        # Prevent path traversal outside project directory
+        if project_dir not in file_path.parents and project_dir != file_path:
+            raise HTTPException(status_code=400, detail="Invalid file path")
+
+        if not file_path.exists() or not file_path.is_file():
+            raise HTTPException(status_code=404, detail="File not found")
+
+        # Remove file from disk
+        file_path.unlink()
+
+        # Update project metadata if needed
+        is_gcode = filename in (project.gcode_files or []) or str(Path(filename)) in (project.gcode_files or [])
+        remove_thumbnail = project.thumbnail_image == filename or project.thumbnail_image == Path(filename).name
+        remove_source = project.source_image == filename or project.source_image == Path(filename).name
+        remove_vectorization_svg = bool(
+            project.vectorization and project.vectorization.svg_filename and (
+                project.vectorization.svg_filename == filename or project.vectorization.svg_filename == Path(filename).name
+            )
+        )
+
+        project_service.update_project_after_file_removal(
+            project_id=project_id,
+            remove_thumbnail=remove_thumbnail,
+            remove_source_image=remove_source,
+            remove_vectorization_svg=remove_vectorization_svg,
+            remove_gcode_filename=filename if is_gcode else None
+        )
+
+        return {"success": True, "message": f"Deleted {filename}"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Delete project file error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/projects/{project_id}/image_upload")
