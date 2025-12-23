@@ -24,6 +24,7 @@ from .config_models import (
     ConfigurationResponse
 )
 from .config_service import config_service
+from .plotter_simulator import PlotterSimulator, SIMULATOR_PORT_NAME
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -240,6 +241,16 @@ async def get_available_ports():
     """Get list of available serial ports"""
     try:
         ports = []
+        
+        # Add simulator port first
+        ports.append({
+            "device": SIMULATOR_PORT_NAME,
+            "description": "PolarVortex Plotter Simulator",
+            "manufacturer": "PolarVortex",
+            "hwid": "SIMULATOR"
+        })
+        
+        # Add real serial ports
         for port in serial.tools.list_ports.comports():
             ports.append({
                 "device": port.device,
@@ -265,9 +276,15 @@ async def connect_plotter(request: PlotterConnectRequest):
         if arduino and arduino.is_open:
             arduino.close()
         
-        # Connect to specified port
-        arduino = serial.Serial(request.port, request.baud_rate, timeout=2)
-        logger.info(f"Connected to plotter on {request.port} at {request.baud_rate} baud")
+        # Check if connecting to simulator
+        if request.port == SIMULATOR_PORT_NAME:
+            # Create simulator instance
+            arduino = PlotterSimulator(request.port, request.baud_rate, timeout=2)
+            logger.info(f"Connected to plotter simulator on {request.port} at {request.baud_rate} baud")
+        else:
+            # Connect to real serial port
+            arduino = serial.Serial(request.port, request.baud_rate, timeout=2)
+            logger.info(f"Connected to plotter on {request.port} at {request.baud_rate} baud")
         
         # Update status
         current_status["connected"] = True

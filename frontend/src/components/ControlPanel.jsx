@@ -1,40 +1,43 @@
 import {
+  ArrowBack,
+  ArrowDownward,
+  ArrowForward,
+  ArrowUpward,
+  Clear,
+  Home,
+  Refresh,
+  Send,
+  Stop,
+  VerticalAlignBottom,
+  VerticalAlignTop,
+} from "@mui/icons-material";
+import {
   Box,
   Button,
-  Paper,
-  Stack,
-  Typography,
-  Select,
-  MenuItem,
-  FormControl,
-  InputLabel,
   Chip,
-  TextField,
+  Divider,
+  FormControl,
   Grid,
   IconButton,
-  Divider,
+  InputAdornment,
+  InputLabel,
+  MenuItem,
+  Paper,
+  Select,
+  Stack,
+  TextField,
+  Typography
 } from "@mui/material";
-import {
-  ArrowUpward,
-  ArrowDownward,
-  ArrowBack,
-  ArrowForward,
-  Home,
-  VerticalAlignTop,
-  VerticalAlignBottom,
-  Clear,
-  Refresh,
-} from "@mui/icons-material";
-import React, { useState, useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import logoImage from "../assets/PolarVortexLogo_small.png";
 import {
-  getAvailablePorts,
+  clearCommandLog,
   connectPlotter,
   disconnectPlotter,
+  getAvailablePorts,
+  getCommandLog,
   getConnectionStatus,
   sendGcodeCommand,
-  getCommandLog,
-  clearCommandLog,
 } from "../services/apiService";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
@@ -55,10 +58,12 @@ export default function ControlPanel() {
   const [connected, setConnected] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState(null);
   const [commandLog, setCommandLog] = useState([]);
-  const [stepSize, setStepSize] = useState(1); // 1mm, 10mm, or 100mm
   const [loading, setLoading] = useState(false);
+  const [commandInput, setCommandInput] = useState("");
+  const [motionMode, setMotionMode] = useState("relative"); // "absolute" or "relative"
   const logEndRef = useRef(null);
   const wsRef = useRef(null);
+  const processedMessagesRef = useRef(new Set());
 
   const baudRates = [9600, 19200, 38400, 57600, 115200];
 
@@ -71,15 +76,24 @@ export default function ControlPanel() {
 
   // WebSocket connection for real-time updates
   useEffect(() => {
-    connectWebSocket();
+    // Only create WebSocket if one doesn't already exist
+    if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED) {
+      connectWebSocket();
+    }
     return () => {
       if (wsRef.current) {
         wsRef.current.close();
+        wsRef.current = null;
       }
     };
   }, []);
 
   const connectWebSocket = () => {
+    // Prevent multiple connections
+    if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+      return;
+    }
+    
     try {
       const ws = new WebSocket(`${WS_URL}/ws`);
       ws.onopen = () => {
@@ -89,15 +103,44 @@ export default function ControlPanel() {
         try {
           const data = JSON.parse(event.data);
           if (data.type === "gcode_response") {
+            // Create a unique key for this message
+            const messageKey = `${data.timestamp}-${data.command}-${data.response}`;
+            
+            // Check if we've already processed this message
+            if (processedMessagesRef.current.has(messageKey)) {
+              return; // Skip duplicate
+            }
+            
+            // Mark as processed
+            processedMessagesRef.current.add(messageKey);
+            
+            // Clean up old keys (keep last 1000)
+            if (processedMessagesRef.current.size > 1000) {
+              const keysArray = Array.from(processedMessagesRef.current);
+              processedMessagesRef.current = new Set(keysArray.slice(-1000));
+            }
+            
             // Add to command log
-            setCommandLog((prev) => [
-              ...prev,
-              {
-                timestamp: data.timestamp,
-                command: data.command,
-                response: data.response,
-              },
-            ]);
+            setCommandLog((prev) => {
+              // Double-check in state as well
+              const exists = prev.some(
+                (entry) =>
+                  entry.command === data.command &&
+                  entry.timestamp === data.timestamp &&
+                  entry.response === data.response
+              );
+              if (exists) {
+                return prev;
+              }
+              return [
+                ...prev,
+                {
+                  timestamp: data.timestamp,
+                  command: data.command,
+                  response: data.response,
+                },
+              ];
+            });
             scrollToBottom();
           }
         } catch (err) {
@@ -109,12 +152,18 @@ export default function ControlPanel() {
       };
       ws.onclose = () => {
         console.log("WebSocket disconnected");
-        // Attempt to reconnect after 5 seconds
-        setTimeout(connectWebSocket, 5000);
+        wsRef.current = null;
+        // Attempt to reconnect after 5 seconds only if component is still mounted
+        setTimeout(() => {
+          if (wsRef.current === null) {
+            connectWebSocket();
+          }
+        }, 5000);
       };
       wsRef.current = ws;
     } catch (err) {
       console.error("Failed to connect WebSocket:", err);
+      wsRef.current = null;
     }
   };
 
@@ -150,6 +199,11 @@ export default function ControlPanel() {
     try {
       const result = await getCommandLog();
       if (result.log) {
+        // Mark all loaded entries as processed to prevent duplicates
+        result.log.forEach((entry) => {
+          const messageKey = `${entry.timestamp}-${entry.command}-${entry.response}`;
+          processedMessagesRef.current.add(messageKey);
+        });
         setCommandLog(result.log);
         scrollToBottom();
       }
@@ -231,6 +285,22 @@ export default function ControlPanel() {
     }
   };
 
+  const handleSendCommand = async () => {
+    if (!commandInput.trim()) {
+      return;
+    }
+    const command = commandInput.trim();
+    setCommandInput("");
+    await sendCommand(command);
+  };
+
+  const handleCommandInputKeyPress = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSendCommand();
+    }
+  };
+
   const handleHome = () => {
     sendCommand("G28");
   };
@@ -241,12 +311,8 @@ export default function ControlPanel() {
       return;
     }
     try {
-      // Set relative positioning
-      await sendGcodeCommand("G91");
-      // Move
+      // Use current motion mode - don't switch modes, just move
       await sendGcodeCommand(`G0 X${x} Y${y}`);
-      // Reset to absolute positioning
-      await sendGcodeCommand("G90");
     } catch (err) {
       alert(`Movement error: ${err.message}`);
     }
@@ -262,14 +328,24 @@ export default function ControlPanel() {
     sendCommand("M280 P0 S0");
   };
 
+  const handleStop = () => {
+    sendCommand("M112"); // Emergency stop, or use M0 for program stop
+  };
+
+  const handleHomeAxis = (axis) => {
+    sendCommand(`G28 ${axis.toUpperCase()}`);
+  };
+
+  const stepSizes = [1, 10, 100]; // 1mm, 10mm, 100mm
+
   return (
     <Box sx={{ p: 3 }}>
       {/* Header with Logo */}
       <Box sx={{ display: "flex", alignItems: "center", mb: 3 }}>
-        <img
-          src={logoImage}
-          alt="PolarVortex Logo"
-          style={{ height: "40px", width: "auto", marginRight: "16px" }}
+        <img 
+          src={logoImage} 
+          alt="PolarVortex Logo" 
+          style={{ height: "40px", width: "auto", marginRight: "16px" }} 
         />
         <Box>
           <Typography variant="h4" gutterBottom sx={{ mb: 0 }}>
@@ -284,10 +360,10 @@ export default function ControlPanel() {
       <Grid container spacing={3}>
         {/* Connection Section */}
         <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
+      <Paper sx={{ p: 3 }}>
+        <Typography variant="h6" gutterBottom>
               Connection
-            </Typography>
+        </Typography>
             <Stack spacing={2}>
               <FormControl fullWidth>
                 <InputLabel>Serial Port</InputLabel>
@@ -327,7 +403,7 @@ export default function ControlPanel() {
                   ))}
                 </Select>
               </FormControl>
-              <Stack direction="row" spacing={2}>
+        <Stack direction="row" spacing={2}>
                 <Button
                   variant="contained"
                   color="success"
@@ -399,99 +475,370 @@ export default function ControlPanel() {
                   No commands sent yet. Connect and send commands to see activity here.
                 </Typography>
               ) : (
-                commandLog.map((entry, index) => (
-                  <Box key={index} sx={{ mb: 1 }}>
-                    <Typography variant="caption" color="text.secondary">
-                      {new Date(entry.timestamp).toLocaleTimeString()}
-                    </Typography>
-                    <Typography
-                      variant="body2"
-                      sx={{ color: "primary.main", fontWeight: "bold" }}
-                    >
-                      → {entry.command}
-                    </Typography>
-                    <Typography variant="body2" sx={{ color: "success.main", ml: 2 }}>
-                      ← {entry.response}
-                    </Typography>
-                  </Box>
-                ))
+                commandLog.map((entry, index) => {
+                  const timestamp = new Date(entry.timestamp).toLocaleTimeString();
+                  return (
+                    <Box key={index} sx={{ mb: 0.5 }}>
+                      <Typography 
+                        variant="body2" 
+                        sx={{ 
+                          fontFamily: "monospace",
+                          fontSize: "0.875rem",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis"
+                        }}
+                      >
+                        <Box component="span" sx={{ color: "text.secondary", mr: 1 }}>
+                          [{timestamp}]
+                        </Box>
+                        <Box component="span" sx={{ color: "primary.main", fontWeight: "bold" }}>
+                          → {entry.command}
+                        </Box>
+                        <Box component="span" sx={{ color: "success.main", ml: 1 }}>
+                          ← {entry.response}
+                        </Box>
+                      </Typography>
+                    </Box>
+                  );
+                })
               )}
               <div ref={logEndRef} />
+            </Box>
+            <Box sx={{ mt: 2 }}>
+              <TextField
+                fullWidth
+                size="small"
+                placeholder="Enter G-code command (e.g., G28, M280 P0 S90)"
+                value={commandInput}
+                onChange={(e) => setCommandInput(e.target.value)}
+                onKeyPress={handleCommandInputKeyPress}
+                disabled={!connected || loading}
+                InputProps={{
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton
+                        onClick={handleSendCommand}
+                        disabled={!connected || loading || !commandInput.trim()}
+                        edge="end"
+                        color="primary"
+                      >
+                        <Send />
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }}
+                sx={{
+                  "& .MuiOutlinedInput-root": {
+                    fontFamily: "monospace",
+                  },
+                }}
+              />
             </Box>
           </Paper>
         </Grid>
 
-        {/* Movement Controls */}
+        {/* Movement Controls - Cross Layout */}
         <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 3 }}>
+          <Paper sx={{ p: 3, display: "flex", flexDirection: "column", alignItems: "center" }}>
             <Typography variant="h6" gutterBottom>
               Movement Controls
             </Typography>
-            <Stack spacing={2}>
-              <FormControl fullWidth>
-                <InputLabel>Step Size</InputLabel>
-                <Select
-                  value={stepSize}
-                  label="Step Size"
-                  onChange={(e) => setStepSize(e.target.value)}
+            <Box
+              sx={{
+                position: "relative",
+                width: "400px",
+                height: "400px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                mt: 2,
+              }}
+            >
+              {/* Central Stop Button */}
+              <IconButton
+                onClick={handleStop}
+                disabled={!connected}
+                sx={{
+                  position: "absolute",
+                  width: "48px",
+                  height: "48px",
+                  bgcolor: "error.main",
+                  color: "white",
+                  zIndex: 10,
+                  "&:hover": {
+                    bgcolor: "error.dark",
+                  },
+                  "&:disabled": {
+                    bgcolor: "grey.400",
+                  },
+                }}
+              >
+                <Stop />
+              </IconButton>
+
+              {/* Top (+Y) - 3 buttons vertical (stacked) */}
+              <Box
+                sx={{
+                  position: "absolute",
+                  top: "10px",
+                  left: "50%",
+                  transform: "translateX(-50%)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 2.5,
+                  alignItems: "center",
+                }}
+              >
+                <Button
+                  onClick={() => handleMove(0, 100)}
                   disabled={!connected}
+                  sx={{
+                    minWidth: "44px",
+                    height: "44px",
+                    bgcolor: "primary.dark",
+                    color: "white",
+                    "&:hover": { bgcolor: "primary.dark", opacity: 0.9 },
+                    "&:disabled": { bgcolor: "grey.300" },
+                  }}
                 >
-                  <MenuItem value={1}>1 mm</MenuItem>
-                  <MenuItem value={10}>10 mm</MenuItem>
-                  <MenuItem value={100}>100 mm</MenuItem>
-                </Select>
-              </FormControl>
-              <Box>
-                <Typography variant="subtitle2" gutterBottom>
-                  Y-Axis (Up/Down)
-                </Typography>
-                <Stack direction="row" spacing={1} justifyContent="center">
-                  <Button
-                    variant="contained"
-                    startIcon={<ArrowUpward />}
-                    onClick={() => handleMove(0, stepSize)}
-                    disabled={!connected}
-                    sx={{ minWidth: "120px" }}
-                  >
-                    Up
-                  </Button>
-                  <Button
-                    variant="contained"
-                    startIcon={<ArrowDownward />}
-                    onClick={() => handleMove(0, -stepSize)}
-                    disabled={!connected}
-                    sx={{ minWidth: "120px" }}
-                  >
-                    Down
-                  </Button>
-                </Stack>
+                  <ArrowUpward sx={{ fontSize: "1.1rem" }} />
+                  <Typography variant="caption" sx={{ ml: 0.4, fontSize: "0.6rem" }}>
+                    100
+                  </Typography>
+                </Button>
+                <Button
+                  onClick={() => handleMove(0, 10)}
+                  disabled={!connected}
+                  sx={{
+                    minWidth: "36px",
+                    height: "36px",
+                    bgcolor: "primary.main",
+                    color: "white",
+                    "&:hover": { bgcolor: "primary.dark" },
+                    "&:disabled": { bgcolor: "grey.300" },
+                  }}
+                >
+                  <ArrowUpward sx={{ fontSize: "0.95rem" }} />
+                  <Typography variant="caption" sx={{ ml: 0.3, fontSize: "0.55rem" }}>
+                    10
+                  </Typography>
+                </Button>
+                <Button
+                  onClick={() => handleMove(0, 1)}
+                  disabled={!connected}
+                  sx={{
+                    minWidth: "28px",
+                    height: "28px",
+                    bgcolor: "primary.light",
+                    color: "white",
+                    "&:hover": { bgcolor: "primary.main" },
+                    "&:disabled": { bgcolor: "grey.300" },
+                  }}
+                >
+                  <ArrowUpward sx={{ fontSize: "0.8rem" }} />
+                  <Typography variant="caption" sx={{ ml: 0.2, fontSize: "0.5rem" }}>
+                    1
+                  </Typography>
+                </Button>
               </Box>
-              <Box>
-                <Typography variant="subtitle2" gutterBottom>
-                  X-Axis (Left/Right)
-                </Typography>
-                <Stack direction="row" spacing={1} justifyContent="center">
-                  <Button
-                    variant="contained"
-                    startIcon={<ArrowBack />}
-                    onClick={() => handleMove(-stepSize, 0)}
-                    disabled={!connected}
-                    sx={{ minWidth: "120px" }}
-                  >
-                    Left
-                  </Button>
-                  <Button
-                    variant="contained"
-                    startIcon={<ArrowForward />}
-                    onClick={() => handleMove(stepSize, 0)}
-                    disabled={!connected}
-                    sx={{ minWidth: "120px" }}
-                  >
-                    Right
-                  </Button>
-                </Stack>
+
+              {/* Bottom (-Y) - 3 buttons vertical (stacked) */}
+              <Box
+                sx={{
+                  position: "absolute",
+                  bottom: "10px",
+                  left: "50%",
+                  transform: "translateX(-50%)",
+                  display: "flex",
+                  flexDirection: "column-reverse",
+                  gap: 2.5,
+                  alignItems: "center",
+                }}
+              >
+                <Button
+                  onClick={() => handleMove(0, -100)}
+                  disabled={!connected}
+                  sx={{
+                    minWidth: "44px",
+                    height: "44px",
+                    bgcolor: "primary.dark",
+                    color: "white",
+                    "&:hover": { bgcolor: "primary.dark", opacity: 0.9 },
+                    "&:disabled": { bgcolor: "grey.300" },
+                  }}
+                >
+                  <ArrowDownward sx={{ fontSize: "1.1rem" }} />
+                  <Typography variant="caption" sx={{ ml: 0.4, fontSize: "0.6rem" }}>
+                    100
+                  </Typography>
+                </Button>
+                <Button
+                  onClick={() => handleMove(0, -10)}
+                  disabled={!connected}
+                  sx={{
+                    minWidth: "36px",
+                    height: "36px",
+                    bgcolor: "primary.main",
+                    color: "white",
+                    "&:hover": { bgcolor: "primary.dark" },
+                    "&:disabled": { bgcolor: "grey.300" },
+                  }}
+                >
+                  <ArrowDownward sx={{ fontSize: "0.95rem" }} />
+                  <Typography variant="caption" sx={{ ml: 0.3, fontSize: "0.55rem" }}>
+                    10
+                  </Typography>
+                </Button>
+                <Button
+                  onClick={() => handleMove(0, -1)}
+                  disabled={!connected}
+                  sx={{
+                    minWidth: "28px",
+                    height: "28px",
+                    bgcolor: "primary.light",
+                    color: "white",
+                    "&:hover": { bgcolor: "primary.main" },
+                    "&:disabled": { bgcolor: "grey.300" },
+                  }}
+                >
+                  <ArrowDownward sx={{ fontSize: "0.8rem" }} />
+                  <Typography variant="caption" sx={{ ml: 0.2, fontSize: "0.5rem" }}>
+                    1
+                  </Typography>
+                </Button>
               </Box>
-            </Stack>
+
+              {/* Left (-X) - 3 buttons horizontal */}
+              <Box
+                sx={{
+                  position: "absolute",
+                  left: "10px",
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  display: "flex",
+                  gap: 2.5,
+                  alignItems: "center",
+                }}
+              >
+                <Button
+                  onClick={() => handleMove(-100, 0)}
+                  disabled={!connected}
+                  sx={{
+                    minWidth: "44px",
+                    height: "44px",
+                    bgcolor: "secondary.dark",
+                    color: "white",
+                    "&:hover": { bgcolor: "secondary.dark", opacity: 0.9 },
+                    "&:disabled": { bgcolor: "grey.300" },
+                  }}
+                >
+                  <ArrowBack sx={{ fontSize: "1.1rem" }} />
+                  <Typography variant="caption" sx={{ ml: 0.4, fontSize: "0.6rem" }}>
+                    100
+                  </Typography>
+                </Button>
+                <Button
+                  onClick={() => handleMove(-10, 0)}
+                  disabled={!connected}
+                  sx={{
+                    minWidth: "36px",
+                    height: "36px",
+                    bgcolor: "secondary.main",
+                    color: "white",
+                    "&:hover": { bgcolor: "secondary.dark" },
+                    "&:disabled": { bgcolor: "grey.300" },
+                  }}
+                >
+                  <ArrowBack sx={{ fontSize: "0.95rem" }} />
+                  <Typography variant="caption" sx={{ ml: 0.3, fontSize: "0.55rem" }}>
+                    10
+                  </Typography>
+                </Button>
+                <Button
+                  onClick={() => handleMove(-1, 0)}
+                  disabled={!connected}
+                  sx={{
+                    minWidth: "28px",
+                    height: "28px",
+                    bgcolor: "secondary.light",
+                    color: "white",
+                    "&:hover": { bgcolor: "secondary.main" },
+                    "&:disabled": { bgcolor: "grey.300" },
+                  }}
+                >
+                  <ArrowBack sx={{ fontSize: "0.8rem" }} />
+                  <Typography variant="caption" sx={{ ml: 0.2, fontSize: "0.5rem" }}>
+                    1
+                  </Typography>
+                </Button>
+              </Box>
+
+              {/* Right (+X) - 3 buttons horizontal */}
+              <Box
+                sx={{
+                  position: "absolute",
+                  right: "10px",
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  display: "flex",
+                  gap: 2.5,
+                  alignItems: "center",
+                }}
+              >
+                <Button
+                  onClick={() => handleMove(1, 0)}
+                  disabled={!connected}
+                  sx={{
+                    minWidth: "28px",
+                    height: "28px",
+                    bgcolor: "secondary.light",
+                    color: "white",
+                    "&:hover": { bgcolor: "secondary.main" },
+                    "&:disabled": { bgcolor: "grey.300" },
+                  }}
+                >
+                  <ArrowForward sx={{ fontSize: "0.8rem" }} />
+                  <Typography variant="caption" sx={{ ml: 0.2, fontSize: "0.5rem" }}>
+                    1
+                  </Typography>
+                </Button>
+                <Button
+                  onClick={() => handleMove(10, 0)}
+                  disabled={!connected}
+                  sx={{
+                    minWidth: "36px",
+                    height: "36px",
+                    bgcolor: "secondary.main",
+                    color: "white",
+                    "&:hover": { bgcolor: "secondary.dark" },
+                    "&:disabled": { bgcolor: "grey.300" },
+                  }}
+                >
+                  <ArrowForward sx={{ fontSize: "0.95rem" }} />
+                  <Typography variant="caption" sx={{ ml: 0.3, fontSize: "0.55rem" }}>
+                    10
+                  </Typography>
+                </Button>
+                <Button
+                  onClick={() => handleMove(100, 0)}
+                  disabled={!connected}
+                  sx={{
+                    minWidth: "44px",
+                    height: "44px",
+                    bgcolor: "secondary.dark",
+                    color: "white",
+                    "&:hover": { bgcolor: "secondary.dark", opacity: 0.9 },
+                    "&:disabled": { bgcolor: "grey.300" },
+                  }}
+                >
+                  <ArrowForward sx={{ fontSize: "1.1rem" }} />
+                  <Typography variant="caption" sx={{ ml: 0.4, fontSize: "0.6rem" }}>
+                    100
+                  </Typography>
+                </Button>
+              </Box>
+            </Box>
           </Paper>
         </Grid>
 
@@ -514,6 +861,30 @@ export default function ControlPanel() {
                 Home (G28)
               </Button>
               <Divider />
+              <Typography variant="subtitle2">Motion Mode</Typography>
+              <Button
+                variant={motionMode === "relative" ? "contained" : "outlined"}
+                color="primary"
+                onClick={async () => {
+                  const current = motionMode || "relative";
+                  const newMode = current === "relative" ? "absolute" : "relative";
+                  const gcode = newMode === "relative" ? "G91" : "G90";
+                  // Optimistic UI update
+                  setMotionMode(newMode);
+                  if (!connected) return;
+                  try {
+                    await sendCommand(gcode);
+                  } catch (err) {
+                    // Revert on error
+                    setMotionMode(current);
+                  }
+                }}
+                disabled={!connected}
+                fullWidth
+              >
+                {(motionMode || "relative") === "relative" ? "Relative (G91)" : "Absolute (G90)"}
+          </Button>
+              <Divider />
               <Typography variant="subtitle2">Pen Control</Typography>
               <Stack direction="row" spacing={2}>
                 <Button
@@ -525,7 +896,7 @@ export default function ControlPanel() {
                   fullWidth
                 >
                   Pen Up
-                </Button>
+          </Button>
                 <Button
                   variant="contained"
                   color="secondary"
@@ -535,10 +906,10 @@ export default function ControlPanel() {
                   fullWidth
                 >
                   Pen Down
-                </Button>
+          </Button>
               </Stack>
-            </Stack>
-          </Paper>
+        </Stack>
+      </Paper>
         </Grid>
       </Grid>
     </Box>

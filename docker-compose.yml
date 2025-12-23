@@ -15,6 +15,9 @@ services:
       - NODE_ENV=development
       - VITE_API_BASE_URL=http://localhost:8000
       - VITE_WS_BASE_URL=ws://localhost:8000
+      # Enable polling for better file watching (especially on Windows/WSL2)
+      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
     env_file:
       - env.example
     depends_on:
@@ -52,14 +55,16 @@ services:
       - BACKEND_PORT=8000
       - DEBUG=true
       - LOG_LEVEL=DEBUG
+      # Enable better file watching for hot-reload
+      - WATCHFILES_FORCE_POLLING=true
     env_file:
       - env.example
     # Serial port device access
     # For Linux: Uncomment and adjust device path (e.g., /dev/ttyUSB0, /dev/ttyACM0)
     # For Windows Docker Desktop: Use COM port mapping (see instructions below)
-    devices:
-      - /dev/ttyUSB0:/dev/ttyUSB0  # Common Linux Arduino port
-      - /dev/ttyACM0:/dev/ttyACM0  # Alternative Linux Arduino port
+    # devices:
+      # - /dev/ttyUSB0:/dev/ttyUSB0  # Common Linux Arduino port
+      # - /dev/ttyACM0:/dev/ttyACM0  # Alternative Linux Arduino port
     # Alternative: Use privileged mode if device access issues occur
     # privileged: true
     # Or add user to dialout group (Linux) - requires modifying Dockerfile

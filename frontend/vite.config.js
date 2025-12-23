@@ -7,6 +7,10 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
+    watch: {
+      usePolling: true, // Better for Docker/WSL2 file watching
+      interval: 1000, // Poll interval in ms
+    },
   },
   build: {
     outDir: 'dist',
