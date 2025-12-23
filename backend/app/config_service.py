@@ -8,7 +8,8 @@ from pathlib import Path
 from .config_models import (
     PlotterSettings, PaperSettings, PlotterCreate, PlotterUpdate,
     PaperCreate, PaperUpdate, PlotterResponse, PaperResponse,
-    PlotterListResponse, PaperListResponse, ConfigurationResponse
+    PlotterListResponse, PaperListResponse, ConfigurationResponse,
+    GcodeSettings, GcodeSettingsUpdate
 )
 from .config import Config
 
@@ -67,6 +68,11 @@ class ConfigurationService:
                 default_config = self._get_default_config()
                 self.config_data[section] = default_config[section]
                 needs_update = True
+
+        # Ensure gcode section exists
+        if 'gcode_sequences' not in self.config_data:
+            self.config_data['gcode_sequences'] = self._get_default_gcode_sequences()
+            needs_update = True
         
         # Save updated configuration if needed
         if needs_update:
@@ -153,6 +159,7 @@ class ConfigurationService:
                 "default_dither": True,
                 "default_invert": False
             },
+            "gcode_sequences": self._get_default_gcode_sequences(),
             "plotters": self._get_default_plotters(),
             "papers": self._get_default_papers()
         }
@@ -330,6 +337,13 @@ class ConfigurationService:
                 "updated_at": datetime.now().isoformat()
             }
         ]
+
+    def _get_default_gcode_sequences(self) -> Dict[str, List[str]]:
+        """Get default G-code sequences for automation"""
+        return {
+            "on_connect": [],
+            "before_print": []
+        }
     
     def _validate_and_repair_config(self):
         """Validate and repair configuration to ensure all required fields exist"""
@@ -580,7 +594,8 @@ class ConfigurationService:
             plotters=plotters,
             papers=papers,
             default_plotter=default_plotter,
-            default_paper=default_paper
+            default_paper=default_paper,
+            gcode=self.get_gcode_settings()
         )
     
     def _dict_to_plotter_response(self, plotter_dict: Dict[str, Any]) -> PlotterResponse:
@@ -619,6 +634,29 @@ class ConfigurationService:
             updated_at=datetime.fromisoformat(paper_dict['updated_at'])
         )
 
+
+    def get_gcode_settings(self) -> GcodeSettings:
+        """Return automatic G-code sequences"""
+        gcode_data = self.config_data.get('gcode_sequences', self._get_default_gcode_sequences())
+        return GcodeSettings(
+            on_connect=gcode_data.get('on_connect', []),
+            before_print=gcode_data.get('before_print', [])
+        )
+
+    def update_gcode_settings(self, gcode_data: GcodeSettingsUpdate) -> GcodeSettings:
+        """Update automatic G-code sequences"""
+        existing = self.config_data.get('gcode_sequences', self._get_default_gcode_sequences())
+        update_payload = gcode_data.dict(exclude_unset=True)
+
+        if 'on_connect' in update_payload:
+            existing['on_connect'] = update_payload['on_connect'] or []
+        if 'before_print' in update_payload:
+            existing['before_print'] = update_payload['before_print'] or []
+
+        # Persist and return as model
+        self.config_data['gcode_sequences'] = existing
+        self._save_configurations()
+        return self.get_gcode_settings()
 
     def rebuild_default_config(self):
         """Force rebuild the configuration with all default values"""

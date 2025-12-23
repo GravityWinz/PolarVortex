@@ -175,6 +175,37 @@ export async function getAllConfigurations() {
   }
 }
 
+export async function getGcodeSettings() {
+  try {
+    const response = await fetch(`${BASE_URL}/config/gcode`);
+    return await response.json();
+  } catch (err) {
+    console.error("Error fetching G-code settings:", err);
+    return { error: err.message };
+  }
+}
+
+export async function updateGcodeSettings(gcodeSettings) {
+  try {
+    const response = await fetch(`${BASE_URL}/config/gcode`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(gcodeSettings),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to update G-code settings: ${response.statusText}`);
+    }
+
+    return await response.json();
+  } catch (err) {
+    console.error("Error updating G-code settings:", err);
+    throw err;
+  }
+}
+
 // Paper Configuration API
 export async function getPapers() {
   try {
@@ -478,6 +509,24 @@ export async function clearCommandLog() {
     return await response.json();
   } catch (err) {
     console.error("Error clearing command log:", err);
+    throw err;
+  }
+}
+
+export async function runPrePrintGcode() {
+  try {
+    const response = await fetch(`${BASE_URL}/plotter/gcode/preprint`, {
+      method: "POST",
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || `Failed to run pre-print G-code: ${response.statusText}`);
+    }
+
+    return await response.json();
+  } catch (err) {
+    console.error("Error running pre-print G-code:", err);
     throw err;
   }
 }

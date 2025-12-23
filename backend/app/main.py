@@ -8,7 +8,7 @@ import json
 import os
 import asyncio
 import logging
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 from pathlib import Path
 import re
@@ -21,7 +21,7 @@ from .vectorizer import PolargraphVectorizer, VectorizationSettings
 from .config_models import (
     PlotterCreate, PlotterUpdate, PlotterResponse, PlotterListResponse,
     PaperCreate, PaperUpdate, PaperResponse, PaperListResponse,
-    ConfigurationResponse
+    ConfigurationResponse, GcodeSettings, GcodeSettingsUpdate
 )
 from .config_service import config_service
 from .plotter_simulator import PlotterSimulator, SIMULATOR_PORT_NAME
@@ -44,6 +44,32 @@ current_status = {
 }
 # Command/response log (session-only)
 command_log: List[Dict] = []
+
+# Helper to send a sequence of G-code commands in order
+async def execute_gcode_sequence(commands: List[str], sequence_name: str = "") -> List[Dict[str, Any]]:
+    """Execute a list of G-code commands sequentially and capture results."""
+    results: List[Dict[str, Any]] = []
+
+    for cmd in commands:
+        gcode = (cmd or "").strip()
+        if not gcode:
+            continue
+
+        response = await send_gcode_command(GcodeRequest(command=gcode))
+        result_entry = {
+            "command": gcode,
+            "success": response.get("success", False),
+            "response": response.get("response"),
+            "timestamp": response.get("timestamp"),
+            "error": response.get("error")
+        }
+        results.append(result_entry)
+
+        # Stop if a command failed to avoid cascading issues
+        if not result_entry["success"]:
+            break
+
+    return results
 
 # Initialize ImageHelper
 image_helper = ImageHelper()
@@ -293,12 +319,27 @@ async def connect_plotter(request: PlotterConnectRequest):
         
         # Clear any existing input buffer
         arduino.reset_input_buffer()
+
+        # Execute any configured on-connect G-code
+        startup_results: List[Dict[str, Any]] = []
+        gcode_settings = config_service.get_gcode_settings()
+        if gcode_settings.on_connect:
+            startup_results = await execute_gcode_sequence(gcode_settings.on_connect, "on_connect")
+            logger.info(
+                "Executed on-connect G-code sequence with %d commands (success=%s)",
+                len(startup_results),
+                all(item.get("success") for item in startup_results) if startup_results else True
+            )
         
         return {
             "success": True,
             "port": request.port,
             "baud_rate": request.baud_rate,
-            "message": f"Connected to {request.port}"
+            "message": f"Connected to {request.port}",
+            "startup_gcode": {
+                "commands_sent": len(startup_results),
+                "results": startup_results
+            }
         }
     except serial.SerialException as e:
         logger.error(f"Serial connection error: {e}")
@@ -418,6 +459,32 @@ async def send_gcode_command(request: GcodeRequest):
         logger.error(f"G-code command error: {e}")
         error_msg = str(e)
         return {"success": False, "error": error_msg, "command": request.command}
+
+
+@app.post("/plotter/gcode/preprint")
+async def run_preprint_gcode():
+    """Run configured G-code commands before starting a print"""
+    try:
+        settings = config_service.get_gcode_settings()
+        if not settings.before_print:
+            return {
+                "success": True,
+                "results": [],
+                "message": "No pre-print G-code configured"
+            }
+
+        results = await execute_gcode_sequence(settings.before_print, "before_print")
+        success = all(item.get("success") for item in results) if results else True
+
+        return {
+            "success": success,
+            "results": results,
+            "message": "Pre-print G-code executed" if success else "Pre-print G-code had errors"
+        }
+    except Exception as e:
+        logger.error(f"Pre-print G-code error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/plotter/log")
 async def get_command_log():
@@ -1033,6 +1100,35 @@ async def get_all_configurations():
         return config_service.get_all_configurations()
     except Exception as e:
         logger.error(f"Get configurations error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/config/gcode", response_model=GcodeSettings)
+async def get_gcode_settings():
+    """Get automatic G-code sequences"""
+    try:
+        return config_service.get_gcode_settings()
+    except Exception as e:
+        logger.error(f"Get G-code settings error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/config/gcode", response_model=GcodeSettings)
+async def update_gcode_settings(gcode_data: GcodeSettingsUpdate):
+    """Update automatic G-code sequences"""
+    try:
+        settings = config_service.update_gcode_settings(gcode_data)
+
+        # Broadcast update
+        await manager.broadcast(json.dumps({
+            "type": "gcode_settings_updated",
+            "on_connect_count": len(settings.on_connect),
+            "before_print_count": len(settings.before_print)
+        }))
+
+        return settings
+    except Exception as e:
+        logger.error(f"Update G-code settings error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

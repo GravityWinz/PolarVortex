@@ -153,6 +153,18 @@ class PaperResponse(BaseModel):
     updated_at: datetime = Field(..., description="Last update timestamp")
 
 
+class GcodeSettings(BaseModel):
+    """Settings for automatic G-code sequences"""
+    on_connect: List[str] = Field(default_factory=list, description="Commands to run right after connecting to the plotter")
+    before_print: List[str] = Field(default_factory=list, description="Commands to run just before starting a print job")
+
+
+class GcodeSettingsUpdate(BaseModel):
+    """Model for updating automatic G-code sequences"""
+    on_connect: Optional[List[str]] = Field(None, description="Commands to run after connect")
+    before_print: Optional[List[str]] = Field(None, description="Commands to run before print start")
+
+
 class PlotterListResponse(BaseModel):
     """Response model for listing plotters"""
     plotters: List[PlotterResponse] = Field(..., description="List of plotter configurations")
@@ -171,3 +183,4 @@ class ConfigurationResponse(BaseModel):
     papers: List[PaperResponse] = Field(..., description="List of paper configurations")
     default_plotter: Optional[PlotterResponse] = Field(None, description="Default plotter configuration")
     default_paper: Optional[PaperResponse] = Field(None, description="Default paper configuration")
+    gcode: GcodeSettings = Field(default_factory=GcodeSettings, description="Automatic G-code sequences")

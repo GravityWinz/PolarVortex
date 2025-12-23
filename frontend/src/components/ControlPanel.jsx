@@ -8,8 +8,6 @@ import {
   Refresh,
   Send,
   Stop,
-  VerticalAlignBottom,
-  VerticalAlignTop,
 } from "@mui/icons-material";
 import {
   Box,
@@ -26,6 +24,7 @@ import {
   Select,
   Stack,
   TextField,
+  Tooltip,
   Typography
 } from "@mui/material";
 import React, { useEffect, useRef, useState } from "react";
@@ -61,11 +60,12 @@ export default function ControlPanel() {
   const [loading, setLoading] = useState(false);
   const [commandInput, setCommandInput] = useState("");
   const [motionMode, setMotionMode] = useState("relative"); // "absolute" or "relative"
+  const [penState, setPenState] = useState("up"); // "up" or "down"
   const logEndRef = useRef(null);
   const wsRef = useRef(null);
   const processedMessagesRef = useRef(new Set());
 
-  const baudRates = [9600, 19200, 38400, 57600, 115200];
+  const baudRates = [9600, 19200, 38400, 57600, 115200, 250000];
 
   // Load available ports on mount
   useEffect(() => {
@@ -318,14 +318,17 @@ export default function ControlPanel() {
     }
   };
 
-  const handlePenUp = () => {
-    // M280 P0 S90 - typical servo command for pen up (adjust as needed)
-    sendCommand("M280 P0 S90");
-  };
-
-  const handlePenDown = () => {
-    // M280 P0 S0 - typical servo command for pen down (adjust as needed)
-    sendCommand("M280 P0 S0");
+  const handleTogglePen = async () => {
+    const target = penState === "up" ? "down" : "up";
+    const cmd = target === "up" ? "M280 P0 S90" : "M280 P0 S0";
+    const prev = penState;
+    setPenState(target);
+    if (!connected) return;
+    try {
+      await sendCommand(cmd);
+    } catch {
+      setPenState(prev);
+    }
   };
 
   const handleStop = () => {
@@ -357,94 +360,490 @@ export default function ControlPanel() {
         </Box>
       </Box>
 
-      <Grid container spacing={3}>
-        {/* Connection Section */}
+      <Grid container spacing={3} alignItems="stretch">
+        {/* Left column: Connection + Movement stacked */}
         <Grid item xs={12} md={6}>
-      <Paper sx={{ p: 3 }}>
-        <Typography variant="h6" gutterBottom>
-              Connection
-        </Typography>
-            <Stack spacing={2}>
-              <FormControl fullWidth>
-                <InputLabel>Serial Port</InputLabel>
-                <Select
-                  value={selectedPort}
-                  label="Serial Port"
-                  onChange={(e) => setSelectedPort(e.target.value)}
-                  disabled={connected || loading}
-                >
-                  {ports.map((port) => (
-                    <MenuItem key={port.device} value={port.device}>
-                      {port.device} - {port.description || "Unknown"}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              <Button
-                variant="outlined"
-                startIcon={<Refresh />}
-                onClick={loadPorts}
-                disabled={connected || loading}
-              >
-                Refresh Ports
-              </Button>
-              <FormControl fullWidth>
-                <InputLabel>Baud Rate</InputLabel>
-                <Select
-                  value={baudRate}
-                  label="Baud Rate"
-                  onChange={(e) => setBaudRate(e.target.value)}
-                  disabled={connected || loading}
-                >
-                  {baudRates.map((rate) => (
-                    <MenuItem key={rate} value={rate}>
-                      {rate}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-        <Stack direction="row" spacing={2}>
-                <Button
-                  variant="contained"
-                  color="success"
-                  onClick={handleConnect}
-                  disabled={connected || loading || !selectedPort}
-                  fullWidth
-                >
-                  Connect
-                </Button>
-                <Button
-                  variant="contained"
-                  color="error"
-                  onClick={handleDisconnect}
-                  disabled={!connected || loading}
-                  fullWidth
-                >
-                  Disconnect
-                </Button>
-              </Stack>
-              {connectionStatus && (
-                <Box>
-                  <Chip
-                    label={connected ? "Connected" : "Disconnected"}
-                    color={connected ? "success" : "default"}
-                    sx={{ mr: 1 }}
-                  />
-                  {connected && (
-                    <>
-                      <Chip label={`Port: ${connectionStatus.port}`} sx={{ mr: 1 }} />
-                      <Chip label={`${connectionStatus.baud_rate} baud`} />
-                    </>
-                  )}
+          <Stack spacing={3} sx={{ height: "100%" }}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                Connection
+              </Typography>
+              <Stack spacing={2}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                  <FormControl fullWidth sx={{ flex: 1 }}>
+                    <InputLabel>Serial Port</InputLabel>
+                    <Select
+                      value={selectedPort}
+                      label="Serial Port"
+                      onChange={(e) => setSelectedPort(e.target.value)}
+                      disabled={connected || loading}
+                    >
+                      {ports.map((port) => (
+                        <MenuItem key={port.device} value={port.device}>
+                          {port.device} - {port.description || "Unknown"}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                  <Button
+                    variant="outlined"
+                    startIcon={<Refresh />}
+                    onClick={loadPorts}
+                    disabled={connected || loading}
+                    sx={{ whiteSpace: "nowrap" }}
+                  >
+                    Refresh
+                  </Button>
                 </Box>
-              )}
-            </Stack>
-          </Paper>
+                <FormControl fullWidth>
+                  <InputLabel>Baud Rate</InputLabel>
+                  <Select
+                    value={baudRate}
+                    label="Baud Rate"
+                    onChange={(e) => setBaudRate(e.target.value)}
+                    disabled={connected || loading}
+                  >
+                    {baudRates.map((rate) => (
+                      <MenuItem key={rate} value={rate}>
+                        {rate}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <Stack direction="row" spacing={2}>
+                  <Button
+                    variant="contained"
+                    color="success"
+                    onClick={handleConnect}
+                    disabled={connected || loading || !selectedPort}
+                    fullWidth
+                  >
+                    Connect
+                  </Button>
+                  <Button
+                    variant="contained"
+                    color="error"
+                    onClick={handleDisconnect}
+                    disabled={!connected || loading}
+                    fullWidth
+                  >
+                    Disconnect
+                  </Button>
+                </Stack>
+                {connectionStatus && (
+                  <Box>
+                    <Chip
+                      label={connected ? "Connected" : "Disconnected"}
+                      color={connected ? "success" : "default"}
+                      sx={{ mr: 1 }}
+                    />
+                    {connected && (
+                      <>
+                        <Chip label={`Port: ${connectionStatus.port}`} sx={{ mr: 1 }} />
+                        <Chip label={`${connectionStatus.baud_rate} baud`} />
+                      </>
+                    )}
+                  </Box>
+                )}
+              </Stack>
+            </Paper>
+
+            {/* Movement Controls - Cross Layout */}
+            <Paper sx={{ p: 3, display: "flex", flexDirection: "column", alignItems: "center", flex: 1 }}>
+              <Typography variant="h6" gutterBottom>
+                Movement Controls
+              </Typography>
+              <Box
+                sx={{
+                  position: "relative",
+                  width: "400px",
+                  height: "400px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  mt: 2,
+                }}
+              >
+                {/* Central Stop Button */}
+                <IconButton
+                  onClick={handleStop}
+                  disabled={!connected}
+                  sx={{
+                    position: "absolute",
+                    width: "48px",
+                    height: "48px",
+                    bgcolor: "error.main",
+                    color: "white",
+                    zIndex: 10,
+                    "&:hover": {
+                      bgcolor: "error.dark",
+                    },
+                    "&:disabled": {
+                      bgcolor: "grey.400",
+                    },
+                  }}
+                >
+                  <Stop />
+                </IconButton>
+
+                {/* Top (+Y) - 3 buttons vertical (stacked) */}
+                <Box
+                  sx={{
+                    position: "absolute",
+                    top: "10px",
+                    left: "50%",
+                    transform: "translateX(-50%)",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 2.5,
+                    alignItems: "center",
+                  }}
+                >
+                  <Button
+                    onClick={() => handleMove(0, 100)}
+                    disabled={!connected}
+                    sx={{
+                      minWidth: "44px",
+                      height: "44px",
+                      bgcolor: "primary.dark",
+                      color: "white",
+                      "&:hover": { bgcolor: "primary.dark", opacity: 0.9 },
+                      "&:disabled": { bgcolor: "grey.300" },
+                    }}
+                  >
+                    <ArrowUpward sx={{ fontSize: "1.1rem" }} />
+                    <Typography variant="caption" sx={{ ml: 0.4, fontSize: "0.6rem" }}>
+                      100
+                    </Typography>
+                  </Button>
+                  <Button
+                    onClick={() => handleMove(0, 10)}
+                    disabled={!connected}
+                    sx={{
+                      minWidth: "36px",
+                      height: "36px",
+                      bgcolor: "primary.main",
+                      color: "white",
+                      "&:hover": { bgcolor: "primary.dark" },
+                      "&:disabled": { bgcolor: "grey.300" },
+                    }}
+                  >
+                    <ArrowUpward sx={{ fontSize: "0.95rem" }} />
+                    <Typography variant="caption" sx={{ ml: 0.3, fontSize: "0.55rem" }}>
+                      10
+                    </Typography>
+                  </Button>
+                  <Button
+                    onClick={() => handleMove(0, 1)}
+                    disabled={!connected}
+                    sx={{
+                      minWidth: "28px",
+                      height: "28px",
+                      bgcolor: "primary.light",
+                      color: "white",
+                      "&:hover": { bgcolor: "primary.main" },
+                      "&:disabled": { bgcolor: "grey.300" },
+                    }}
+                  >
+                    <ArrowUpward sx={{ fontSize: "0.8rem" }} />
+                    <Typography variant="caption" sx={{ ml: 0.2, fontSize: "0.5rem" }}>
+                      1
+                    </Typography>
+                  </Button>
+                </Box>
+
+                {/* Bottom (-Y) - 3 buttons vertical (stacked) */}
+                <Box
+                  sx={{
+                    position: "absolute",
+                    bottom: "10px",
+                    left: "50%",
+                    transform: "translateX(-50%)",
+                    display: "flex",
+                    flexDirection: "column-reverse",
+                    gap: 2.5,
+                    alignItems: "center",
+                  }}
+                >
+                  <Button
+                    onClick={() => handleMove(0, -100)}
+                    disabled={!connected}
+                    sx={{
+                      minWidth: "44px",
+                      height: "44px",
+                      bgcolor: "primary.dark",
+                      color: "white",
+                      "&:hover": { bgcolor: "primary.dark", opacity: 0.9 },
+                      "&:disabled": { bgcolor: "grey.300" },
+                    }}
+                  >
+                    <ArrowDownward sx={{ fontSize: "1.1rem" }} />
+                    <Typography variant="caption" sx={{ ml: 0.4, fontSize: "0.6rem" }}>
+                      100
+                    </Typography>
+                  </Button>
+                  <Button
+                    onClick={() => handleMove(0, -10)}
+                    disabled={!connected}
+                    sx={{
+                      minWidth: "36px",
+                      height: "36px",
+                      bgcolor: "primary.main",
+                      color: "white",
+                      "&:hover": { bgcolor: "primary.dark" },
+                      "&:disabled": { bgcolor: "grey.300" },
+                    }}
+                  >
+                    <ArrowDownward sx={{ fontSize: "0.95rem" }} />
+                    <Typography variant="caption" sx={{ ml: 0.3, fontSize: "0.55rem" }}>
+                      10
+                    </Typography>
+                  </Button>
+                  <Button
+                    onClick={() => handleMove(0, -1)}
+                    disabled={!connected}
+                    sx={{
+                      minWidth: "28px",
+                      height: "28px",
+                      bgcolor: "primary.light",
+                      color: "white",
+                      "&:hover": { bgcolor: "primary.main" },
+                      "&:disabled": { bgcolor: "grey.300" },
+                    }}
+                  >
+                    <ArrowDownward sx={{ fontSize: "0.8rem" }} />
+                    <Typography variant="caption" sx={{ ml: 0.2, fontSize: "0.5rem" }}>
+                      1
+                    </Typography>
+                  </Button>
+                </Box>
+
+                {/* Left (-X) - 3 buttons horizontal */}
+                <Box
+                  sx={{
+                    position: "absolute",
+                    left: "10px",
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    display: "flex",
+                    gap: 2.5,
+                    alignItems: "center",
+                  }}
+                >
+                  <Button
+                    onClick={() => handleMove(-100, 0)}
+                    disabled={!connected}
+                    sx={{
+                      minWidth: "44px",
+                      height: "44px",
+                      bgcolor: "secondary.dark",
+                      color: "white",
+                      "&:hover": { bgcolor: "secondary.dark", opacity: 0.9 },
+                      "&:disabled": { bgcolor: "grey.300" },
+                    }}
+                  >
+                    <ArrowBack sx={{ fontSize: "1.1rem" }} />
+                    <Typography variant="caption" sx={{ ml: 0.4, fontSize: "0.6rem" }}>
+                      100
+                    </Typography>
+                  </Button>
+                  <Button
+                    onClick={() => handleMove(-10, 0)}
+                    disabled={!connected}
+                    sx={{
+                      minWidth: "36px",
+                      height: "36px",
+                      bgcolor: "secondary.main",
+                      color: "white",
+                      "&:hover": { bgcolor: "secondary.dark" },
+                      "&:disabled": { bgcolor: "grey.300" },
+                    }}
+                  >
+                    <ArrowBack sx={{ fontSize: "0.95rem" }} />
+                    <Typography variant="caption" sx={{ ml: 0.3, fontSize: "0.55rem" }}>
+                      10
+                    </Typography>
+                  </Button>
+                  <Button
+                    onClick={() => handleMove(-1, 0)}
+                    disabled={!connected}
+                    sx={{
+                      minWidth: "28px",
+                      height: "28px",
+                      bgcolor: "secondary.light",
+                      color: "white",
+                      "&:hover": { bgcolor: "secondary.main" },
+                      "&:disabled": { bgcolor: "grey.300" },
+                    }}
+                  >
+                    <ArrowBack sx={{ fontSize: "0.8rem" }} />
+                    <Typography variant="caption" sx={{ ml: 0.2, fontSize: "0.5rem" }}>
+                      1
+                    </Typography>
+                  </Button>
+                </Box>
+
+                {/* Right (+X) - 3 buttons horizontal */}
+                <Box
+                  sx={{
+                    position: "absolute",
+                    right: "10px",
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    display: "flex",
+                    gap: 2.5,
+                    alignItems: "center",
+                  }}
+                >
+                  <Button
+                    onClick={() => handleMove(1, 0)}
+                    disabled={!connected}
+                    sx={{
+                      minWidth: "28px",
+                      height: "28px",
+                      bgcolor: "secondary.light",
+                      color: "white",
+                      "&:hover": { bgcolor: "secondary.main" },
+                      "&:disabled": { bgcolor: "grey.300" },
+                    }}
+                  >
+                    <ArrowForward sx={{ fontSize: "0.8rem" }} />
+                    <Typography variant="caption" sx={{ ml: 0.2, fontSize: "0.5rem" }}>
+                      1
+                    </Typography>
+                  </Button>
+                  <Button
+                    onClick={() => handleMove(10, 0)}
+                    disabled={!connected}
+                    sx={{
+                      minWidth: "36px",
+                      height: "36px",
+                      bgcolor: "secondary.main",
+                      color: "white",
+                      "&:hover": { bgcolor: "secondary.dark" },
+                      "&:disabled": { bgcolor: "grey.300" },
+                    }}
+                  >
+                    <ArrowForward sx={{ fontSize: "0.95rem" }} />
+                    <Typography variant="caption" sx={{ ml: 0.3, fontSize: "0.55rem" }}>
+                      10
+                    </Typography>
+                  </Button>
+                  <Button
+                    onClick={() => handleMove(100, 0)}
+                    disabled={!connected}
+                    sx={{
+                      minWidth: "44px",
+                      height: "44px",
+                      bgcolor: "secondary.dark",
+                      color: "white",
+                      "&:hover": { bgcolor: "secondary.dark", opacity: 0.9 },
+                      "&:disabled": { bgcolor: "grey.300" },
+                    }}
+                  >
+                    <ArrowForward sx={{ fontSize: "1.1rem" }} />
+                    <Typography variant="caption" sx={{ ml: 0.4, fontSize: "0.6rem" }}>
+                      100
+                    </Typography>
+                  </Button>
+                </Box>
+              </Box>
+              <Stack spacing={2} sx={{ width: "100%" }}>
+                <Divider sx={{ mt: 4, mb: 1 }} />
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  Controls
+                </Typography>
+                <Box
+                  sx={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 1,
+                    alignItems: "center",
+                  }}
+                >
+                  <Chip
+                    label="Auto Home"
+                    color="primary"
+                    variant="filled"
+                    icon={<Home />}
+                    clickable={connected}
+                    onClick={() => {
+                      if (!connected) return;
+                      handleHome();
+                    }}
+                    sx={{ minWidth: 110, textTransform: "none", fontWeight: "bold" }}
+                  />
+                  <Chip
+                    label="Set Home"
+                    color="primary"
+                    variant="outlined"
+                    clickable={connected}
+                    onClick={() => {
+                      if (!connected) return;
+                      sendCommand("G92 X0 Y0 Z0");
+                    }}
+                    sx={{ minWidth: 110, textTransform: "none", fontWeight: "bold" }}
+                  />
+
+                  <Tooltip
+                    title={
+                      motionMode === "relative"
+                        ? "Relative mode (G91): moves are relative to current position"
+                        : "Absolute mode (G90): moves are to absolute coordinates"
+                    }
+                    arrow
+                  >
+                    <span>
+                      <Chip
+                        label={(motionMode || "relative") === "relative" ? "Relative" : "Absolute"}
+                        color={motionMode === "relative" ? "primary" : "default"}
+                        variant={motionMode === "relative" ? "filled" : "outlined"}
+                        clickable={connected}
+                        onClick={async () => {
+                          if (!connected) return;
+                          const current = motionMode || "relative";
+                          const newMode = current === "relative" ? "absolute" : "relative";
+                          const gcode = newMode === "relative" ? "G91" : "G90";
+                          setMotionMode(newMode); // optimistic
+                          try {
+                            await sendCommand(gcode);
+                          } catch {
+                            setMotionMode(current);
+                          }
+                        }}
+                        sx={{ minWidth: 110, textTransform: "none", fontWeight: "bold" }}
+                      />
+                    </span>
+                  </Tooltip>
+
+                  <Tooltip
+                    title={
+                      penState === "up"
+                        ? "Pen Up: M280 P0 S90 (click to send pen down)"
+                        : "Pen Down: M280 P0 S0 (click to send pen up)"
+                    }
+                    arrow
+                  >
+                    <span>
+                      <Chip
+                        label={penState === "up" ? "Pen Up" : "Pen Down"}
+                        color={penState === "up" ? "success" : "warning"}
+                        variant={penState === "up" ? "filled" : "outlined"}
+                        onClick={connected ? handleTogglePen : undefined}
+                        clickable={connected}
+                        sx={{ minWidth: 110, textTransform: "none", fontWeight: "bold" }}
+                      />
+                    </span>
+                  </Tooltip>
+                </Box>
+              </Stack>
+            </Paper>
+          </Stack>
         </Grid>
 
-        {/* Command/Response Log */}
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 3, display: "flex", flexDirection: "column", height: "100%" }}>
+        {/* Command/Response Log spanning full height */}
+        <Grid item xs={12} md={6} sx={{ display: "flex" }}>
+          <Paper sx={{ p: 3, display: "flex", flexDirection: "column", flex: 1 }}>
             <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
               <Typography variant="h6">Command/Response Log</Typography>
               <Button
@@ -459,13 +858,14 @@ export default function ControlPanel() {
             <Box
               sx={{
                 flex: 1,
+                minHeight: "70vh",
+                maxHeight: "80vh",
                 border: "1px solid",
                 borderColor: "divider",
                 borderRadius: 1,
                 p: 1,
                 bgcolor: "background.default",
                 overflow: "auto",
-                maxHeight: "400px",
                 fontFamily: "monospace",
                 fontSize: "0.875rem",
               }}
@@ -802,7 +1202,7 @@ export default function ControlPanel() {
                   <Typography variant="caption" sx={{ ml: 0.2, fontSize: "0.5rem" }}>
                     1
                   </Typography>
-                </Button>
+          </Button>
                 <Button
                   onClick={() => handleMove(10, 0)}
                   disabled={!connected}
@@ -819,7 +1219,7 @@ export default function ControlPanel() {
                   <Typography variant="caption" sx={{ ml: 0.3, fontSize: "0.55rem" }}>
                     10
                   </Typography>
-                </Button>
+          </Button>
                 <Button
                   onClick={() => handleMove(100, 0)}
                   disabled={!connected}
@@ -836,81 +1236,100 @@ export default function ControlPanel() {
                   <Typography variant="caption" sx={{ ml: 0.4, fontSize: "0.6rem" }}>
                     100
                   </Typography>
-                </Button>
+          </Button>
               </Box>
-            </Box>
-          </Paper>
-        </Grid>
+              </Box>
+              <Stack spacing={2} sx={{ width: "100%" }}>
+                <Divider sx={{ mt: 4, mb: 1 }} />
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  Controls
+                </Typography>
+                <Box
+                  sx={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 1,
+                    alignItems: "center",
+                  }}
+                >
+                  <Chip
+                    label="Auto Home"
+                    color="primary"
+                    variant="filled"
+                    icon={<Home />}
+                    clickable={connected}
+                    onClick={() => {
+                      if (!connected) return;
+                      handleHome();
+                    }}
+                    sx={{ minWidth: 110, textTransform: "none", fontWeight: "bold" }}
+                  />
+                  <Chip
+                    label="Set Home"
+                    color="primary"
+                    variant="outlined"
+                    clickable={connected}
+                    onClick={() => {
+                      if (!connected) return;
+                      sendCommand("G92 X0 Y0 Z0");
+                    }}
+                    sx={{ minWidth: 110, textTransform: "none", fontWeight: "bold" }}
+                  />
 
-        {/* Home and Pen Controls */}
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              System Controls
-            </Typography>
-            <Stack spacing={2}>
-              <Button
-                variant="contained"
-                color="primary"
-                startIcon={<Home />}
-                onClick={handleHome}
-                disabled={!connected}
-                fullWidth
-                size="large"
-              >
-                Home (G28)
-              </Button>
-              <Divider />
-              <Typography variant="subtitle2">Motion Mode</Typography>
-              <Button
-                variant={motionMode === "relative" ? "contained" : "outlined"}
-                color="primary"
-                onClick={async () => {
-                  const current = motionMode || "relative";
-                  const newMode = current === "relative" ? "absolute" : "relative";
-                  const gcode = newMode === "relative" ? "G91" : "G90";
-                  // Optimistic UI update
-                  setMotionMode(newMode);
-                  if (!connected) return;
-                  try {
-                    await sendCommand(gcode);
-                  } catch (err) {
-                    // Revert on error
-                    setMotionMode(current);
-                  }
-                }}
-                disabled={!connected}
-                fullWidth
-              >
-                {(motionMode || "relative") === "relative" ? "Relative (G91)" : "Absolute (G90)"}
-          </Button>
-              <Divider />
-              <Typography variant="subtitle2">Pen Control</Typography>
-              <Stack direction="row" spacing={2}>
-                <Button
-                  variant="contained"
-                  color="secondary"
-                  startIcon={<VerticalAlignTop />}
-                  onClick={handlePenUp}
-                  disabled={!connected}
-                  fullWidth
-                >
-                  Pen Up
-          </Button>
-                <Button
-                  variant="contained"
-                  color="secondary"
-                  startIcon={<VerticalAlignBottom />}
-                  onClick={handlePenDown}
-                  disabled={!connected}
-                  fullWidth
-                >
-                  Pen Down
-          </Button>
-              </Stack>
+                  <Tooltip
+                    title={
+                      motionMode === "relative"
+                        ? "Relative mode (G91): moves are relative to current position"
+                        : "Absolute mode (G90): moves are to absolute coordinates"
+                    }
+                    arrow
+                  >
+                    <span>
+                      <Chip
+                        label={(motionMode || "relative") === "relative" ? "Relative" : "Absolute"}
+                        color={motionMode === "relative" ? "primary" : "default"}
+                        variant={motionMode === "relative" ? "filled" : "outlined"}
+                        clickable={connected}
+                        onClick={async () => {
+                          if (!connected) return;
+                          const current = motionMode || "relative";
+                          const newMode = current === "relative" ? "absolute" : "relative";
+                          const gcode = newMode === "relative" ? "G91" : "G90";
+                          setMotionMode(newMode); // optimistic
+                          try {
+                            await sendCommand(gcode);
+                          } catch {
+                            setMotionMode(current);
+                          }
+                        }}
+                        sx={{ minWidth: 110, textTransform: "none", fontWeight: "bold" }}
+                      />
+                    </span>
+                  </Tooltip>
+
+                  <Tooltip
+                    title={
+                      penState === "up"
+                        ? "Pen Up: M280 P0 S90 (click to send pen down)"
+                        : "Pen Down: M280 P0 S0 (click to send pen up)"
+                    }
+                    arrow
+                  >
+                    <span>
+                      <Chip
+                        label={penState === "up" ? "Pen Up" : "Pen Down"}
+                        color={penState === "up" ? "success" : "warning"}
+                        variant={penState === "up" ? "filled" : "outlined"}
+                        onClick={connected ? handleTogglePen : undefined}
+                        clickable={connected}
+                        sx={{ minWidth: 110, textTransform: "none", fontWeight: "bold" }}
+                      />
+                    </span>
+                  </Tooltip>
+                </Box>
         </Stack>
       </Paper>
-        </Grid>
+          </Grid>
       </Grid>
     </Box>
   );

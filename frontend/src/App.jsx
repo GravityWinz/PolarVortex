@@ -6,6 +6,7 @@ import GraphPreparation from "./components/GraphPreparation";
 import MenuBar from "./components/MenuBar";
 import PaperConfiguration from "./components/PaperConfiguration";
 import PlotterConfiguration from "./components/PlotterConfiguration";
+import GcodeSettings from "./components/GcodeSettings";
 import ProjectList from "./components/ProjectList";
 import StatusPanel from "./components/StatusPanel";
 
@@ -157,10 +158,12 @@ function SettingsView() {
         <Tabs value={activeTab} onChange={handleTabChange} sx={{ mb: 3 }}>
           <Tab label="Paper Configuration" />
           <Tab label="Plotter Configuration" />
+          <Tab label="G-code" />
         </Tabs>
 
         {activeTab === 0 && <PaperConfiguration />}
         {activeTab === 1 && <PlotterConfiguration />}
+        {activeTab === 2 && <GcodeSettings />}
       </Paper>
     </Box>
   );

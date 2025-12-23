@@ -202,6 +202,10 @@ class Config:
                 "default_threshold": 128,
                 "default_dither": True,
                 "default_invert": False
+            },
+            "gcode_sequences": {
+                "on_connect": [],
+                "before_print": []
             }
         }
     
