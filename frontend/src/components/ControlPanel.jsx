@@ -20,6 +20,7 @@ import {
   InputAdornment,
   InputLabel,
   MenuItem,
+  Pagination,
   Paper,
   Select,
   Stack,
@@ -36,6 +37,9 @@ import {
   getAvailablePorts,
   getCommandLog,
   getConnectionStatus,
+  stopPlotter,
+  togglePausePlotter,
+  runProjectGcode,
   sendGcodeCommand,
 } from "../services/apiService";
 
@@ -50,7 +54,7 @@ const getWebSocketUrl = () => {
 };
 const WS_URL = getWebSocketUrl();
 
-export default function ControlPanel() {
+export default function ControlPanel({ currentProject }) {
   const [ports, setPorts] = useState([]);
   const [selectedPort, setSelectedPort] = useState("");
   const [baudRate, setBaudRate] = useState(9600);
@@ -61,7 +65,13 @@ export default function ControlPanel() {
   const [commandInput, setCommandInput] = useState("");
   const [motionMode, setMotionMode] = useState("relative"); // "absolute" or "relative"
   const [penState, setPenState] = useState("up"); // "up" or "down"
-  const logEndRef = useRef(null);
+  const [logPage, setLogPage] = useState(1);
+  const LOG_PAGE_SIZE = 25;
+  const [expandedEntries, setExpandedEntries] = useState(new Set());
+  const [selectedProjectGcode, setSelectedProjectGcode] = useState("");
+  const [gcodeRunning, setGcodeRunning] = useState(false);
+  const [gcodePaused, setGcodePaused] = useState(false);
+  const logContainerRef = useRef(null);
   const wsRef = useRef(null);
   const processedMessagesRef = useRef(new Set());
 
@@ -73,6 +83,20 @@ export default function ControlPanel() {
     checkConnectionStatus();
     loadCommandLog();
   }, []);
+
+  useEffect(() => {
+    if (currentProject?.gcode_files?.length) {
+      setSelectedProjectGcode(currentProject.gcode_files[0]);
+    } else {
+      setSelectedProjectGcode("");
+    }
+  }, [currentProject]);
+
+  // Keep pagination on the newest page when new log entries arrive
+  useEffect(() => {
+    const totalPages = Math.max(1, Math.ceil(commandLog.length / LOG_PAGE_SIZE));
+    setLogPage(totalPages);
+  }, [commandLog]);
 
   // WebSocket connection for real-time updates
   useEffect(() => {
@@ -205,17 +229,26 @@ export default function ControlPanel() {
           processedMessagesRef.current.add(messageKey);
         });
         setCommandLog(result.log);
-        scrollToBottom();
+        scrollToBottom(true);
       }
     } catch (err) {
       console.error("Error loading command log:", err);
     }
   };
 
-  const scrollToBottom = () => {
+  const isNearBottom = () => {
+    const el = logContainerRef.current;
+    if (!el) return false;
+    const distance = el.scrollHeight - el.clientHeight - el.scrollTop;
+    return distance < 80;
+  };
+
+  const scrollToBottom = (force = false) => {
     setTimeout(() => {
-      if (logEndRef.current) {
-        logEndRef.current.scrollIntoView({ behavior: "smooth" });
+      const el = logContainerRef.current;
+      if (!el) return;
+      if (force || isNearBottom()) {
+        el.scrollTop = el.scrollHeight;
       }
     }, 100);
   };
@@ -235,6 +268,42 @@ export default function ControlPanel() {
           port: selectedPort,
           baud_rate: baudRate,
         });
+
+        // Surface any on-connect G-code results returned by the backend
+        const startupResults = result.startup_gcode?.results || [];
+        if (startupResults.length) {
+          const entries = startupResults.map((item) => ({
+            timestamp: item.timestamp || new Date().toISOString(),
+            command: item.command || "(on_connect)",
+            response: item.response || (item.error ? `error: ${item.error}` : ""),
+          }));
+
+          setCommandLog((prev) => {
+            const combined = [...prev];
+            entries.forEach((entry) => {
+              const key = `${entry.timestamp}-${entry.command}-${entry.response}`;
+              const exists = combined.some(
+                (e) =>
+                  e.command === entry.command &&
+                  e.timestamp === entry.timestamp &&
+                  e.response === entry.response
+              );
+              if (!exists) {
+                combined.push(entry);
+              }
+              processedMessagesRef.current.add(key);
+            });
+
+            // Trim processed keys to avoid unbounded growth
+            if (processedMessagesRef.current.size > 1000) {
+              const keysArray = Array.from(processedMessagesRef.current);
+              processedMessagesRef.current = new Set(keysArray.slice(-1000));
+            }
+
+            return combined;
+          });
+        }
+
         await loadCommandLog();
       } else {
         alert(`Connection failed: ${result.error || "Unknown error"}`);
@@ -278,8 +347,34 @@ export default function ControlPanel() {
       return;
     }
     try {
-      await sendGcodeCommand(gcode);
-      // Log will be updated via WebSocket
+      const result = await sendGcodeCommand(gcode);
+
+      // Immediately reflect the response locally in case WebSocket delivery lags or fails
+      if (result?.timestamp) {
+        const entry = {
+          timestamp: result.timestamp,
+          command: result.command || gcode,
+          response: result.response || "",
+        };
+        const messageKey = `${entry.timestamp}-${entry.command}-${entry.response}`;
+
+        setCommandLog((prev) => {
+          const exists = prev.some(
+            (e) =>
+              e.command === entry.command &&
+              e.timestamp === entry.timestamp &&
+              e.response === entry.response
+          );
+          if (exists) return prev;
+          return [...prev, entry];
+        });
+
+        processedMessagesRef.current.add(messageKey);
+        if (processedMessagesRef.current.size > 1000) {
+          const keysArray = Array.from(processedMessagesRef.current);
+          processedMessagesRef.current = new Set(keysArray.slice(-1000));
+        }
+      }
     } catch (err) {
       alert(`Command error: ${err.message}`);
     }
@@ -292,6 +387,38 @@ export default function ControlPanel() {
     const command = commandInput.trim();
     setCommandInput("");
     await sendCommand(command);
+  };
+
+  const handleRunProjectGcode = async () => {
+    if (!currentProject?.id) {
+      alert("Select a current project with G-code files first");
+      return;
+    }
+    if (!selectedProjectGcode) {
+      alert("Select a G-code file to send");
+      return;
+    }
+    if (!connected) {
+      alert("Please connect to plotter first");
+      return;
+    }
+    try {
+      setGcodeRunning(true);
+      await runProjectGcode(currentProject.id, selectedProjectGcode);
+    } catch (err) {
+      alert(`G-code run error: ${err.message}`);
+    } finally {
+      setGcodeRunning(false);
+    }
+  };
+
+  const handleTogglePause = async () => {
+    try {
+      const res = await togglePausePlotter();
+      setGcodePaused(res.paused);
+    } catch (err) {
+      alert(`Pause error: ${err.message}`);
+    }
   };
 
   const handleCommandInputKeyPress = (e) => {
@@ -320,7 +447,8 @@ export default function ControlPanel() {
 
   const handleTogglePen = async () => {
     const target = penState === "up" ? "down" : "up";
-    const cmd = target === "up" ? "M280 P0 S90" : "M280 P0 S0";
+    // Pen up/down commands: up = S33, down = S160
+    const cmd = target === "up" ? "M280 P0 S33" : "M280 P0 S160";
     const prev = penState;
     setPenState(target);
     if (!connected) return;
@@ -332,7 +460,9 @@ export default function ControlPanel() {
   };
 
   const handleStop = () => {
-    sendCommand("M112"); // Emergency stop, or use M0 for program stop
+    stopPlotter().catch((err) => {
+      alert(`Stop error: ${err.message}`);
+    });
   };
 
   const handleHomeAxis = (axis) => {
@@ -340,6 +470,7 @@ export default function ControlPanel() {
   };
 
   const stepSizes = [1, 10, 100]; // 1mm, 10mm, 100mm
+  const projectGcodeFiles = currentProject?.gcode_files || [];
 
   return (
     <Box sx={{ p: 3 }}>
@@ -446,6 +577,82 @@ export default function ControlPanel() {
                   </Box>
                 )}
               </Stack>
+            </Paper>
+
+            {/* Project G-code Sender */}
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                Project G-code
+              </Typography>
+              {!currentProject ? (
+                <Typography variant="body2" color="text.secondary">
+                  Select a current project on the Projects tab to send its G-code.
+                </Typography>
+              ) : projectGcodeFiles.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  No G-code files found in the current project.
+                </Typography>
+              ) : (
+                <Stack spacing={2}>
+                  <Typography variant="body2" color="text.secondary">
+                    Current project: {currentProject.name}
+                  </Typography>
+                  <FormControl fullWidth>
+                    <InputLabel>G-code File</InputLabel>
+                    <Select
+                      value={selectedProjectGcode}
+                      label="G-code File"
+                      onChange={(e) => setSelectedProjectGcode(e.target.value)}
+                      disabled={gcodeRunning}
+                    >
+                      {projectGcodeFiles.map((file) => {
+                        const friendly = file.split("/").pop();
+                        return (
+                          <MenuItem key={file} value={file}>
+                            {friendly}
+                          </MenuItem>
+                        );
+                      })}
+                    </Select>
+                  </FormControl>
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
+                    <Chip
+                      icon={<Send />}
+                      label={gcodeRunning ? "Sending..." : "Send to Plotter"}
+                      color="primary"
+                      variant="filled"
+                      clickable
+                      disabled={!connected || gcodeRunning || !selectedProjectGcode}
+                      onClick={handleRunProjectGcode}
+                      sx={{ fontWeight: "bold", textTransform: "none" }}
+                    />
+                    <Chip
+                      icon={<Stop />}
+                      label="Stop"
+                      color="error"
+                      variant="outlined"
+                      clickable
+                      disabled={!connected}
+                      onClick={() => stopPlotter().catch((err) => alert(`Stop error: ${err.message}`))}
+                      sx={{ fontWeight: "bold", textTransform: "none" }}
+                    />
+                    <Chip
+                      label={gcodePaused ? "Resume" : "Pause"}
+                      color={gcodePaused ? "success" : "warning"}
+                      variant="filled"
+                      clickable
+                      disabled={!connected}
+                      onClick={handleTogglePause}
+                      sx={{ fontWeight: "bold", textTransform: "none" }}
+                    />
+                    {!connected && (
+                      <Typography variant="caption" color="text.secondary">
+                        Connect to the plotter to enable sending.
+                      </Typography>
+                    )}
+                  </Box>
+                </Stack>
+              )}
             </Paper>
 
             {/* Movement Controls - Cross Layout */}
@@ -806,8 +1013,8 @@ export default function ControlPanel() {
                   <Tooltip
                     title={
                       penState === "up"
-                        ? "Pen Up: M280 P0 S90 (click to send pen down)"
-                        : "Pen Down: M280 P0 S0 (click to send pen up)"
+                        ? "Pen Up: M280 P0 S33 (click to send pen down)"
+                        : "Pen Down: M280 P0 S160 (click to send pen up)"
                     }
                     arrow
                   >
@@ -833,14 +1040,25 @@ export default function ControlPanel() {
           <Paper sx={{ p: 3, display: "flex", flexDirection: "column", flex: 1 }}>
             <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
               <Typography variant="h6">Command/Response Log</Typography>
-              <Button
-                size="small"
-                startIcon={<Clear />}
-                onClick={handleClearLog}
-                disabled={commandLog.length === 0}
-              >
-                Clear
-              </Button>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                {commandLog.length > LOG_PAGE_SIZE && (
+                  <Pagination
+                    size="small"
+                    color="primary"
+                    count={Math.max(1, Math.ceil(commandLog.length / LOG_PAGE_SIZE))}
+                    page={logPage}
+                    onChange={(_, value) => setLogPage(value)}
+                  />
+                )}
+                <Button
+                  size="small"
+                  startIcon={<Clear />}
+                  onClick={handleClearLog}
+                  disabled={commandLog.length === 0}
+                >
+                  Clear
+                </Button>
+              </Box>
             </Box>
             <Box
               sx={{
@@ -856,47 +1074,82 @@ export default function ControlPanel() {
                 fontFamily: "monospace",
                 fontSize: "0.875rem",
               }}
+              ref={logContainerRef}
             >
               {commandLog.length === 0 ? (
                 <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>
                   No commands sent yet. Connect and send commands to see activity here.
                 </Typography>
               ) : (
-                commandLog.map((entry, index) => {
-                  const timestamp = new Date(entry.timestamp).toLocaleTimeString();
-                  return (
-                    <Box key={index} sx={{ mb: 0.5 }}>
-                      <Typography 
-                        variant="body2" 
-                        sx={{ 
-                          fontFamily: "monospace",
-                          fontSize: "0.875rem",
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis"
-                        }}
-                      >
-                        <Box component="span" sx={{ color: "text.secondary", mr: 1 }}>
-                          [{timestamp}]
-                        </Box>
-                        <Box component="span" sx={{ color: "primary.main", fontWeight: "bold" }}>
-                          → {entry.command}
-                        </Box>
-                        <Box component="span" sx={{ color: "success.main", ml: 1 }}>
-                          ← {entry.response}
-                        </Box>
-                      </Typography>
-                    </Box>
-                  );
-                })
+                (() => {
+                  const totalPages = Math.max(1, Math.ceil(commandLog.length / LOG_PAGE_SIZE));
+                  const safePage = Math.min(logPage, totalPages);
+                  const start = (safePage - 1) * LOG_PAGE_SIZE;
+                  const end = start + LOG_PAGE_SIZE;
+                  const pageEntries = commandLog.slice(start, end);
+
+                  return pageEntries.map((entry, index) => {
+                    const timestamp = new Date(entry.timestamp).toLocaleTimeString();
+                    const entryKey = `${entry.timestamp}-${entry.command}-${start + index}`;
+                    const isExpanded = expandedEntries.has(entryKey);
+                    const responseText = entry.response || "";
+                    const truncated =
+                      responseText.length > 200
+                        ? `${responseText.slice(0, 200)}…`
+                        : responseText;
+                    const displayText = isExpanded ? responseText : truncated;
+
+                    return (
+                      <Box key={entryKey} sx={{ mb: 1 }}>
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            fontFamily: "monospace",
+                            fontSize: "0.875rem",
+                            whiteSpace: "pre-wrap",
+                            overflowWrap: "anywhere",
+                          }}
+                        >
+                          <Box component="span" sx={{ color: "text.secondary", mr: 1 }}>
+                            [{timestamp}]
+                          </Box>
+                          <Box component="span" sx={{ color: "primary.main", fontWeight: "bold" }}>
+                            → {entry.command}
+                          </Box>
+                          <Box component="span" sx={{ color: "success.main", ml: 1 }}>
+                            ← {displayText}
+                          </Box>
+                        </Typography>
+                        {responseText.length > 200 && (
+                          <Button
+                            size="small"
+                            variant="text"
+                            onClick={() => {
+                              setExpandedEntries((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(entryKey)) {
+                                  next.delete(entryKey);
+                                } else {
+                                  next.add(entryKey);
+                                }
+                                return next;
+                              });
+                            }}
+                          >
+                            {isExpanded ? "Show less" : "Show more"}
+                          </Button>
+                        )}
+                      </Box>
+                    );
+                  });
+                })()
               )}
-              <div ref={logEndRef} />
             </Box>
             <Box sx={{ mt: 2 }}>
               <TextField
                 fullWidth
                 size="small"
-                placeholder="Enter G-code command (e.g., G28, M280 P0 S90)"
+                placeholder="Enter G-code command (e.g., G28, M280 P0 S33)"
                 value={commandInput}
                 onChange={(e) => setCommandInput(e.target.value)}
                 onKeyPress={handleCommandInputKeyPress}

@@ -28,6 +28,7 @@ class Project(BaseModel):
     thumbnail_image: Optional[str] = Field(default=None, description="Local filename of the thumbnail image")
     source_image: Optional[str] = Field(default=None, description="Original filename of the uploaded image")
     vectorization: Optional[VectorizationInfo] = Field(default=None, description="Vectorization information")
+    gcode_files: list[str] = Field(default_factory=list, description="List of uploaded G-code filenames for this project")
 
 
 class ProjectResponse(BaseModel):
@@ -39,6 +40,7 @@ class ProjectResponse(BaseModel):
     thumbnail_image: Optional[str] = None
     source_image: Optional[str] = None
     vectorization: Optional[VectorizationInfo] = None
+    gcode_files: list[str] = []
     
     class Config:
         json_encoders = {

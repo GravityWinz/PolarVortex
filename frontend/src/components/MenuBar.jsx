@@ -29,7 +29,7 @@ import logoImage from "../assets/PolarVortexLogo_small.png";
  * MenuBar component for PolarVortex
  * Provides navigation between different sections of the application
  */
-export default function MenuBar({ currentView, onNavigate }) {
+export default function MenuBar({ currentView, onNavigate, currentProject }) {
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
@@ -84,7 +84,7 @@ export default function MenuBar({ currentView, onNavigate }) {
           </IconButton>
           
           {/* Logo and Title */}
-          <Box sx={{ display: "flex", alignItems: "center", flexGrow: 1 }}>
+          <Box sx={{ display: "flex", alignItems: "center", flexGrow: 1, minWidth: 0 }}>
             <img 
               src={logoImage} 
               alt="PolarVortex Logo" 
@@ -98,6 +98,15 @@ export default function MenuBar({ currentView, onNavigate }) {
             <Typography variant="h6" component="div">
               PolarVortex
             </Typography>
+            {currentProject?.name && (
+              <Typography 
+                variant="subtitle2" 
+                sx={{ ml: 2, color: "rgba(255,255,255,0.85)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: { xs: 140, sm: 240, md: 320 } }}
+                title={currentProject.name}
+              >
+                Current: {currentProject.name}
+              </Typography>
+            )}
           </Box>
           
           {/* Desktop Menu */}

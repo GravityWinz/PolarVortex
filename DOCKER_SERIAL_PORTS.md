@@ -92,7 +92,7 @@ Docker Desktop on Windows uses WSL2, which complicates COM port access. Here are
    ```powershell
    usbipd bind --busid <BUSID>
    # Then in WSL2:
-   usbipd attach --remote=localhost --busid <BUSID>
+   usbipd attach --wsl --busid <BUSID>
    ```
 
 4. **Find device in WSL2:**

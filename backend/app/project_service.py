@@ -65,7 +65,8 @@ class ProjectService:
                 id=project_id,
                 name=project_data.name,
                 created_at=now,
-                updated_at=now
+                updated_at=now,
+                gcode_files=[]
             )
             
             # Save project.yaml file
@@ -169,7 +170,11 @@ class ProjectService:
                 id=project_id,
                 name=project_data.name,
                 created_at=existing_project.created_at,
-                updated_at=datetime.now()
+                updated_at=datetime.now(),
+                thumbnail_image=existing_project.thumbnail_image,
+                source_image=existing_project.source_image,
+                vectorization=existing_project.vectorization,
+                gcode_files=existing_project.gcode_files or []
             )
             
             # Save updated project
@@ -197,7 +202,9 @@ class ProjectService:
                 created_at=existing_project.created_at,
                 updated_at=datetime.now(),
                 thumbnail_image=thumbnail_filename,
-                source_image=existing_project.source_image
+                source_image=existing_project.source_image,
+                vectorization=existing_project.vectorization,
+                gcode_files=existing_project.gcode_files or []
             )
             
             # Save updated project
@@ -225,7 +232,9 @@ class ProjectService:
                 created_at=existing_project.created_at,
                 updated_at=datetime.now(),
                 thumbnail_image=existing_project.thumbnail_image,
-                source_image=source_filename
+                source_image=source_filename,
+                vectorization=existing_project.vectorization,
+                gcode_files=existing_project.gcode_files or []
             )
             
             # Save updated project
@@ -266,7 +275,8 @@ class ProjectService:
                 updated_at=datetime.now(),
                 thumbnail_image=existing_project.thumbnail_image,
                 source_image=existing_project.source_image,
-                vectorization=vectorization_info
+                vectorization=vectorization_info,
+                gcode_files=existing_project.gcode_files or []
             )
             
             # Save updated project
@@ -298,6 +308,35 @@ class ProjectService:
         except Exception as e:
             logger.error(f"Failed to delete project {project_id}: {e}")
             return False
+
+    def add_project_gcode_file(self, project_id: str, filename: str) -> Optional[ProjectResponse]:
+        """Register an uploaded G-code file to the project"""
+        try:
+            existing_project = self.get_project(project_id)
+            if not existing_project:
+                return None
+
+            gcode_files = existing_project.gcode_files or []
+            if filename not in gcode_files:
+                gcode_files.append(filename)
+
+            updated_project = Project(
+                id=project_id,
+                name=existing_project.name,
+                created_at=existing_project.created_at,
+                updated_at=datetime.now(),
+                thumbnail_image=existing_project.thumbnail_image,
+                source_image=existing_project.source_image,
+                vectorization=existing_project.vectorization,
+                gcode_files=gcode_files
+            )
+
+            self._save_project_yaml(updated_project)
+            logger.info(f"Added G-code file to project {project_id}: {filename}")
+            return ProjectResponse(**updated_project.dict())
+        except Exception as e:
+            logger.error(f"Failed to add G-code file to project {project_id}: {e}")
+            return None
 
 
 # Create global instance

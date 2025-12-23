@@ -100,6 +100,63 @@ export async function uploadImageToProject(projectId, formData, onProgress) {
   }
 }
 
+export async function uploadGcodeToProject(projectId, formData) {
+  try {
+    const response = await fetch(`${BASE_URL}/projects/${projectId}/gcode_upload`, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || error.error || `Upload failed: ${response.statusText}`);
+    }
+
+    return await response.json();
+  } catch (err) {
+    console.error("Error uploading G-code:", err);
+    throw err;
+  }
+}
+
+export async function runProjectGcode(projectId, filename) {
+  try {
+    const response = await fetch(`${BASE_URL}/projects/${projectId}/gcode/run`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ filename }),
+    });
+
+    const data = await response.json();
+    if (!response.ok || data.success === false) {
+      throw new Error(data.detail || data.error || "Failed to run G-code file");
+    }
+
+    return data;
+  } catch (err) {
+    console.error("Error running project G-code:", err);
+    throw err;
+  }
+}
+
+export async function togglePausePlotter() {
+  try {
+    const response = await fetch(`${BASE_URL}/plotter/pause`, {
+      method: "POST",
+    });
+    const data = await response.json();
+    if (!response.ok || data.success === false) {
+      throw new Error(data.error || data.detail || "Failed to toggle pause");
+    }
+    return data;
+  } catch (err) {
+    console.error("Error toggling pause:", err);
+    throw err;
+  }
+}
+
 // Utility functions for image URLs
 export function getProjectThumbnailUrl(projectId) {
   return `${BASE_URL}/projects/${projectId}/thumbnail`;
@@ -461,6 +518,22 @@ export async function getConnectionStatus() {
   } catch (err) {
     console.error("Error fetching connection status:", err);
     return { error: err.message, connected: false };
+  }
+}
+
+export async function stopPlotter() {
+  try {
+    const response = await fetch(`${BASE_URL}/plotter/stop`, {
+      method: "POST",
+    });
+    const data = await response.json();
+    if (!response.ok || data.success === false) {
+      throw new Error(data.error || data.detail || "Failed to stop plotter");
+    }
+    return data;
+  } catch (err) {
+    console.error("Error stopping plotter:", err);
+    throw err;
   }
 }
 

@@ -9,6 +9,8 @@ import os
 import asyncio
 import logging
 from typing import List, Optional, Dict, Any
+import threading
+import uuid
 from datetime import datetime
 from pathlib import Path
 import re
@@ -44,6 +46,16 @@ current_status = {
 }
 # Command/response log (session-only)
 command_log: List[Dict] = []
+
+# G-code upload validation
+ALLOWED_GCODE_EXTENSIONS = {".gcode", ".nc", ".txt"}
+MAX_GCODE_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
+GCODE_SEND_DELAY_SECONDS = 0.1  # delay between lines when streaming files
+
+# Background G-code job tracking
+gcode_jobs: Dict[str, Dict[str, Any]] = {}
+gcode_cancel_all = threading.Event()
+gcode_pause_all = threading.Event()
 
 # Helper to send a sequence of G-code commands in order
 async def execute_gcode_sequence(commands: List[str], sequence_name: str = "") -> List[Dict[str, Any]]:
@@ -382,6 +394,9 @@ async def get_connection_status():
 class GcodeRequest(BaseModel):
     command: str
 
+class ProjectGcodeRunRequest(BaseModel):
+    filename: str
+
 async def read_arduino_response(timeout_seconds: float = 3.0) -> List[str]:
     """Read response from Arduino until 'ok' or timeout"""
     responses = []
@@ -417,9 +432,10 @@ async def send_gcode_command(request: GcodeRequest):
         if not gcode:
             return {"success": False, "error": "Empty command"}
         
-        # Send command
-        command_bytes = f"{gcode}\n".encode('utf-8')
+        # Send command with an explicit newline terminator so manual entries are processed
+        command_bytes = gcode.encode('utf-8')
         arduino.write(command_bytes)
+        arduino.write(b"\n")
         logger.info(f"Sent G-code: {gcode}")
         
         # Read response
@@ -649,6 +665,268 @@ async def upload_image_to_project(
     except Exception as e:
         logger.error(f"Upload error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# Upload a G-code file to a project
+@app.post("/projects/{project_id}/gcode_upload")
+async def upload_gcode_to_project(
+    project_id: str,
+    file: UploadFile,
+):
+    """
+    Upload a G-code file into a project directory and register it on the project.
+    """
+    try:
+        # Verify project exists
+        project = project_service.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="Empty file")
+
+        if len(content) > MAX_GCODE_UPLOAD_SIZE:
+            raise HTTPException(status_code=400, detail="File too large (max 10MB)")
+
+        ext = Path(file.filename or "").suffix.lower()
+        if ext not in ALLOWED_GCODE_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type. Allowed: {', '.join(sorted(ALLOWED_GCODE_EXTENSIONS))}")
+
+        # Sanitize filename and ensure deterministic storage path
+        base_name = image_helper.sanitize_filename(file.filename or "upload.gcode")
+        safe_filename = f"{base_name}{ext}"
+
+        project_dir = image_helper.get_project_directory(project_id)
+        gcode_dir = project_dir / "gcode"
+        gcode_dir.mkdir(parents=True, exist_ok=True)
+
+        save_path = gcode_dir / safe_filename
+        with open(save_path, "wb") as f:
+            f.write(content)
+
+        # Store relative path inside project for portability
+        stored_name = str(Path("gcode") / safe_filename)
+        updated_project = project_service.add_project_gcode_file(project_id, stored_name)
+        if not updated_project:
+            raise HTTPException(status_code=500, detail="Failed to register G-code on project")
+
+        return {
+            "success": True,
+            "project_id": project_id,
+            "filename": safe_filename,
+            "relative_path": stored_name,
+            "size": len(content),
+            "gcode_files": updated_project.gcode_files,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"G-code upload error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/projects/{project_id}/gcode/run")
+async def run_project_gcode(project_id: str, request: ProjectGcodeRunRequest):
+    """
+    Stream a stored project G-code file to the plotter in a background thread.
+    """
+    try:
+        if not arduino or not arduino.is_open:
+            raise HTTPException(status_code=400, detail="Plotter not connected")
+
+        project = project_service.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        if not project.gcode_files or request.filename not in project.gcode_files:
+            raise HTTPException(status_code=404, detail="G-code file not found for this project")
+
+        project_dir = project_service._get_project_directory(project_id).resolve()
+        file_path = (project_dir / request.filename).resolve()
+
+        # Prevent path traversal outside project directory
+        if project_dir not in file_path.parents and project_dir != file_path:
+            raise HTTPException(status_code=400, detail="Invalid file path")
+
+        if not file_path.exists() or not file_path.is_file():
+            raise HTTPException(status_code=404, detail="G-code file missing on disk")
+
+        commands: List[str] = []
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                stripped = line.strip()
+                if not stripped or stripped.startswith(";"):
+                    continue
+                if ";" in stripped:
+                    stripped = stripped.split(";", 1)[0].strip()
+                if stripped:
+                    commands.append(stripped)
+
+        job_id = str(uuid.uuid4())
+        # Clear any global cancel flag before starting a new job
+        gcode_cancel_all.clear()
+        gcode_pause_all.clear()
+
+        gcode_jobs[job_id] = {
+            "status": "queued",
+            "project_id": project_id,
+            "filename": request.filename,
+            "commands_total": len(commands),
+            "started_at": None,
+            "finished_at": None,
+            "error": None,
+            "cancel_requested": False,
+            "paused": False,
+        }
+
+        if commands:
+            thread = threading.Thread(
+                target=_run_gcode_commands_thread,
+                args=(job_id, commands, request.filename),
+                daemon=True,
+            )
+            thread.start()
+        else:
+            gcode_jobs[job_id]["status"] = "completed"
+            gcode_jobs[job_id]["finished_at"] = datetime.now().isoformat()
+
+        return {
+            "success": True,
+            "job_id": job_id,
+            "project_id": project_id,
+            "filename": request.filename,
+            "queued": len(commands),
+            "status": gcode_jobs[job_id]["status"],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Run project G-code error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _run_gcode_commands_thread(job_id: str, commands: List[str], filename: str):
+    """Background thread runner to stream G-code commands."""
+    async def runner():
+        try:
+            gcode_jobs[job_id]["status"] = "running"
+            gcode_jobs[job_id]["started_at"] = datetime.now().isoformat()
+            results: List[Dict[str, Any]] = []
+
+            for cmd in commands:
+                if gcode_cancel_all.is_set() or gcode_jobs[job_id].get("cancel_requested"):
+                    gcode_jobs[job_id]["status"] = "canceled"
+                    gcode_jobs[job_id]["finished_at"] = datetime.now().isoformat()
+                    gcode_jobs[job_id]["results"] = results
+                    return
+
+                # Handle pause
+                if gcode_pause_all.is_set():
+                    gcode_jobs[job_id]["status"] = "paused"
+                    gcode_jobs[job_id]["paused"] = True
+                    while gcode_pause_all.is_set():
+                        await asyncio.sleep(0.1)
+                        if gcode_cancel_all.is_set() or gcode_jobs[job_id].get("cancel_requested"):
+                            gcode_jobs[job_id]["status"] = "canceled"
+                            gcode_jobs[job_id]["finished_at"] = datetime.now().isoformat()
+                            gcode_jobs[job_id]["results"] = results
+                            return
+                    gcode_jobs[job_id]["status"] = "running"
+                    gcode_jobs[job_id]["paused"] = False
+
+                try:
+                    resp = await send_gcode_command(GcodeRequest(command=cmd))
+                except Exception as e:
+                    resp = {"success": False, "error": str(e), "command": cmd}
+                results.append(resp)
+                if not resp.get("success"):
+                    break
+                # Yield control and add a small delay to avoid overrun
+                await asyncio.sleep(GCODE_SEND_DELAY_SECONDS)
+
+            gcode_jobs[job_id]["status"] = "completed" if all(r.get("success") for r in results) else "failed"
+            gcode_jobs[job_id]["finished_at"] = datetime.now().isoformat()
+            gcode_jobs[job_id]["results"] = results
+        except Exception as e:
+            logger.error(f"G-code job {job_id} failed: {e}")
+            gcode_jobs[job_id]["status"] = "failed"
+            gcode_jobs[job_id]["error"] = str(e)
+            gcode_jobs[job_id]["finished_at"] = datetime.now().isoformat()
+
+    asyncio.run(runner())
+
+
+def cancel_all_gcode_jobs():
+    """Request cancellation of all running/queued G-code jobs."""
+    gcode_cancel_all.set()
+    for job_id, job in gcode_jobs.items():
+        if job.get("status") in {"queued", "running"}:
+            job["cancel_requested"] = True
+    gcode_pause_all.clear()
+
+
+@app.post("/plotter/stop")
+async def stop_plotter():
+    """Stop plotter immediately and cancel any running G-code jobs."""
+    try:
+        cancel_all_gcode_jobs()
+
+        stop_sent = False
+        if arduino and arduino.is_open:
+            try:
+                arduino.write(b"M112\n")  # Emergency stop
+                stop_sent = True
+            except Exception as e:
+                logger.warning(f"Failed to send stop command: {e}")
+
+        current_status["drawing"] = False
+        current_status["current_command"] = None
+
+        return {
+            "success": True,
+            "message": "Stop requested",
+            "stop_sent": stop_sent,
+            "canceled_jobs": [
+                job_id for job_id, job in gcode_jobs.items() if job.get("cancel_requested")
+            ],
+        }
+    except Exception as e:
+        logger.error(f"Stop error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/plotter/pause")
+async def pause_plotter():
+    """Toggle pause/resume: on pause send M0, on resume clear pause flag."""
+    try:
+        was_paused = gcode_pause_all.is_set()
+        if was_paused:
+            gcode_pause_all.clear()
+            for job in gcode_jobs.values():
+                if job.get("status") == "paused":
+                    job["status"] = "running"
+                    job["paused"] = False
+            return {"success": True, "message": "Resume requested", "paused": False}
+
+        # Request pause
+        gcode_pause_all.set()
+        for job in gcode_jobs.values():
+            if job.get("status") in {"queued", "running"}:
+                job["paused"] = True
+                job["status"] = "paused"
+
+        # Send M0 best-effort
+        pause_sent = False
+        if arduino and arduino.is_open:
+            try:
+                arduino.write(b"M0\n")
+                pause_sent = True
+            except Exception as e:
+                logger.warning(f"Failed to send pause command: {e}")
+
+        return {"success": True, "message": "Pause requested", "paused": True, "pause_sent": pause_sent}
+    except Exception as e:
+        logger.error(f"Pause error: {e}")
+        return {"success": False, "error": str(e)}
 
 # Project Management Endpoints
 @app.post("/projects", response_model=ProjectResponse)

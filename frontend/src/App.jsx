@@ -1,5 +1,5 @@
 import { Box, Container, CssBaseline, Paper, Tab, Tabs, ThemeProvider, Typography, createTheme } from "@mui/material";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import logoImage from "./assets/PolarVortexLogo_small.png";
 import ControlPanel from "./components/ControlPanel";
 import GraphPreparation from "./components/GraphPreparation";
@@ -67,6 +67,26 @@ export default function App() {
   const [currentView, setCurrentView] = useState("projects");
   const [selectedProject, setSelectedProject] = useState(null);
   const [selectedImage, setSelectedImage] = useState(null);
+  const [currentProject, setCurrentProject] = useState(() => {
+    try {
+      const stored = localStorage.getItem("pv_current_project");
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      if (currentProject) {
+        localStorage.setItem("pv_current_project", JSON.stringify(currentProject));
+      } else {
+        localStorage.removeItem("pv_current_project");
+      }
+    } catch (err) {
+      console.warn("Failed to persist current project", err);
+    }
+  }, [currentProject]);
 
   const handleNavigation = (destination) => {
     setCurrentView(destination);
@@ -93,7 +113,7 @@ export default function App() {
       case "preparation":
         return <GraphPreparation selectedImage={selectedImage} />;
       case "control":
-        return <ControlPanel />;
+        return <ControlPanel currentProject={currentProject} />;
       case "status":
         return <StatusPanel />;
       case "settings":
@@ -103,6 +123,8 @@ export default function App() {
         return (
           <ProjectList 
             onProjectSelect={handleProjectSelect}
+            currentProject={currentProject}
+            onSetCurrentProject={setCurrentProject}
           />
         );
     }
@@ -113,7 +135,11 @@ export default function App() {
       <CssBaseline />
       <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
         {/* Menu Bar */}
-        <MenuBar currentView={currentView} onNavigate={handleNavigation} />
+        <MenuBar 
+          currentView={currentView} 
+          onNavigate={handleNavigation} 
+          currentProject={currentProject}
+        />
         
         {/* Main Content */}
         <Container maxWidth="xl" sx={{ py: 3 }}>

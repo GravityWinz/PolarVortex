@@ -4,7 +4,9 @@ import {
     Delete as DeleteIcon,
     Edit as EditIcon,
     Folder as FolderIcon,
-    AutoGraph as VectorizeIcon
+    AutoGraph as VectorizeIcon,
+    Star as StarIcon,
+    StarBorder as StarBorderIcon
 } from "@mui/icons-material";
 import {
     Alert,
@@ -28,14 +30,14 @@ import {
 } from "@mui/material";
 import React, { useEffect, useState } from "react";
 import logoImage from "../assets/PolarVortexLogo_small.png";
-import { createProject, deleteProject, getProjectThumbnailUrl, getProjects, uploadImageToProject } from "../services/apiService";
+import { createProject, deleteProject, getProjectThumbnailUrl, getProjects, uploadImageToProject, uploadGcodeToProject } from "../services/apiService";
 import VectorizeDialog from "./VectorizeDialog";
 
 /**
  * ProjectList component for displaying and managing projects
  * Shows all projects in a grid layout with project management actions
  */
-export default function ProjectList({ onProjectSelect }) {
+export default function ProjectList({ onProjectSelect, currentProject, onSetCurrentProject }) {
     const [projects, setProjects] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -44,6 +46,7 @@ export default function ProjectList({ onProjectSelect }) {
     const [creating, setCreating] = useState(false);
     const [uploadingProjects, setUploadingProjects] = useState(new Set());
     const [uploadProgress, setUploadProgress] = useState({});
+    const [gcodeUploadingProjects, setGcodeUploadingProjects] = useState(new Set());
     const [failedThumbnails, setFailedThumbnails] = useState(new Set());
     const [vectorizeDialogOpen, setVectorizeDialogOpen] = useState(false);
     const [selectedProjectForVectorize, setSelectedProjectForVectorize] = useState(null);
@@ -176,6 +179,41 @@ export default function ProjectList({ onProjectSelect }) {
         }
     };
 
+    const handleGcodeUpload = async (project, file) => {
+        if (!file) return;
+
+        const allowedExtensions = [".gcode", ".nc", ".txt"];
+        const ext = (file.name || "").toLowerCase().match(/\.[^.]+$/)?.[0] || "";
+        if (!allowedExtensions.includes(ext)) {
+            setError("Please select a .gcode, .nc, or .txt file");
+            return;
+        }
+
+        if (file.size > 10 * 1024 * 1024) {
+            setError("File size must be less than 10MB");
+            return;
+        }
+
+        try {
+            setGcodeUploadingProjects(prev => new Set([...prev, project.id]));
+
+            const formData = new FormData();
+            formData.append("file", file);
+
+            await uploadGcodeToProject(project.id, formData);
+            await fetchProjects();
+        } catch (err) {
+            setError("Failed to upload G-code");
+            console.error("Error uploading G-code:", err);
+        } finally {
+            setGcodeUploadingProjects(prev => {
+                const next = new Set(prev);
+                next.delete(project.id);
+                return next;
+            });
+        }
+    };
+
     const formatDate = (dateString) => {
         return new Date(dateString).toLocaleDateString();
     };
@@ -260,7 +298,10 @@ export default function ProjectList({ onProjectSelect }) {
                                     display: "flex",
                                     flexDirection: "column",
                                     cursor: "pointer",
-                                    transition: "transform 0.2s, box-shadow 0.2s",
+                                    transition: "transform 0.2s, box-shadow 0.2s, border-color 0.2s",
+                                    border: currentProject?.id === project.id ? "2px solid" : "1px solid",
+                                    borderColor: currentProject?.id === project.id ? "primary.main" : "divider",
+                                    boxShadow: currentProject?.id === project.id ? 6 : 1,
                                     "&:hover": {
                                         transform: "translateY(-4px)",
                                         boxShadow: 4,
@@ -417,22 +458,66 @@ export default function ProjectList({ onProjectSelect }) {
                                 </CardMedia>
                                 
                                 <CardContent sx={{ flexGrow: 1, p: 2 }}>
-                                    <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", mb: 1 }}>
+                                        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", mb: 1 }}>
                                         <Typography variant="subtitle2" component="div" noWrap sx={{ maxWidth: "70%" }}>
                                             {project.name}
                                         </Typography>
-                                        <Chip
-                                            label={project.thumbnail_image ? "Has Image" : "Empty"}
-                                            color={project.thumbnail_image ? "success" : "default"}
-                                            size="small"
-                                        />
+                                        <Box sx={{ display: "flex", gap: 0.5 }}>
+                                            <Chip
+                                                label={project.thumbnail_image ? "Has Image" : "Empty"}
+                                                color={project.thumbnail_image ? "success" : "default"}
+                                                size="small"
+                                            />
+                                            <Chip
+                                                label={`G-code ${project.gcode_files?.length || 0}`}
+                                                color={(project.gcode_files?.length || 0) > 0 ? "primary" : "default"}
+                                                size="small"
+                                            />
+                                        </Box>
                                     </Box>
                                     
                                     <Typography variant="caption" color="text.secondary" display="block">
                                         Created: {formatDate(project.created_at)}
                                     </Typography>
                                     
-                                    <Box sx={{ display: "flex", justifyContent: "space-between", mt: 2 }}>
+                                    <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mt: 2, gap: 1, flexWrap: "wrap" }}>
+                                        <Button
+                                            variant={currentProject?.id === project.id ? "contained" : "outlined"}
+                                            size="small"
+                                            startIcon={currentProject?.id === project.id ? <StarIcon /> : <StarBorderIcon />}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (onSetCurrentProject) {
+                                                    onSetCurrentProject(project);
+                                                }
+                                            }}
+                                            sx={{ textTransform: "none" }}
+                                        >
+                                            {currentProject?.id === project.id ? "Current" : "Set Current"}
+                                        </Button>
+                                        <Button
+                                            variant="outlined"
+                                            size="small"
+                                            startIcon={<CloudUploadIcon />}
+                                            component="label"
+                                            disabled={gcodeUploadingProjects.has(project.id)}
+                                            onClick={(e) => e.stopPropagation()}
+                                        >
+                                            {gcodeUploadingProjects.has(project.id) ? "Uploading..." : "Upload G-code"}
+                                            <input
+                                                type="file"
+                                                hidden
+                                                accept=".gcode,.nc,.txt"
+                                                onChange={(e) => {
+                                                    const file = e.target.files[0];
+                                                    if (file) {
+                                                        handleGcodeUpload(project, file);
+                                                    }
+                                                    e.target.value = "";
+                                                }}
+                                            />
+                                        </Button>
+
                                         <IconButton
                                             size="small"
                                             onClick={(e) => {
