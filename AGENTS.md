@@ -4,10 +4,10 @@
 This document defines the roles of different parts of the PolarVortex system.
 PolarVortex is intended to control a Polarplotter system
 
-There will be 3 different part of the system
+There will be 2 different part of the system
 - Frontend which is developed in React and Material UI
 - Backend which is python fastAPI based
-- Arduino which is control software for the physical plotter hardware
+
 
 
 
@@ -15,7 +15,8 @@ There will be 3 different part of the system
 - Provides a web interface for controlling the polargraph plotter.
 - Uploads images, sends commands, and monitors drawing status.
 - Develop on most  version 19.1 of react as well as Material UI v 7.0.0 
-- use VITE as well 
+- use VITE as well
+- Built using Material UI framework
 - For this development i am not familiar with react development so develop in a clear and simple manner 
 - for ui only use elements in Material
 
@@ -28,7 +29,7 @@ You are an expert React developer specializing in modern, functional, and compos
 This project is built using:
 - **Framework**: React with Next.js (App Router).
 - **Language**: TypeScript.
-- **Styling**: Tailwind CSS for utility-first styling.
+- **Styling**: utilizes the material UI framework
 - **State Management**: React's built-in state (e.g., `useState`, `useContext`) or Zustand.
 - **Component Convention**:
   - Components are functional and use hooks.
