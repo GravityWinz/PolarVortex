@@ -1,12 +1,22 @@
-import { Box, Container, CssBaseline, Paper, Tab, Tabs, ThemeProvider, Typography, createTheme } from "@mui/material";
+import {
+  Box,
+  Container,
+  CssBaseline,
+  Paper,
+  Tab,
+  Tabs,
+  ThemeProvider,
+  Typography,
+  createTheme,
+} from "@mui/material";
 import React, { useEffect, useState } from "react";
 import logoImage from "./assets/PolarVortexLogo_small.png";
 import ControlPanel from "./components/ControlPanel";
 import EditProject from "./components/EditProject";
+import GcodeSettings from "./components/GcodeSettings";
 import MenuBar from "./components/MenuBar";
 import PaperConfiguration from "./components/PaperConfiguration";
 import PlotterConfiguration from "./components/PlotterConfiguration";
-import GcodeSettings from "./components/GcodeSettings";
 import ProjectList from "./components/ProjectList";
 import StatusPanel from "./components/StatusPanel";
 
@@ -77,7 +87,10 @@ export default function App() {
   useEffect(() => {
     try {
       if (currentProject) {
-        localStorage.setItem("pv_current_project", JSON.stringify(currentProject));
+        localStorage.setItem(
+          "pv_current_project",
+          JSON.stringify(currentProject)
+        );
       } else {
         localStorage.removeItem("pv_current_project");
       }
@@ -108,7 +121,7 @@ export default function App() {
       case "projects":
       default:
         return (
-          <ProjectList 
+          <ProjectList
             onProjectSelect={handleProjectSelect}
             currentProject={currentProject}
             onSetCurrentProject={setCurrentProject}
@@ -123,12 +136,12 @@ export default function App() {
       <CssBaseline />
       <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
         {/* Menu Bar */}
-        <MenuBar 
-          currentView={currentView} 
-          onNavigate={handleNavigation} 
+        <MenuBar
+          currentView={currentView}
+          onNavigate={handleNavigation}
           currentProject={currentProject}
         />
-        
+
         {/* Main Content */}
         <Container maxWidth="xl" sx={{ py: 3 }}>
           {renderCurrentView()}
@@ -152,16 +165,21 @@ function SettingsView() {
     <Box sx={{ p: 3 }}>
       {/* Header with Logo */}
       <Box sx={{ display: "flex", alignItems: "center", mb: 3 }}>
-        <img 
-          src={logoImage} 
-          alt="PolarVortex Logo" 
-          style={{ height: "40px", width: "auto", marginRight: "16px" }} 
+        <img
+          src={logoImage}
+          alt="PolarVortex Logo"
+          style={{ height: "40px", width: "auto", marginRight: "16px" }}
         />
         <Box>
           <Typography variant="h4" gutterBottom sx={{ mb: 0 }}>
             Settings
           </Typography>
-          <Typography variant="body1" color="text.secondary" paragraph sx={{ mb: 0 }}>
+          <Typography
+            variant="body1"
+            color="text.secondary"
+            paragraph
+            sx={{ mb: 0 }}
+          >
             Configure your polargraph plotter settings and system preferences.
           </Typography>
         </Box>
@@ -182,5 +200,3 @@ function SettingsView() {
     </Box>
   );
 }
-
-

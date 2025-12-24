@@ -1,26 +1,26 @@
 import {
-    ControlCamera as ControlIcon,
-    Folder as FolderIcon,
-    Menu as MenuIcon,
-    Monitor as MonitorIcon,
-    Settings as SettingsIcon,
-    Timeline as TimelineIcon,
+  ControlCamera as ControlIcon,
+  Folder as FolderIcon,
+  Menu as MenuIcon,
+  Monitor as MonitorIcon,
+  Settings as SettingsIcon,
+  Timeline as TimelineIcon,
 } from "@mui/icons-material";
 import {
-    AppBar,
-    Box,
-    Button,
-    Drawer,
-    IconButton,
-    List,
-    ListItem,
-    ListItemButton,
-    ListItemIcon,
-    ListItemText,
-    Toolbar,
-    Typography,
-    useMediaQuery,
-    useTheme,
+  AppBar,
+  Box,
+  Button,
+  Drawer,
+  IconButton,
+  List,
+  ListItem,
+  ListItemButton,
+  ListItemIcon,
+  ListItemText,
+  Toolbar,
+  Typography,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
 import React from "react";
 import logoImage from "../assets/PolarVortexLogo_small.png";
@@ -82,33 +82,47 @@ export default function MenuBar({ currentView, onNavigate, currentProject }) {
           >
             <MenuIcon />
           </IconButton>
-          
+
           {/* Logo and Title */}
-          <Box sx={{ display: "flex", alignItems: "center", flexGrow: 1, minWidth: 0 }}>
-            <img 
-              src={logoImage} 
-              alt="PolarVortex Logo" 
-              style={{ 
-                height: "40px", 
-                width: "auto", 
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              flexGrow: 1,
+              minWidth: 0,
+            }}
+          >
+            <img
+              src={logoImage}
+              alt="PolarVortex Logo"
+              style={{
+                height: "40px",
+                width: "auto",
                 marginRight: "12px",
-                filter: "brightness(0) invert(1)" // Make logo white for dark background
-              }} 
+                filter: "brightness(0) invert(1)", // Make logo white for dark background
+              }}
             />
             <Typography variant="h6" component="div">
               PolarVortex
             </Typography>
             {currentProject?.name && (
-              <Typography 
-                variant="subtitle2" 
-                sx={{ ml: 2, color: "rgba(255,255,255,0.85)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: { xs: 140, sm: 240, md: 320 } }}
+              <Typography
+                variant="subtitle2"
+                sx={{
+                  ml: 2,
+                  color: "rgba(255,255,255,0.85)",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  maxWidth: { xs: 140, sm: 240, md: 320 },
+                }}
                 title={currentProject.name}
               >
                 Current: {currentProject.name}
               </Typography>
             )}
           </Box>
-          
+
           {/* Desktop Menu */}
           <Box sx={{ display: { xs: "none", md: "flex" } }}>
             {menuItems.map((item) => (
@@ -120,7 +134,10 @@ export default function MenuBar({ currentView, onNavigate, currentProject }) {
                 sx={{
                   textTransform: "none",
                   mx: 1,
-                  bgcolor: currentView === item.destination ? "rgba(255,255,255,0.1)" : "transparent",
+                  bgcolor:
+                    currentView === item.destination
+                      ? "rgba(255,255,255,0.1)"
+                      : "transparent",
                   "&:hover": {
                     bgcolor: "rgba(255,255,255,0.1)",
                   },
@@ -142,21 +159,28 @@ export default function MenuBar({ currentView, onNavigate, currentProject }) {
       >
         <Box sx={{ width: 250 }} role="presentation">
           {/* Logo in Drawer Header */}
-          <Box sx={{ p: 2, textAlign: "center", borderBottom: 1, borderColor: "divider" }}>
-            <img 
-              src={logoImage} 
-              alt="PolarVortex Logo" 
-              style={{ height: "50px", width: "auto" }} 
+          <Box
+            sx={{
+              p: 2,
+              textAlign: "center",
+              borderBottom: 1,
+              borderColor: "divider",
+            }}
+          >
+            <img
+              src={logoImage}
+              alt="PolarVortex Logo"
+              style={{ height: "50px", width: "auto" }}
             />
             <Typography variant="h6" sx={{ mt: 1, color: "primary.main" }}>
               PolarVortex
             </Typography>
           </Box>
-          
+
           <List>
             {menuItems.map((item) => (
               <ListItem key={item.text} disablePadding>
-                <ListItemButton 
+                <ListItemButton
                   onClick={() => handleNavigation(item.destination)}
                   selected={currentView === item.destination}
                 >

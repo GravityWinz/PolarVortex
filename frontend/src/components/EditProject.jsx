@@ -1,11 +1,11 @@
 import {
-  Article as SvgIcon,
   Code as CodeIcon,
-  DeleteOutline as DeleteIcon,
   AutoFixHigh as ConvertIcon,
-  Image as ImageIcon,
+  DeleteOutline as DeleteIcon,
   InsertDriveFile as FileIcon,
+  Image as ImageIcon,
   Refresh as RefreshIcon,
+  Article as SvgIcon,
 } from "@mui/icons-material";
 import {
   Alert,
@@ -13,35 +13,35 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Divider,
+  FormControl,
   Grid,
   IconButton,
+  InputLabel,
   List,
   ListItem,
   ListItemButton,
   ListItemText,
   ListSubheader,
-  Paper,
-  Stack,
-  Typography,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  FormControl,
-  InputLabel,
-  Select,
   MenuItem,
+  Paper,
+  Select,
+  Stack,
   TextField,
+  Typography,
 } from "@mui/material";
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  convertSvgToGcode,
+  deleteProjectFile,
   getProject,
   getProjectAssets,
   getProjectFileText,
   getProjectFileUrl,
-  deleteProjectFile,
-  convertSvgToGcode,
 } from "../services/apiService";
 
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "bmp", "webp"];
@@ -460,7 +460,11 @@ export default function EditProject({ currentProject }) {
     }
 
     const isSvg = selectedAsset.type === "svg";
-    const icon = isSvg ? <SvgIcon color="primary" /> : <ImageIcon color="primary" />;
+    const icon = isSvg ? (
+      <SvgIcon color="primary" />
+    ) : (
+      <ImageIcon color="primary" />
+    );
 
     return (
       <Box>
@@ -597,12 +601,18 @@ export default function EditProject({ currentProject }) {
       <Grid container spacing={3}>
         <Grid item xs={12} md={4}>
           <Paper sx={{ p: 2, height: "100%", minHeight: 420 }}>
-            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+            <Stack
+              direction="row"
+              spacing={1}
+              alignItems="center"
+              sx={{ mb: 1 }}
+            >
               <FileIcon color="primary" />
               <Typography variant="h6">Asset Viewer</Typography>
             </Stack>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-              Select a file to preview. Includes images, thumbnails, SVGs, and G-code.
+              Select a file to preview. Includes images, thumbnails, SVGs, and
+              G-code.
             </Typography>
             <Divider sx={{ mb: 1 }} />
 
@@ -634,22 +644,37 @@ export default function EditProject({ currentProject }) {
 
             {currentProject && !loadingAssets && !assetError && hasAssets && (
               <Box sx={{ maxHeight: 600, overflow: "auto" }}>
-                {renderAssetSection("Images", assets.images, <ImageIcon fontSize="small" />)}
-                {renderAssetSection("SVG", assets.svgs, <SvgIcon fontSize="small" />)}
-                {renderAssetSection("G-code", assets.gcode, <CodeIcon fontSize="small" />)}
+                {renderAssetSection(
+                  "Images",
+                  assets.images,
+                  <ImageIcon fontSize="small" />
+                )}
+                {renderAssetSection(
+                  "SVG",
+                  assets.svgs,
+                  <SvgIcon fontSize="small" />
+                )}
+                {renderAssetSection(
+                  "G-code",
+                  assets.gcode,
+                  <CodeIcon fontSize="small" />
+                )}
               </Box>
             )}
           </Paper>
         </Grid>
 
         <Grid item xs={12} md={8}>
-          <Paper sx={{ p: 2, minHeight: 420 }}>
-            {renderPreview()}
-          </Paper>
+          <Paper sx={{ p: 2, minHeight: 420 }}>{renderPreview()}</Paper>
         </Grid>
       </Grid>
 
-      <Dialog open={convertDialogOpen} onClose={() => setConvertDialogOpen(false)} fullWidth maxWidth="sm">
+      <Dialog
+        open={convertDialogOpen}
+        onClose={() => setConvertDialogOpen(false)}
+        fullWidth
+        maxWidth="sm"
+      >
         <DialogTitle>Convert SVG to G-code</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
@@ -659,7 +684,10 @@ export default function EditProject({ currentProject }) {
                 label="Paper Size"
                 value={convertOptions.paperSize}
                 onChange={(e) =>
-                  setConvertOptions((prev) => ({ ...prev, paperSize: e.target.value }))
+                  setConvertOptions((prev) => ({
+                    ...prev,
+                    paperSize: e.target.value,
+                  }))
                 }
               >
                 <MenuItem value="A4">A4</MenuItem>
@@ -674,7 +702,10 @@ export default function EditProject({ currentProject }) {
                 label="Fit / Center"
                 value={convertOptions.fitMode}
                 onChange={(e) =>
-                  setConvertOptions((prev) => ({ ...prev, fitMode: e.target.value }))
+                  setConvertOptions((prev) => ({
+                    ...prev,
+                    fitMode: e.target.value,
+                  }))
                 }
               >
                 <MenuItem value="fit">Fit to page</MenuItem>
@@ -686,7 +717,10 @@ export default function EditProject({ currentProject }) {
               label="Pen Mapping (placeholder)"
               value={convertOptions.penMapping}
               onChange={(e) =>
-                setConvertOptions((prev) => ({ ...prev, penMapping: e.target.value }))
+                setConvertOptions((prev) => ({
+                  ...prev,
+                  penMapping: e.target.value,
+                }))
               }
               helperText="E.g., pen color or channel to use"
               fullWidth
@@ -696,7 +730,10 @@ export default function EditProject({ currentProject }) {
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setConvertDialogOpen(false)} disabled={convertLoading}>
+          <Button
+            onClick={() => setConvertDialogOpen(false)}
+            disabled={convertLoading}
+          >
             Cancel
           </Button>
           <Button
@@ -711,4 +748,3 @@ export default function EditProject({ currentProject }) {
     </Box>
   );
 }
-
