@@ -404,6 +404,11 @@ class SvgToGcodeRequest(BaseModel):
     fit_mode: str = "fit"  # fit | center
     pen_mapping: Optional[str] = None
 
+def _response_contains_ok(responses: List[str]) -> bool:
+    """Check if any response line includes an OK acknowledgement."""
+    return any(line.lower().startswith("ok") for line in responses)
+
+
 async def read_arduino_response(timeout_seconds: float = 3.0) -> List[str]:
     """Read response from Arduino until 'ok' or timeout"""
     responses = []
@@ -447,9 +452,15 @@ async def send_gcode_command(request: GcodeRequest):
         
         # Read response
         responses = await read_arduino_response(timeout_seconds=3.0)
+        ok_received = _response_contains_ok(responses)
         
         # Combine multi-line responses
         response_text = "\n".join(responses) if responses else "No response"
+        success = ok_received
+        error_text = None
+        if not ok_received:
+            error_text = "No 'ok' received from printer; holding next commands to avoid buffer overrun"
+            logger.warning("%s (command='%s', response='%s')", error_text, gcode, response_text)
         
         # Log command/response
         log_entry = {
@@ -468,14 +479,17 @@ async def send_gcode_command(request: GcodeRequest):
             "type": "gcode_response",
             "command": gcode,
             "response": response_text,
+            "ok_received": ok_received,
             "timestamp": log_entry["timestamp"]
         }))
         
         return {
-            "success": True,
+            "success": success,
             "command": gcode,
             "response": response_text,
             "responses": responses,
+            "ok_received": ok_received,
+            "error": error_text,
             "timestamp": log_entry["timestamp"]
         }
     except Exception as e:
