@@ -1,4 +1,37 @@
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+const isLoopbackOrDockerHost = (url = "") => {
+  const lower = url.toLowerCase();
+  return (
+    lower.includes("localhost") ||
+    lower.includes("127.0.0.1") ||
+    lower.includes("backend")
+  );
+};
+
+export const resolveApiBaseUrl = () => {
+  const envUrl = import.meta.env.VITE_API_BASE_URL;
+  if (envUrl && !isLoopbackOrDockerHost(envUrl)) {
+    return envUrl;
+  }
+  if (typeof window !== "undefined") {
+    const protocol = window.location.protocol === "https:" ? "https:" : "http:";
+    const host = window.location.hostname;
+    return `${protocol}//${host}:8000`;
+  }
+  return envUrl || "http://localhost:8000";
+};
+
+export const resolveWsBaseUrl = () => {
+  const envUrl = import.meta.env.VITE_WS_BASE_URL;
+  if (envUrl && !isLoopbackOrDockerHost(envUrl)) {
+    return envUrl;
+  }
+  const apiBase = resolveApiBaseUrl();
+  const isSecure = apiBase.startsWith("https://");
+  const host = apiBase.replace(/^https?:\/\//, "");
+  return `${isSecure ? "wss" : "ws"}://${host}`;
+};
+
+export const BASE_URL = resolveApiBaseUrl();
 
 export async function getStatus() {
   try {

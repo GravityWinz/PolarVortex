@@ -36,7 +36,7 @@ import {
 } from "@mui/material";
 import React, { useCallback, useState } from "react";
 import logoImage from "../assets/PolarVortexLogo_small.png";
-import { uploadImageToProject } from "../services/apiService";
+import { uploadImageToProject, resolveApiBaseUrl } from "../services/apiService";
 
 /**
  * Image Upload component for PolarVortex
@@ -114,7 +114,7 @@ export default function ImageUpload({ project, onUploadComplete }) {
   // Check for name collision
   const checkNameCollision = async (name) => {
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || "http://localhost:8000"}/check-directory/${encodeURIComponent(name)}`);
+      const response = await fetch(`${resolveApiBaseUrl()}/check-directory/${encodeURIComponent(name)}`);
       const result = await response.json();
       return result.exists;
     } catch (error) {

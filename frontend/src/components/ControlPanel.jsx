@@ -34,6 +34,8 @@ import {
   clearCommandLog,
   connectPlotter,
   disconnectPlotter,
+  resolveApiBaseUrl,
+  resolveWsBaseUrl,
   getAvailablePorts,
   getCommandLog,
   getConnectionStatus,
@@ -43,16 +45,8 @@ import {
   sendGcodeCommand,
 } from "../services/apiService";
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
-// Convert HTTP URL to WebSocket URL
-const getWebSocketUrl = () => {
-  const url = BASE_URL.replace("http://", "").replace("https://", "");
-  if (BASE_URL.startsWith("https://")) {
-    return `wss://${url}`;
-  }
-  return `ws://${url}`;
-};
-const WS_URL = getWebSocketUrl();
+const BASE_URL = resolveApiBaseUrl();
+const WS_URL = resolveWsBaseUrl();
 
 export default function ControlPanel({ currentProject }) {
   const [ports, setPorts] = useState([]);

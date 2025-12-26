@@ -16,7 +16,7 @@ from pathlib import Path
 import re
 from pydantic import BaseModel
 from .image_processor import ImageHelper
-from .config import Config
+from .config import Config, Settings
 from .project_models import ProjectCreate, ProjectResponse, ProjectListResponse
 from .project_service import project_service
 from .vectorizer import PolargraphVectorizer, VectorizationSettings
@@ -106,15 +106,17 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS middleware for frontend communication
+# CORS middleware for frontend communication (allow override via CORS_ORIGINS env)
+cors_origins = Settings.get_cors_origins()
+allow_origin_regex = None
+# If no override provided, allow any host (useful for Pi access from LAN)
+if not os.getenv("CORS_ORIGINS"):
+    allow_origin_regex = ".*"
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=cors_origins,
+    allow_origin_regex=allow_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
