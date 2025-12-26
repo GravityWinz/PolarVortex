@@ -26,7 +26,7 @@ import {
   Stack,
   TextField,
   Tooltip,
-  Typography
+  Typography,
 } from "@mui/material";
 import React, { useEffect, useRef, useState } from "react";
 import logoImage from "../assets/PolarVortexLogo_small.png";
@@ -34,15 +34,15 @@ import {
   clearCommandLog,
   connectPlotter,
   disconnectPlotter,
-  resolveApiBaseUrl,
-  resolveWsBaseUrl,
   getAvailablePorts,
   getCommandLog,
   getConnectionStatus,
-  stopPlotter,
-  togglePausePlotter,
+  resolveApiBaseUrl,
+  resolveWsBaseUrl,
   runProjectGcode,
   sendGcodeCommand,
+  stopPlotter,
+  togglePausePlotter,
 } from "../services/apiService";
 
 const BASE_URL = resolveApiBaseUrl();
@@ -88,7 +88,10 @@ export default function ControlPanel({ currentProject }) {
 
   // Keep pagination on the newest page when new log entries arrive
   useEffect(() => {
-    const totalPages = Math.max(1, Math.ceil(commandLog.length / LOG_PAGE_SIZE));
+    const totalPages = Math.max(
+      1,
+      Math.ceil(commandLog.length / LOG_PAGE_SIZE)
+    );
     setLogPage(totalPages);
   }, [commandLog]);
 
@@ -111,7 +114,7 @@ export default function ControlPanel({ currentProject }) {
     if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
       return;
     }
-    
+
     try {
       const ws = new WebSocket(`${WS_URL}/ws`);
       ws.onopen = () => {
@@ -123,21 +126,21 @@ export default function ControlPanel({ currentProject }) {
           if (data.type === "gcode_response") {
             // Create a unique key for this message
             const messageKey = `${data.timestamp}-${data.command}-${data.response}`;
-            
+
             // Check if we've already processed this message
             if (processedMessagesRef.current.has(messageKey)) {
               return; // Skip duplicate
             }
-            
+
             // Mark as processed
             processedMessagesRef.current.add(messageKey);
-            
+
             // Clean up old keys (keep last 1000)
             if (processedMessagesRef.current.size > 1000) {
               const keysArray = Array.from(processedMessagesRef.current);
               processedMessagesRef.current = new Set(keysArray.slice(-1000));
             }
-            
+
             // Add to command log
             setCommandLog((prev) => {
               // Double-check in state as well
@@ -269,7 +272,8 @@ export default function ControlPanel({ currentProject }) {
           const entries = startupResults.map((item) => ({
             timestamp: item.timestamp || new Date().toISOString(),
             command: item.command || "(on_connect)",
-            response: item.response || (item.error ? `error: ${item.error}` : ""),
+            response:
+              item.response || (item.error ? `error: ${item.error}` : ""),
           }));
 
           setCommandLog((prev) => {
@@ -470,16 +474,21 @@ export default function ControlPanel({ currentProject }) {
     <Box sx={{ p: 3 }}>
       {/* Header with Logo */}
       <Box sx={{ display: "flex", alignItems: "center", mb: 3 }}>
-        <img 
-          src={logoImage} 
-          alt="PolarVortex Logo" 
-          style={{ height: "40px", width: "auto", marginRight: "16px" }} 
+        <img
+          src={logoImage}
+          alt="PolarVortex Logo"
+          style={{ height: "40px", width: "auto", marginRight: "16px" }}
         />
         <Box>
           <Typography variant="h4" gutterBottom sx={{ mb: 0 }}>
             Plotter Control
           </Typography>
-          <Typography variant="body1" color="text.secondary" paragraph sx={{ mb: 0 }}>
+          <Typography
+            variant="body1"
+            color="text.secondary"
+            paragraph
+            sx={{ mb: 0 }}
+          >
             Control your polargraph plotter with real-time commands.
           </Typography>
         </Box>
@@ -564,7 +573,10 @@ export default function ControlPanel({ currentProject }) {
                     />
                     {connected && (
                       <>
-                        <Chip label={`Port: ${connectionStatus.port}`} sx={{ mr: 1 }} />
+                        <Chip
+                          label={`Port: ${connectionStatus.port}`}
+                          sx={{ mr: 1 }}
+                        />
                         <Chip label={`${connectionStatus.baud_rate} baud`} />
                       </>
                     )}
@@ -580,7 +592,8 @@ export default function ControlPanel({ currentProject }) {
               </Typography>
               {!currentProject ? (
                 <Typography variant="body2" color="text.secondary">
-                  Select a current project on the Projects tab to send its G-code.
+                  Select a current project on the Projects tab to send its
+                  G-code.
                 </Typography>
               ) : projectGcodeFiles.length === 0 ? (
                 <Typography variant="body2" color="text.secondary">
@@ -609,14 +622,23 @@ export default function ControlPanel({ currentProject }) {
                       })}
                     </Select>
                   </FormControl>
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
+                  <Box
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 2,
+                      flexWrap: "wrap",
+                    }}
+                  >
                     <Chip
                       icon={<Send />}
                       label={gcodeRunning ? "Sending..." : "Send to Plotter"}
                       color="primary"
                       variant="filled"
                       clickable
-                      disabled={!connected || gcodeRunning || !selectedProjectGcode}
+                      disabled={
+                        !connected || gcodeRunning || !selectedProjectGcode
+                      }
                       onClick={handleRunProjectGcode}
                       sx={{ fontWeight: "bold", textTransform: "none" }}
                     />
@@ -627,7 +649,11 @@ export default function ControlPanel({ currentProject }) {
                       variant="outlined"
                       clickable
                       disabled={!connected}
-                      onClick={() => stopPlotter().catch((err) => alert(`Stop error: ${err.message}`))}
+                      onClick={() =>
+                        stopPlotter().catch((err) =>
+                          alert(`Stop error: ${err.message}`)
+                        )
+                      }
                       sx={{ fontWeight: "bold", textTransform: "none" }}
                     />
                     <Chip
@@ -650,7 +676,15 @@ export default function ControlPanel({ currentProject }) {
             </Paper>
 
             {/* Movement Controls - Cross Layout */}
-            <Paper sx={{ p: 3, display: "flex", flexDirection: "column", alignItems: "center", flex: 1 }}>
+            <Paper
+              sx={{
+                p: 3,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                flex: 1,
+              }}
+            >
               <Typography variant="h6" gutterBottom>
                 Movement Controls
               </Typography>
@@ -691,7 +725,10 @@ export default function ControlPanel({ currentProject }) {
                     }}
                   >
                     <ArrowUpward sx={{ fontSize: "1.1rem" }} />
-                    <Typography variant="caption" sx={{ ml: 0.4, fontSize: "0.6rem" }}>
+                    <Typography
+                      variant="caption"
+                      sx={{ ml: 0.4, fontSize: "0.6rem" }}
+                    >
                       100
                     </Typography>
                   </Button>
@@ -708,7 +745,10 @@ export default function ControlPanel({ currentProject }) {
                     }}
                   >
                     <ArrowUpward sx={{ fontSize: "0.95rem" }} />
-                    <Typography variant="caption" sx={{ ml: 0.3, fontSize: "0.55rem" }}>
+                    <Typography
+                      variant="caption"
+                      sx={{ ml: 0.3, fontSize: "0.55rem" }}
+                    >
                       10
                     </Typography>
                   </Button>
@@ -725,7 +765,10 @@ export default function ControlPanel({ currentProject }) {
                     }}
                   >
                     <ArrowUpward sx={{ fontSize: "0.8rem" }} />
-                    <Typography variant="caption" sx={{ ml: 0.2, fontSize: "0.5rem" }}>
+                    <Typography
+                      variant="caption"
+                      sx={{ ml: 0.2, fontSize: "0.5rem" }}
+                    >
                       1
                     </Typography>
                   </Button>
@@ -757,7 +800,10 @@ export default function ControlPanel({ currentProject }) {
                     }}
                   >
                     <ArrowDownward sx={{ fontSize: "1.1rem" }} />
-                    <Typography variant="caption" sx={{ ml: 0.4, fontSize: "0.6rem" }}>
+                    <Typography
+                      variant="caption"
+                      sx={{ ml: 0.4, fontSize: "0.6rem" }}
+                    >
                       100
                     </Typography>
                   </Button>
@@ -774,7 +820,10 @@ export default function ControlPanel({ currentProject }) {
                     }}
                   >
                     <ArrowDownward sx={{ fontSize: "0.95rem" }} />
-                    <Typography variant="caption" sx={{ ml: 0.3, fontSize: "0.55rem" }}>
+                    <Typography
+                      variant="caption"
+                      sx={{ ml: 0.3, fontSize: "0.55rem" }}
+                    >
                       10
                     </Typography>
                   </Button>
@@ -791,7 +840,10 @@ export default function ControlPanel({ currentProject }) {
                     }}
                   >
                     <ArrowDownward sx={{ fontSize: "0.8rem" }} />
-                    <Typography variant="caption" sx={{ ml: 0.2, fontSize: "0.5rem" }}>
+                    <Typography
+                      variant="caption"
+                      sx={{ ml: 0.2, fontSize: "0.5rem" }}
+                    >
                       1
                     </Typography>
                   </Button>
@@ -822,7 +874,10 @@ export default function ControlPanel({ currentProject }) {
                     }}
                   >
                     <ArrowBack sx={{ fontSize: "1.1rem" }} />
-                    <Typography variant="caption" sx={{ ml: 0.4, fontSize: "0.6rem" }}>
+                    <Typography
+                      variant="caption"
+                      sx={{ ml: 0.4, fontSize: "0.6rem" }}
+                    >
                       100
                     </Typography>
                   </Button>
@@ -839,7 +894,10 @@ export default function ControlPanel({ currentProject }) {
                     }}
                   >
                     <ArrowBack sx={{ fontSize: "0.95rem" }} />
-                    <Typography variant="caption" sx={{ ml: 0.3, fontSize: "0.55rem" }}>
+                    <Typography
+                      variant="caption"
+                      sx={{ ml: 0.3, fontSize: "0.55rem" }}
+                    >
                       10
                     </Typography>
                   </Button>
@@ -856,7 +914,10 @@ export default function ControlPanel({ currentProject }) {
                     }}
                   >
                     <ArrowBack sx={{ fontSize: "0.8rem" }} />
-                    <Typography variant="caption" sx={{ ml: 0.2, fontSize: "0.5rem" }}>
+                    <Typography
+                      variant="caption"
+                      sx={{ ml: 0.2, fontSize: "0.5rem" }}
+                    >
                       1
                     </Typography>
                   </Button>
@@ -887,7 +948,10 @@ export default function ControlPanel({ currentProject }) {
                     }}
                   >
                     <ArrowForward sx={{ fontSize: "0.8rem" }} />
-                    <Typography variant="caption" sx={{ ml: 0.2, fontSize: "0.5rem" }}>
+                    <Typography
+                      variant="caption"
+                      sx={{ ml: 0.2, fontSize: "0.5rem" }}
+                    >
                       1
                     </Typography>
                   </Button>
@@ -904,7 +968,10 @@ export default function ControlPanel({ currentProject }) {
                     }}
                   >
                     <ArrowForward sx={{ fontSize: "0.95rem" }} />
-                    <Typography variant="caption" sx={{ ml: 0.3, fontSize: "0.55rem" }}>
+                    <Typography
+                      variant="caption"
+                      sx={{ ml: 0.3, fontSize: "0.55rem" }}
+                    >
                       10
                     </Typography>
                   </Button>
@@ -921,7 +988,10 @@ export default function ControlPanel({ currentProject }) {
                     }}
                   >
                     <ArrowForward sx={{ fontSize: "1.1rem" }} />
-                    <Typography variant="caption" sx={{ ml: 0.4, fontSize: "0.6rem" }}>
+                    <Typography
+                      variant="caption"
+                      sx={{ ml: 0.4, fontSize: "0.6rem" }}
+                    >
                       100
                     </Typography>
                   </Button>
@@ -947,7 +1017,11 @@ export default function ControlPanel({ currentProject }) {
                     icon={<Stop />}
                     clickable={connected}
                     onClick={handleStop}
-                    sx={{ minWidth: 110, textTransform: "none", fontWeight: "bold" }}
+                    sx={{
+                      minWidth: 110,
+                      textTransform: "none",
+                      fontWeight: "bold",
+                    }}
                   />
                   <Chip
                     label="Auto Home"
@@ -959,7 +1033,11 @@ export default function ControlPanel({ currentProject }) {
                       if (!connected) return;
                       handleHome();
                     }}
-                    sx={{ minWidth: 110, textTransform: "none", fontWeight: "bold" }}
+                    sx={{
+                      minWidth: 110,
+                      textTransform: "none",
+                      fontWeight: "bold",
+                    }}
                   />
                   <Chip
                     label="Set Home"
@@ -970,7 +1048,11 @@ export default function ControlPanel({ currentProject }) {
                       if (!connected) return;
                       sendCommand("G92 X0 Y0 Z0");
                     }}
-                    sx={{ minWidth: 110, textTransform: "none", fontWeight: "bold" }}
+                    sx={{
+                      minWidth: 110,
+                      textTransform: "none",
+                      fontWeight: "bold",
+                    }}
                   />
 
                   <Tooltip
@@ -983,14 +1065,23 @@ export default function ControlPanel({ currentProject }) {
                   >
                     <span>
                       <Chip
-                        label={(motionMode || "relative") === "relative" ? "Relative" : "Absolute"}
-                        color={motionMode === "relative" ? "primary" : "default"}
-                        variant={motionMode === "relative" ? "filled" : "outlined"}
+                        label={
+                          (motionMode || "relative") === "relative"
+                            ? "Relative"
+                            : "Absolute"
+                        }
+                        color={
+                          motionMode === "relative" ? "primary" : "default"
+                        }
+                        variant={
+                          motionMode === "relative" ? "filled" : "outlined"
+                        }
                         clickable={connected}
                         onClick={async () => {
                           if (!connected) return;
                           const current = motionMode || "relative";
-                          const newMode = current === "relative" ? "absolute" : "relative";
+                          const newMode =
+                            current === "relative" ? "absolute" : "relative";
                           const gcode = newMode === "relative" ? "G91" : "G90";
                           setMotionMode(newMode); // optimistic
                           try {
@@ -999,7 +1090,11 @@ export default function ControlPanel({ currentProject }) {
                             setMotionMode(current);
                           }
                         }}
-                        sx={{ minWidth: 110, textTransform: "none", fontWeight: "bold" }}
+                        sx={{
+                          minWidth: 110,
+                          textTransform: "none",
+                          fontWeight: "bold",
+                        }}
                       />
                     </span>
                   </Tooltip>
@@ -1019,7 +1114,11 @@ export default function ControlPanel({ currentProject }) {
                         variant={penState === "up" ? "filled" : "outlined"}
                         onClick={connected ? handleTogglePen : undefined}
                         clickable={connected}
-                        sx={{ minWidth: 110, textTransform: "none", fontWeight: "bold" }}
+                        sx={{
+                          minWidth: 110,
+                          textTransform: "none",
+                          fontWeight: "bold",
+                        }}
                       />
                     </span>
                   </Tooltip>
@@ -1031,15 +1130,27 @@ export default function ControlPanel({ currentProject }) {
 
         {/* Command/Response Log spanning full height */}
         <Grid item xs={12} md={6} sx={{ display: "flex" }}>
-          <Paper sx={{ p: 3, display: "flex", flexDirection: "column", flex: 1 }}>
-            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
+          <Paper
+            sx={{ p: 3, display: "flex", flexDirection: "column", flex: 1 }}
+          >
+            <Box
+              sx={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                mb: 2,
+              }}
+            >
               <Typography variant="h6">Command/Response Log</Typography>
               <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                 {commandLog.length > LOG_PAGE_SIZE && (
                   <Pagination
                     size="small"
                     color="primary"
-                    count={Math.max(1, Math.ceil(commandLog.length / LOG_PAGE_SIZE))}
+                    count={Math.max(
+                      1,
+                      Math.ceil(commandLog.length / LOG_PAGE_SIZE)
+                    )}
                     page={logPage}
                     onChange={(_, value) => setLogPage(value)}
                   />
@@ -1071,20 +1182,32 @@ export default function ControlPanel({ currentProject }) {
               ref={logContainerRef}
             >
               {commandLog.length === 0 ? (
-                <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>
-                  No commands sent yet. Connect and send commands to see activity here.
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{ p: 2 }}
+                >
+                  No commands sent yet. Connect and send commands to see
+                  activity here.
                 </Typography>
               ) : (
                 (() => {
-                  const totalPages = Math.max(1, Math.ceil(commandLog.length / LOG_PAGE_SIZE));
+                  const totalPages = Math.max(
+                    1,
+                    Math.ceil(commandLog.length / LOG_PAGE_SIZE)
+                  );
                   const safePage = Math.min(logPage, totalPages);
                   const start = (safePage - 1) * LOG_PAGE_SIZE;
                   const end = start + LOG_PAGE_SIZE;
                   const pageEntries = commandLog.slice(start, end);
 
                   return pageEntries.map((entry, index) => {
-                    const timestamp = new Date(entry.timestamp).toLocaleTimeString();
-                    const entryKey = `${entry.timestamp}-${entry.command}-${start + index}`;
+                    const timestamp = new Date(
+                      entry.timestamp
+                    ).toLocaleTimeString();
+                    const entryKey = `${entry.timestamp}-${entry.command}-${
+                      start + index
+                    }`;
                     const isExpanded = expandedEntries.has(entryKey);
                     const responseText = entry.response || "";
                     const truncated =
@@ -1104,13 +1227,22 @@ export default function ControlPanel({ currentProject }) {
                             overflowWrap: "anywhere",
                           }}
                         >
-                          <Box component="span" sx={{ color: "text.secondary", mr: 1 }}>
+                          <Box
+                            component="span"
+                            sx={{ color: "text.secondary", mr: 1 }}
+                          >
                             [{timestamp}]
                           </Box>
-                          <Box component="span" sx={{ color: "primary.main", fontWeight: "bold" }}>
+                          <Box
+                            component="span"
+                            sx={{ color: "primary.main", fontWeight: "bold" }}
+                          >
                             → {entry.command}
                           </Box>
-                          <Box component="span" sx={{ color: "success.main", ml: 1 }}>
+                          <Box
+                            component="span"
+                            sx={{ color: "success.main", ml: 1 }}
+                          >
                             ← {displayText}
                           </Box>
                         </Typography>
@@ -1171,7 +1303,6 @@ export default function ControlPanel({ currentProject }) {
             </Box>
           </Paper>
         </Grid>
-
       </Grid>
     </Box>
   );

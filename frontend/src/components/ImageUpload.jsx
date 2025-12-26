@@ -1,42 +1,45 @@
 import {
-    CheckCircle as CheckCircleIcon,
-    CloudUpload as CloudUploadIcon,
-    Delete as DeleteIcon,
-    FileUpload as FileUploadIcon,
-    Image as ImageIcon,
-    PlayArrow as PlayIcon,
-    Settings as SettingsIcon
+  CheckCircle as CheckCircleIcon,
+  CloudUpload as CloudUploadIcon,
+  Delete as DeleteIcon,
+  FileUpload as FileUploadIcon,
+  Image as ImageIcon,
+  PlayArrow as PlayIcon,
+  Settings as SettingsIcon,
 } from "@mui/icons-material";
 import {
-    Alert,
-    Box,
-    Button,
-    Card,
-    CardContent,
-    CardMedia,
-    Chip,
-    Dialog,
-    DialogActions,
-    DialogContent,
-    DialogTitle,
-    FormControl,
-    FormControlLabel,
-    Grid,
-    IconButton,
-    InputLabel,
-    LinearProgress,
-    MenuItem,
-    Paper,
-    Select,
-    Slider,
-    Stack,
-    Switch,
-    TextField,
-    Typography,
+  Alert,
+  Box,
+  Button,
+  Card,
+  CardContent,
+  CardMedia,
+  Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  FormControl,
+  FormControlLabel,
+  Grid,
+  IconButton,
+  InputLabel,
+  LinearProgress,
+  MenuItem,
+  Paper,
+  Select,
+  Slider,
+  Stack,
+  Switch,
+  TextField,
+  Typography,
 } from "@mui/material";
 import React, { useCallback, useState } from "react";
 import logoImage from "../assets/PolarVortexLogo_small.png";
-import { uploadImageToProject, resolveApiBaseUrl } from "../services/apiService";
+import {
+  resolveApiBaseUrl,
+  uploadImageToProject,
+} from "../services/apiService";
 
 /**
  * Image Upload component for PolarVortex
@@ -85,7 +88,9 @@ export default function ImageUpload({ project, onUploadComplete }) {
   const validateAndSetFile = (file) => {
     // Check file type
     if (!file.type.startsWith("image/")) {
-      setErrorMessage("Please select a valid image file (JPEG, PNG, GIF, etc.)");
+      setErrorMessage(
+        "Please select a valid image file (JPEG, PNG, GIF, etc.)"
+      );
       return;
     }
 
@@ -114,7 +119,9 @@ export default function ImageUpload({ project, onUploadComplete }) {
   // Check for name collision
   const checkNameCollision = async (name) => {
     try {
-      const response = await fetch(`${resolveApiBaseUrl()}/check-directory/${encodeURIComponent(name)}`);
+      const response = await fetch(
+        `${resolveApiBaseUrl()}/check-directory/${encodeURIComponent(name)}`
+      );
       const result = await response.json();
       return result.exists;
     } catch (error) {
@@ -173,7 +180,6 @@ export default function ImageUpload({ project, onUploadComplete }) {
       if (onUploadComplete) {
         onUploadComplete(project, response);
       }
-
     } catch (error) {
       setUploadStatus("error");
       setErrorMessage(error?.message || "Upload failed. Please try again.");
@@ -208,20 +214,24 @@ export default function ImageUpload({ project, onUploadComplete }) {
     <Box>
       {/* Header with Logo */}
       <Box sx={{ display: "flex", alignItems: "center", mb: 2 }}>
-        <img 
-          src={logoImage} 
-          alt="PolarVortex Logo" 
-          style={{ height: "40px", width: "auto", marginRight: "16px" }} 
+        <img
+          src={logoImage}
+          alt="PolarVortex Logo"
+          style={{ height: "40px", width: "auto", marginRight: "16px" }}
         />
         <Box>
           <Typography variant="h4" gutterBottom sx={{ mb: 0 }}>
             {project ? `Upload to ${project.name}` : "Image Upload"}
           </Typography>
-          <Typography variant="body1" color="text.secondary" paragraph sx={{ mb: 0 }}>
-            {project 
+          <Typography
+            variant="body1"
+            color="text.secondary"
+            paragraph
+            sx={{ mb: 0 }}
+          >
+            {project
               ? `Upload and process an image for the "${project.name}" project.`
-              : "Please select a project to upload images."
-            }
+              : "Please select a project to upload images."}
           </Typography>
         </Box>
       </Box>
@@ -256,20 +266,25 @@ export default function ImageUpload({ project, onUploadComplete }) {
 
             <Box sx={{ textAlign: "center" }}>
               {selectedFile ? (
-                <CheckCircleIcon sx={{ fontSize: 48, color: "success.main", mb: 2 }} />
+                <CheckCircleIcon
+                  sx={{ fontSize: 48, color: "success.main", mb: 2 }}
+                />
               ) : (
-                <CloudUploadIcon sx={{ fontSize: 48, color: "primary.main", mb: 2 }} />
+                <CloudUploadIcon
+                  sx={{ fontSize: 48, color: "primary.main", mb: 2 }}
+                />
               )}
 
               <Typography variant="h6" gutterBottom>
-                {selectedFile ? "File Selected" : "Drop image here or click to browse"}
+                {selectedFile
+                  ? "File Selected"
+                  : "Drop image here or click to browse"}
               </Typography>
 
               <Typography variant="body2" color="text.secondary">
                 {selectedFile
                   ? `${selectedFile.name} (${getFileSize(selectedFile.size)})`
-                  : "Supports JPEG, PNG, GIF up to 10MB"
-                }
+                  : "Supports JPEG, PNG, GIF up to 10MB"}
               </Typography>
             </Box>
           </Paper>
@@ -283,7 +298,11 @@ export default function ImageUpload({ project, onUploadComplete }) {
                 value={directoryName}
                 onChange={handleDirectoryNameChange}
                 error={nameCollision}
-                helperText={nameCollision ? "A directory with this name already exists. Please choose a different name." : "This will be the name of the directory where your image is stored."}
+                helperText={
+                  nameCollision
+                    ? "A directory with this name already exists. Please choose a different name."
+                    : "This will be the name of the directory where your image is stored."
+                }
                 disabled={uploadStatus === "uploading"}
                 sx={{ mb: 2 }}
               />
@@ -297,7 +316,12 @@ export default function ImageUpload({ project, onUploadComplete }) {
                 variant="contained"
                 startIcon={<PlayIcon />}
                 onClick={handleUpload}
-                disabled={uploadStatus === "uploading" || nameCollision || !directoryName.trim() || !project}
+                disabled={
+                  uploadStatus === "uploading" ||
+                  nameCollision ||
+                  !directoryName.trim() ||
+                  !project
+                }
                 fullWidth
               >
                 Process & Upload
@@ -433,7 +457,10 @@ export default function ImageUpload({ project, onUploadComplete }) {
               <Slider
                 value={processingSettings.threshold}
                 onChange={(_, value) =>
-                  setProcessingSettings(prev => ({ ...prev, threshold: value }))
+                  setProcessingSettings((prev) => ({
+                    ...prev,
+                    threshold: value,
+                  }))
                 }
                 min={0}
                 max={255}
@@ -452,7 +479,10 @@ export default function ImageUpload({ project, onUploadComplete }) {
                 <Select
                   value={processingSettings.resolution}
                   onChange={(e) =>
-                    setProcessingSettings(prev => ({ ...prev, resolution: e.target.value }))
+                    setProcessingSettings((prev) => ({
+                      ...prev,
+                      resolution: e.target.value,
+                    }))
                   }
                   label="Resolution"
                 >
@@ -470,7 +500,10 @@ export default function ImageUpload({ project, onUploadComplete }) {
                   <Switch
                     checked={processingSettings.invert}
                     onChange={(e) =>
-                      setProcessingSettings(prev => ({ ...prev, invert: e.target.checked }))
+                      setProcessingSettings((prev) => ({
+                        ...prev,
+                        invert: e.target.checked,
+                      }))
                     }
                   />
                 }
@@ -484,7 +517,10 @@ export default function ImageUpload({ project, onUploadComplete }) {
                   <Switch
                     checked={processingSettings.dither}
                     onChange={(e) =>
-                      setProcessingSettings(prev => ({ ...prev, dither: e.target.checked }))
+                      setProcessingSettings((prev) => ({
+                        ...prev,
+                        dither: e.target.checked,
+                      }))
                     }
                   />
                 }
@@ -501,7 +537,10 @@ export default function ImageUpload({ project, onUploadComplete }) {
                     type="number"
                     value={processingSettings.maxWidth}
                     onChange={(e) =>
-                      setProcessingSettings(prev => ({ ...prev, maxWidth: parseInt(e.target.value) }))
+                      setProcessingSettings((prev) => ({
+                        ...prev,
+                        maxWidth: parseInt(e.target.value),
+                      }))
                     }
                     inputProps={{ min: 100, max: 2000 }}
                   />
@@ -513,7 +552,10 @@ export default function ImageUpload({ project, onUploadComplete }) {
                     type="number"
                     value={processingSettings.maxHeight}
                     onChange={(e) =>
-                      setProcessingSettings(prev => ({ ...prev, maxHeight: parseInt(e.target.value) }))
+                      setProcessingSettings((prev) => ({
+                        ...prev,
+                        maxHeight: parseInt(e.target.value),
+                      }))
                     }
                     inputProps={{ min: 100, max: 2000 }}
                   />
@@ -532,4 +574,3 @@ export default function ImageUpload({ project, onUploadComplete }) {
     </Box>
   );
 }
-
