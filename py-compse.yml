@@ -80,9 +80,13 @@ services:
         max-size: "10m"
         max-file: "3"
 
-B
-A
-B
+  ubuntu:
+    image: ubuntu:20.04
+    command: sleep infinity
+    volumes:
+      - ./local_storage:/app/local_storage
+    networks:
+      - polarvortex-network
 
 
 networks:
