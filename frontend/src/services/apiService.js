@@ -10,18 +10,6 @@ export async function getStatus() {
   }
 }
 
-export async function sendCommand(cmd) {
-  try {
-    const response = await fetch(`${BASE_URL}/command/${cmd}`, {
-      method: "POST",
-    });
-    return await response.json();
-  } catch (err) {
-    console.error("Error sending command:", err);
-    return { error: err.message };
-  }
-}
-
 // Project Management API
 export async function createProject(projectData) {
   try {

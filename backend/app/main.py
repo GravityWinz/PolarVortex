@@ -243,37 +243,6 @@ async def get_status():
         logger.error(f"Status error: {e}")
         return {"error": str(e)}
 
-@app.post("/command/{cmd}")
-async def send_command(cmd: str):
-    """Send command to Arduino (legacy endpoint)"""
-    try:
-        if arduino and arduino.is_open:
-            command = f"{cmd}\n".encode()
-            arduino.write(command)
-            
-            # Update status
-            current_status["current_command"] = cmd
-            if cmd.upper() in ["START", "DRAW"]:
-                current_status["drawing"] = True
-                current_status["progress"] = 0
-            elif cmd.upper() in ["STOP", "PAUSE"]:
-                current_status["drawing"] = False
-            
-            # Broadcast status update
-            await manager.broadcast(json.dumps({
-                "type": "status_update",
-                "command": cmd,
-                "drawing": current_status["drawing"],
-                "progress": current_status["progress"]
-            }))
-            
-            return {"success": True, "command": cmd, "sent": True}
-        else:
-            return {"success": False, "error": "Arduino not connected"}
-    except Exception as e:
-        logger.error(f"Command error: {e}")
-        return {"success": False, "error": str(e)}
-
 # Plotter connection management endpoints
 @app.get("/plotter/ports")
 async def get_available_ports():

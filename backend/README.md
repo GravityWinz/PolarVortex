@@ -126,10 +126,6 @@ Once the server is running, visit:
 - `GET /status` - Get current system status
 - `GET /` - API information and health check
 
-#### Commands
-- `POST /command/{cmd}` - Send command to Arduino
-  - Commands: `START`, `STOP`, `PAUSE`, `RESUME`, `STATUS`
-
 #### Image Processing
 - `POST /upload` - Upload and process image
 - `GET /projects` - List processed images
