@@ -1,5 +1,6 @@
 from fastapi import FastAPI, UploadFile, WebSocket, WebSocketDisconnect, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse, FileResponse
 from contextlib import asynccontextmanager
 import serial
@@ -105,6 +106,27 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+
+def custom_openapi():
+    """Sort endpoints alphabetically in Swagger UI for easier scanning."""
+    if app.openapi_schema:
+        return app.openapi_schema
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    # Order paths and tags consistently
+    schema["paths"] = dict(sorted(schema.get("paths", {}).items(), key=lambda item: item[0]))
+    if "tags" in schema and isinstance(schema["tags"], list):
+        schema["tags"] = sorted(schema["tags"], key=lambda t: t.get("name", ""))
+    app.openapi_schema = schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
 
 # CORS middleware for frontend communication (allow override via CORS_ORIGINS env)
 cors_origins = Settings.get_cors_origins()
@@ -374,6 +396,23 @@ class SvgToGcodeRequest(BaseModel):
     paper_size: str = "A4"
     fit_mode: str = "fit"  # fit | center
     pen_mapping: Optional[str] = None
+
+
+def _resolve_paper_dimensions(paper_size: str) -> tuple[float, float, str]:
+    """Look up paper width/height from configuration by size name or ID."""
+    papers = config_service.list_papers().papers
+    paper = next(
+        (
+            p for p in papers
+            if p.paper_size.lower() == paper_size.lower() or p.id == paper_size
+        ),
+        None,
+    )
+    if not paper:
+        paper = config_service.get_default_paper()
+    if not paper:
+        raise HTTPException(status_code=400, detail="No paper configurations found")
+    return float(paper.width), float(paper.height), paper.paper_size
 
 def _response_contains_ok(responses: List[str]) -> bool:
     """Check if any response line includes an OK acknowledgement."""
@@ -650,10 +689,13 @@ async def convert_svg_to_gcode(project_id: str, request: SvgToGcodeRequest):
             gcode_filename = f"{base_name}_converted_{uuid.uuid4().hex[:8]}.gcode"
             target_path = gcode_dir / gcode_filename
 
+        paper_width_mm, paper_height_mm, resolved_paper_size = _resolve_paper_dimensions(request.paper_size)
+
         await convert_svg_to_gcode_file(
             svg_path=svg_path,
             output_path=target_path,
-            paper=request.paper_size,
+            paper_width_mm=paper_width_mm,
+            paper_height_mm=paper_height_mm,
             fit_mode=request.fit_mode,
             pen_mapping=request.pen_mapping,
         )

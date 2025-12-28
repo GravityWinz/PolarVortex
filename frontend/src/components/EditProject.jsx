@@ -42,6 +42,7 @@ import {
   getProjectAssets,
   getProjectFileText,
   getProjectFileUrl,
+  getPapers,
 } from "../services/apiService";
 
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "bmp", "webp"];
@@ -166,12 +167,14 @@ export default function EditProject({ currentProject }) {
   const [convertDialogOpen, setConvertDialogOpen] = useState(false);
   const [convertTarget, setConvertTarget] = useState(null);
   const [convertOptions, setConvertOptions] = useState({
-    paperSize: "A4",
+    paperSize: "",
     fitMode: "fit",
     penMapping: "default",
   });
   const [convertLoading, setConvertLoading] = useState(false);
   const [convertError, setConvertError] = useState("");
+  const [paperOptions, setPaperOptions] = useState([]);
+  const [paperLoadError, setPaperLoadError] = useState("");
 
   const hasAssets = useMemo(
     () =>
@@ -220,6 +223,29 @@ export default function EditProject({ currentProject }) {
     loadAssets();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentProject?.id]);
+
+  useEffect(() => {
+    const loadPapers = async () => {
+      try {
+        const resp = await getPapers();
+        if (resp.error) {
+          throw new Error(resp.error);
+        }
+        const papers = resp.papers || [];
+        setPaperOptions(papers);
+        if (!convertOptions.paperSize && papers.length) {
+          const defaultPaper = papers.find((p) => p.is_default) || papers[0];
+          setConvertOptions((prev) => ({
+            ...prev,
+            paperSize: defaultPaper.id || defaultPaper.paper_size,
+          }));
+        }
+      } catch (err) {
+        setPaperLoadError(err.message || "Failed to load papers");
+      }
+    };
+    loadPapers();
+  }, [convertOptions.paperSize]);
 
   useEffect(() => {
     if (!selectedAsset || selectedAsset.type !== "gcode" || !currentProject) {
@@ -689,11 +715,25 @@ export default function EditProject({ currentProject }) {
                     paperSize: e.target.value,
                   }))
                 }
+                disabled={!paperOptions.length}
               >
-                <MenuItem value="A4">A4</MenuItem>
-                <MenuItem value="Letter">Letter</MenuItem>
-                <MenuItem value="A3">A3</MenuItem>
+                {paperOptions.map((paper) => (
+                  <MenuItem key={paper.id} value={paper.id || paper.paper_size}>
+                    {paper.name || paper.paper_size} ({paper.width}×{paper.height}mm)
+                    {paper.is_default ? " • default" : ""}
+                  </MenuItem>
+                ))}
               </Select>
+              {!paperOptions.length && (
+                <Typography variant="caption" color="text.secondary">
+                  No papers configured yet. Add one in Configuration → Papers.
+                </Typography>
+              )}
+              {paperLoadError && (
+                <Typography variant="caption" color="error">
+                  {paperLoadError}
+                </Typography>
+              )}
             </FormControl>
 
             <FormControl fullWidth>

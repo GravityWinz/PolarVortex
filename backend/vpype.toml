@@ -1,0 +1,36 @@
+# vpype/vpype-gcode profile for PolarVortex plotter
+[gwrite.polarvortex]
+# Work in millimeters for Marlin-style controllers
+unit = "mm"
+
+# Initial setup: absolute coords, mm units, and pen up
+document_start = """
+G90 ; absolute positioning
+G21 ; units in mm
+M280 P0 S110 ; pen up
+"""
+
+# Ensure pen is raised between collections
+linecollection_start = "M280 P0 S110\n"
+
+# First segment in a path: move then pen down
+segment_first = """
+G0 X{x:.3f} Y{y:.3f}
+M280 P0 S130 ; pen down
+"""
+
+# Subsequent segments while drawing
+segment = "G1 X{x:.3f} Y{y:.3f} F1500\n"
+
+# Last segment in a path: finish move then pen up
+segment_last = """
+G1 X{x:.3f} Y{y:.3f} F1500
+M280 P0 S110 ; pen up
+"""
+
+# Wrap up program with pen up
+document_end = """
+M280 P0 S110 ; ensure pen up
+M2 ; program end
+"""
+

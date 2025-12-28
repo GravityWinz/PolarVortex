@@ -7,16 +7,12 @@ from pathlib import Path
 from typing import Literal, Optional
 
 logger = logging.getLogger(__name__)
-LOG_PATH = Path(r"c:\Users\mlutz\OneDrive\Desktop\Cursor\PolarVortex\.cursor\debug.log")
+# Write debug logs inside the repo so paths work in containers and on host
+LOG_PATH = Path(__file__).resolve().parent.parent / ".cursor" / "debug.log"
+DEFAULT_VPYPE_CONFIG = Path(__file__).resolve().parent.parent / "vpype.toml"
+DEFAULT_GWRITE_PROFILE = "polarvortex"
 
-PaperSize = Literal["A4", "Letter", "A3"]
 FitMode = Literal["fit", "center"]
-
-PAPER_DIMENSIONS_MM = {
-    "A4": (210.0, 297.0),
-    "Letter": (215.9, 279.4),
-    "A3": (297.0, 420.0),
-}
 
 
 def _dbg_log(hypothesis: str, location: str, message: str, data: Optional[dict] = None, run_id: str = "pre-fix"):
@@ -39,9 +35,17 @@ def _dbg_log(hypothesis: str, location: str, message: str, data: Optional[dict] 
         logger.debug("debug log write failed", exc_info=True)
 
 
-def build_vpype_pipeline(svg_path: Path, paper: PaperSize, fit_mode: FitMode, output_path: Path) -> str:
+def build_vpype_pipeline(
+    svg_path: Path,
+    paper_width_mm: float,
+    paper_height_mm: float,
+    fit_mode: FitMode,
+    output_path: Path,
+    config_path: Optional[Path] = DEFAULT_VPYPE_CONFIG,
+    profile: str = DEFAULT_GWRITE_PROFILE,
+) -> str:
     """Build a vpype pipeline string for SVG->G-code conversion."""
-    width, height = PAPER_DIMENSIONS_MM.get(paper, PAPER_DIMENSIONS_MM["A4"])
+    width, height = float(paper_width_mm), float(paper_height_mm)
     # `layout` keeps things centered by default. With `--fit-to-margins 0` it
     # scales uniformly to fit the page, avoiding the deprecated/invalid
     # `--origin` flag we previously passed to `scaleto`.
@@ -52,10 +56,18 @@ def build_vpype_pipeline(svg_path: Path, paper: PaperSize, fit_mode: FitMode, ou
 
     # vpype-gcode plugin provides `gwrite` for G-code export
     # Commands in vpype are space-separated (no shell pipes needed)
+    # Prefer repo-owned vpype config/profile for consistent pen control
+    config_arg = ""
+    if config_path and config_path.exists():
+        config_arg = f'--config "{config_path}" '
+    else:
+        logger.warning("vpype config not found at %s, falling back to defaults", config_path)
+
     pipeline = (
+        f"{config_arg}"
         f'read "{svg_path}" '
         f"{place_cmd} "
-        f'gwrite --profile gcode \"{output_path}\"'
+        f'gwrite --profile {profile} \"{output_path}\"'
     )
     return pipeline
 
@@ -86,7 +98,8 @@ async def run_vpype_pipeline(pipeline: str) -> None:
 async def convert_svg_to_gcode_file(
     svg_path: Path,
     output_path: Path,
-    paper: PaperSize = "A4",
+    paper_width_mm: float,
+    paper_height_mm: float,
     fit_mode: FitMode = "fit",
     pen_mapping: Optional[str] = None,  # reserved for future use
 ) -> None:
@@ -95,12 +108,21 @@ async def convert_svg_to_gcode_file(
     _dbg_log("H1", "vpype_converter.py:79", "convert_svg_to_gcode_file start", {
         "svg_path": str(svg_path),
         "output_path": str(output_path),
-        "paper": paper,
+        "paper_width_mm": paper_width_mm,
+        "paper_height_mm": paper_height_mm,
         "fit_mode": fit_mode,
         "pen_mapping": pen_mapping,
     })
     # #endregion
-    pipeline = build_vpype_pipeline(svg_path, paper, fit_mode, output_path)
+    pipeline = build_vpype_pipeline(
+        svg_path=svg_path,
+        paper_width_mm=paper_width_mm,
+        paper_height_mm=paper_height_mm,
+        fit_mode=fit_mode,
+        output_path=output_path,
+        config_path=DEFAULT_VPYPE_CONFIG,
+        profile=DEFAULT_GWRITE_PROFILE,
+    )
     await run_vpype_pipeline(pipeline)
     # #region agent log
     _dbg_log("H1", "vpype_converter.py:91", "convert_svg_to_gcode_file done", {"output_exists": output_path.exists()})
