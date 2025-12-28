@@ -66,6 +66,10 @@ export default function PlotterConfiguration() {
     pen_up_position: 10.0,
     pen_down_position: 0.0,
     pen_speed: 20.0,
+    gcode_pen_up_command: 'M280 P0 S110',
+    gcode_pen_down_command: 'M280 P0 S130',
+    gcode_on_connect: '',
+    gcode_before_print: '',
     home_position_x: 0.0,
     home_position_y: 0.0,
     is_default: false,
@@ -105,6 +109,10 @@ export default function PlotterConfiguration() {
       pen_up_position: 10.0,
       pen_down_position: 0.0,
       pen_speed: 20.0,
+      gcode_pen_up_command: 'M280 P0 S110',
+      gcode_pen_down_command: 'M280 P0 S130',
+      gcode_on_connect: '',
+      gcode_before_print: '',
       home_position_x: 0.0,
       home_position_y: 0.0,
       is_default: false,
@@ -126,6 +134,10 @@ export default function PlotterConfiguration() {
       pen_up_position: plotter.pen_up_position,
       pen_down_position: plotter.pen_down_position,
       pen_speed: plotter.pen_speed,
+      gcode_pen_up_command: plotter.gcode_sequences?.pen_up_command || 'M280 P0 S110',
+      gcode_pen_down_command: plotter.gcode_sequences?.pen_down_command || 'M280 P0 S130',
+      gcode_on_connect: (plotter.gcode_sequences?.on_connect || []).join('\n'),
+      gcode_before_print: (plotter.gcode_sequences?.before_print || []).join('\n'),
       home_position_x: plotter.home_position_x,
       home_position_y: plotter.home_position_y,
       is_default: plotter.is_default,
@@ -135,11 +147,20 @@ export default function PlotterConfiguration() {
 
   const handleSave = async () => {
     try {
+      const payload = {
+        ...formData,
+        gcode_sequences: {
+          on_connect: (formData.gcode_on_connect || '').split('\n').map((s) => s.trim()).filter(Boolean),
+          before_print: (formData.gcode_before_print || '').split('\n').map((s) => s.trim()).filter(Boolean),
+          pen_up_command: formData.gcode_pen_up_command || 'M280 P0 S110',
+          pen_down_command: formData.gcode_pen_down_command || 'M280 P0 S130',
+        },
+      };
       if (editingPlotter) {
-        await updatePlotter(editingPlotter.id, formData);
+        await updatePlotter(editingPlotter.id, payload);
         setSuccess('Plotter updated successfully');
       } else {
-        await createPlotter(formData);
+        await createPlotter(payload);
         setSuccess('Plotter created successfully');
       }
       setDialogOpen(false);
@@ -414,6 +435,25 @@ export default function PlotterConfiguration() {
               />
             </Grid>
 
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Pen Up Command"
+                value={formData.gcode_pen_up_command}
+                onChange={(e) => setFormData(prev => ({ ...prev, gcode_pen_up_command: e.target.value }))}
+                helperText="Command sent to raise the pen (e.g., servo angle)"
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Pen Down Command"
+                value={formData.gcode_pen_down_command}
+                onChange={(e) => setFormData(prev => ({ ...prev, gcode_pen_down_command: e.target.value }))}
+                helperText="Command sent to lower the pen"
+              />
+            </Grid>
+
             <Grid item xs={12}>
               <Divider sx={{ my: 2 }} />
             </Grid>
@@ -440,6 +480,42 @@ export default function PlotterConfiguration() {
                 value={formData.home_position_y}
                 onChange={(e) => setFormData(prev => ({ ...prev, home_position_y: parseFloat(e.target.value) || 0 }))}
                 required
+              />
+            </Grid>
+
+            <Grid item xs={12}>
+              <Divider sx={{ my: 2 }} />
+            </Grid>
+
+            {/* Automatic G-code */}
+            <Grid item xs={12}>
+              <Typography variant="h6" gutterBottom>Automatic G-code</Typography>
+              <Typography variant="body2" color="text.secondary" gutterBottom>
+                Commands run automatically for this plotter. One command per line; empty lines are ignored.
+              </Typography>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                multiline
+                minRows={6}
+                label="On Connect"
+                value={formData.gcode_on_connect}
+                onChange={(e) => setFormData(prev => ({ ...prev, gcode_on_connect: e.target.value }))}
+                placeholder="G21&#10;G90"
+                helperText="Sent immediately after connecting to the plotter."
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                multiline
+                minRows={6}
+                label="Before Print Start"
+                value={formData.gcode_before_print}
+                onChange={(e) => setFormData(prev => ({ ...prev, gcode_before_print: e.target.value }))}
+                placeholder="G92 X0 Y0 Z0"
+                helperText="Sent right before a print job begins."
               />
             </Grid>
 

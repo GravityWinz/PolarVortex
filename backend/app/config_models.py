@@ -4,6 +4,22 @@ from datetime import datetime
 from enum import Enum
 
 
+class GcodeSettings(BaseModel):
+    """Settings for automatic G-code sequences and pen control commands"""
+    on_connect: List[str] = Field(default_factory=list, description="Commands to run right after connecting to the plotter")
+    before_print: List[str] = Field(default_factory=list, description="Commands to run just before starting a print job")
+    pen_up_command: str = Field(default="M280 P0 S110", description="Command to raise pen")
+    pen_down_command: str = Field(default="M280 P0 S130", description="Command to lower pen")
+
+
+class GcodeSettingsUpdate(BaseModel):
+    """Model for updating automatic G-code sequences"""
+    on_connect: Optional[List[str]] = Field(None, description="Commands to run after connect")
+    before_print: Optional[List[str]] = Field(None, description="Commands to run before print start")
+    pen_up_command: Optional[str] = Field(None, description="Command to raise pen")
+    pen_down_command: Optional[str] = Field(None, description="Command to lower pen")
+
+
 class PlotterType(str, Enum):
     """Enum for different plotter types"""
     POLARGRAPH = "polargraph"
@@ -44,6 +60,7 @@ class PlotterSettings(BaseModel):
     pen_up_position: float = Field(default=10.0, description="Pen up position in mm")
     pen_down_position: float = Field(default=0.0, description="Pen down position in mm")
     pen_speed: float = Field(default=20.0, description="Pen movement speed in mm/s")
+    gcode_sequences: GcodeSettings = Field(default_factory=GcodeSettings, description="Automatic G-code for this plotter")
     home_position_x: float = Field(default=0.0, description="Home position X coordinate")
     home_position_y: float = Field(default=0.0, description="Home position Y coordinate")
     is_default: bool = Field(default=False, description="Whether this is the default plotter")
@@ -76,6 +93,7 @@ class PlotterCreate(BaseModel):
     pen_up_position: float = Field(default=10.0, description="Pen up position in mm")
     pen_down_position: float = Field(default=0.0, description="Pen down position in mm")
     pen_speed: float = Field(default=20.0, description="Pen movement speed in mm/s")
+    gcode_sequences: GcodeSettings = Field(default_factory=GcodeSettings, description="Automatic G-code for this plotter")
     home_position_x: float = Field(default=0.0, description="Home position X coordinate")
     home_position_y: float = Field(default=0.0, description="Home position Y coordinate")
     is_default: bool = Field(default=False, description="Whether this is the default plotter")
@@ -94,6 +112,7 @@ class PlotterUpdate(BaseModel):
     pen_up_position: Optional[float] = Field(None, description="Pen up position in mm")
     pen_down_position: Optional[float] = Field(None, description="Pen down position in mm")
     pen_speed: Optional[float] = Field(None, description="Pen movement speed in mm/s")
+    gcode_sequences: Optional[GcodeSettings] = Field(None, description="Automatic G-code for this plotter")
     home_position_x: Optional[float] = Field(None, description="Home position X coordinate")
     home_position_y: Optional[float] = Field(None, description="Home position Y coordinate")
     is_default: Optional[bool] = Field(None, description="Whether this is the default plotter")
@@ -133,6 +152,7 @@ class PlotterResponse(BaseModel):
     pen_up_position: float = Field(..., description="Pen up position in mm")
     pen_down_position: float = Field(..., description="Pen down position in mm")
     pen_speed: float = Field(..., description="Pen movement speed in mm/s")
+    gcode_sequences: GcodeSettings = Field(..., description="Automatic G-code for this plotter")
     home_position_x: float = Field(..., description="Home position X coordinate")
     home_position_y: float = Field(..., description="Home position Y coordinate")
     is_default: bool = Field(..., description="Whether this is the default plotter")
@@ -151,18 +171,6 @@ class PaperResponse(BaseModel):
     is_default: bool = Field(..., description="Whether this is the default paper")
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
-
-
-class GcodeSettings(BaseModel):
-    """Settings for automatic G-code sequences"""
-    on_connect: List[str] = Field(default_factory=list, description="Commands to run right after connecting to the plotter")
-    before_print: List[str] = Field(default_factory=list, description="Commands to run just before starting a print job")
-
-
-class GcodeSettingsUpdate(BaseModel):
-    """Model for updating automatic G-code sequences"""
-    on_connect: Optional[List[str]] = Field(None, description="Commands to run after connect")
-    before_print: Optional[List[str]] = Field(None, description="Commands to run before print start")
 
 
 class PlotterListResponse(BaseModel):

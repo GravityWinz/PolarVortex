@@ -1,5 +1,6 @@
 import os
 import yaml
+import copy
 from typing import List, Dict, Any
 from pathlib import Path
 
@@ -139,6 +140,11 @@ class Config:
     
     def _get_default_config(self) -> Dict[str, Any]:
         """Get default configuration values"""
+        # Prefer current in-memory config as the template for defaults (so we
+        # regenerate using existing settings when available)
+        if getattr(self, "_config_data", None):
+            return copy.deepcopy(self._config_data)
+
         return {
             "api": {
                 "title": "PolarVortex API",
