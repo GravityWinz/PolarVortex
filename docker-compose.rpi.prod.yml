@@ -59,6 +59,9 @@ services:
     privileged: true
     group_add:
       - dialout
+    device_cgroup_rules:
+      - 'c 166:* rmw'
+    user: root
     networks:
       - polarvortex-network
     healthcheck:
