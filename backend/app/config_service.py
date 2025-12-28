@@ -341,8 +341,14 @@ class ConfigurationService:
     def _get_default_gcode_sequences(self) -> Dict[str, List[str]]:
         """Get default G-code sequences for automation"""
         return {
-            "on_connect": [],
-            "before_print": []
+            "on_connect": [
+                "M115; get machine status",
+                "G91; set relative motion mode",
+                "G21; set units to mm"
+            ],
+            "before_print": [
+                "G92 X0 Y0 Z0; set home position"
+            ]
         }
     
     def _validate_and_repair_config(self):

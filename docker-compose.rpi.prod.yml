@@ -2,15 +2,15 @@ version: '3.8'
 
 services:
   frontend:
-    build: 
+    build:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "80:80"  # Map to standard HTTP port
+      - "80:80"
     environment:
       - NODE_ENV=production
-      - VITE_API_BASE_URL=http://localhost:8000
-      - VITE_WS_BASE_URL=ws://localhost:8000
+      - VITE_API_BASE_URL=http://192.168.11.205:8000
+      - VITE_WS_BASE_URL=ws://192.168.11.205:8000
     env_file:
       - .env.production
     depends_on:
@@ -38,7 +38,7 @@ services:
       - /var/cache/nginx
 
   backend:
-    build: 
+    build:
       context: ./backend
       dockerfile: Dockerfile
     ports:
@@ -53,16 +53,11 @@ services:
       - BACKEND_PORT=8000
       - DEBUG=false
       - LOG_LEVEL=INFO
+      - CORS_ORIGINS=http://192.168.11.205,http://192.168.11.205:80
     env_file:
       - .env.production
-    # Serial port device access
-    # For Linux: Uncomment and adjust device path (e.g., /dev/ttyUSB0, /dev/ttyACM0)
-    # For Windows Docker Desktop: Use COM port mapping (see instructions below)
     devices:
-      # - /dev/ttyUSB0:/dev/ttyUSB0  # Common Linux Arduino port
-      - /dev/ttyACM0:/dev/ttyACM0  # Alternative Linux Arduino port
-    # Note: Production Dockerfile runs as non-root user - may need privileged: true
-    # or modify Dockerfile to add user to dialout group for serial port access
+      - /dev/ttyACM0:/dev/ttyACM0
     networks:
       - polarvortex-network
     healthcheck:
@@ -86,3 +81,4 @@ services:
 networks:
   polarvortex-network:
     driver: bridge
+

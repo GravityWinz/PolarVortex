@@ -204,7 +204,11 @@ class Config:
                 "default_invert": False
             },
             "gcode_sequences": {
-                "on_connect": [],
+                "on_connect": [
+                    "M115; get machine status",
+                    "G91; set relative motion mode",
+                    "G21; set units to mm"
+                ],
                 "before_print": []
             }
         }
