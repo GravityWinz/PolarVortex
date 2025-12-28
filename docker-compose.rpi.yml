@@ -58,6 +58,8 @@ services:
       - WATCHFILES_FORCE_POLLING=true
     env_file:
       - env.example
+    devices:
+      - /dev/ttyACM0:/dev/ttyACM0  # Alternative Linux Arduino port
     networks:
       - polarvortex-network
     healthcheck:
