@@ -3,14 +3,103 @@ import json
 import logging
 import shlex
 import time
+import textwrap
 from pathlib import Path
 from typing import Literal, Optional
 
 logger = logging.getLogger(__name__)
 # Write debug logs inside the repo so paths work in containers and on host
-LOG_PATH = Path(__file__).resolve().parent.parent / ".cursor" / "debug.log"
-DEFAULT_VPYPE_CONFIG = Path(__file__).resolve().parent.parent / "vpype.toml"
+# Persist vpype debug logs inside container storage
+LOG_PATH = Path("/app/local_storage/log/vpype.log")
+# Store vpype config in persistent local storage so it survives rebuilds
+DEFAULT_VPYPE_CONFIG = Path("/app/local_storage/config/vpype.toml")
 DEFAULT_GWRITE_PROFILE = "polarvortex"
+def _get_default_gcode_settings():
+    try:
+        from .config_service import config_service
+
+        plotter = config_service.get_default_plotter()
+        if plotter and getattr(plotter, "gcode_sequences", None):
+            return plotter.gcode_sequences
+    except Exception:
+        logger.warning("Falling back to hardcoded vpype defaults", exc_info=True)
+
+    class _Fallback:
+        pen_up_command = "M280 P0 S110"
+        pen_down_command = "M280 P0 S130"
+        on_connect = ["G90", "G21", "M280 P0 S110"]
+
+    return _Fallback()
+
+
+def build_vpype_config_content() -> str:
+    """Generate vpype config content using current plotter gcode settings."""
+    gcode = _get_default_gcode_settings()
+    pen_up = getattr(gcode, "pen_up_command", "M280 P0 S110") or "M280 P0 S110"
+    pen_down = getattr(gcode, "pen_down_command", "M280 P0 S130") or "M280 P0 S130"
+    on_connect = getattr(gcode, "on_connect", None) or []
+    # Ensure pen is up in document_start
+    doc_start_lines = list(on_connect)
+    if pen_up not in doc_start_lines:
+        doc_start_lines.append(pen_up)
+    document_start = "\n".join(doc_start_lines)
+
+    return textwrap.dedent(
+        f'''# vpype/vpype-gcode profile for PolarVortex plotter
+[gwrite.polarvortex]
+# Work in millimeters for Marlin-style controllers
+unit = "mm"
+
+# Initial setup: absolute coords, mm units, and pen up
+document_start = """
+{document_start}
+"""
+
+# Ensure pen is raised between collections
+linecollection_start = "{pen_up}\\n"
+
+# First segment in a path: move then pen down
+segment_first = """
+G0 X{{x:.3f}} Y{{y:.3f}}
+{pen_down}
+"""
+
+# Subsequent segments while drawing
+segment = "G1 X{{x:.3f}} Y{{y:.3f}} F1500\\n"
+
+# Last segment in a path: finish move then pen up
+segment_last = """
+G1 X{{x:.3f}} Y{{y:.3f}} F1500
+{pen_up}
+"""
+
+# Wrap up program with pen up
+document_end = """
+{pen_up} ; ensure pen up
+M2 ; program end
+"""
+'''
+    )
+
+
+def ensure_vpype_config(path: Path = DEFAULT_VPYPE_CONFIG) -> Path:
+    """Ensure vpype config exists and reflects current plotter G-code settings."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        content = build_vpype_config_content()
+        needs_write = True
+        if path.exists():
+            try:
+                existing = path.read_text(encoding="utf-8")
+                needs_write = existing != content
+            except Exception:
+                needs_write = True
+        if needs_write:
+            path.write_text(content, encoding="utf-8")
+    except Exception:
+        logger.error("Failed to ensure vpype config at %s", path, exc_info=True)
+    return path
+
 
 FitMode = Literal["fit", "center"]
 
@@ -56,12 +145,14 @@ def build_vpype_pipeline(
 
     # vpype-gcode plugin provides `gwrite` for G-code export
     # Commands in vpype are space-separated (no shell pipes needed)
-    # Prefer repo-owned vpype config/profile for consistent pen control
+    # Prefer local stored vpype config/profile for consistent pen control
     config_arg = ""
-    if config_path and config_path.exists():
-        config_arg = f'--config "{config_path}" '
-    else:
-        logger.warning("vpype config not found at %s, falling back to defaults", config_path)
+    if config_path:
+        ensure_vpype_config(config_path)
+        if config_path.exists():
+            config_arg = f'--config "{config_path}" '
+        else:
+            logger.warning("vpype config not found at %s, falling back to defaults", config_path)
 
     pipeline = (
         f"{config_arg}"
