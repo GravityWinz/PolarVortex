@@ -43,6 +43,7 @@ import {
   getProjectFileText,
   getProjectFileUrl,
   getPapers,
+  getProjectGcodeAnalysis,
 } from "../services/apiService";
 
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "bmp", "webp"];
@@ -159,6 +160,11 @@ export default function EditProject({ currentProject }) {
     content: "",
     error: "",
   });
+  const [gcodeAnalysis, setGcodeAnalysis] = useState({
+    loading: false,
+    data: null,
+    error: "",
+  });
   const [deletingFile, setDeletingFile] = useState(null);
   const [gcodeGeometry, setGcodeGeometry] = useState({
     segments: [],
@@ -250,6 +256,8 @@ export default function EditProject({ currentProject }) {
   useEffect(() => {
     if (!selectedAsset || selectedAsset.type !== "gcode" || !currentProject) {
       setGcodePreview({ loading: false, content: "", error: "" });
+      setGcodeAnalysis({ loading: false, data: null, error: "" });
+      setGcodeAnalysis({ loading: false, data: null, error: "" });
       return;
     }
 
@@ -308,6 +316,24 @@ export default function EditProject({ currentProject }) {
       setAssetError(err.message || "Failed to delete file");
     } finally {
       setDeletingFile(null);
+    }
+  };
+
+  const handleAnalyzeGcode = async () => {
+    if (!currentProject || !selectedAsset) return;
+    setGcodeAnalysis({ loading: true, data: null, error: "" });
+    try {
+      const result = await getProjectGcodeAnalysis(
+        currentProject.id,
+        selectedAsset.filename
+      );
+      setGcodeAnalysis({ loading: false, data: result, error: "" });
+    } catch (err) {
+      setGcodeAnalysis({
+        loading: false,
+        data: null,
+        error: err.message || "Failed to analyze G-code",
+      });
     }
   };
 
@@ -421,6 +447,98 @@ export default function EditProject({ currentProject }) {
     );
   };
 
+  const formatMinutes = (minutes) => {
+    if (minutes == null) return "—";
+    const totalSeconds = Math.round(minutes * 60);
+    const hrs = Math.floor(totalSeconds / 3600);
+    const mins = Math.floor((totalSeconds % 3600) / 60);
+    const secs = totalSeconds % 60;
+    if (hrs > 0) {
+      return `${hrs}h ${mins}m ${secs}s`;
+    }
+    if (mins > 0) {
+      return `${mins}m ${secs}s`;
+    }
+    return `${secs}s`;
+  };
+
+  const renderGcodeAnalysis = () => {
+    if (gcodeAnalysis.loading) {
+      return (
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
+          <CircularProgress size={18} />
+          <Typography variant="body2">Analyzing G-code…</Typography>
+        </Stack>
+      );
+    }
+
+    if (gcodeAnalysis.error) {
+      return (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {gcodeAnalysis.error}
+        </Alert>
+      );
+    }
+
+    if (!gcodeAnalysis.data) return null;
+
+    const a = gcodeAnalysis.data;
+    return (
+      <Paper variant="outlined" sx={{ p: 2, mb: 2, bgcolor: "grey.50" }}>
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+          <Typography variant="subtitle1">G-code Analysis</Typography>
+          <Chip
+            size="small"
+            label={`${(a.width_mm ?? 0).toFixed(2)}×${(a.height_mm ?? 0).toFixed(
+              2
+            )} mm`}
+          />
+          <Chip
+            size="small"
+            label={`Segments: ${a.move_commands} (draw ${a.pen_moves} / travel ${a.travel_moves})`}
+          />
+        </Stack>
+        <Grid container spacing={2}>
+          <Grid item xs={12} sm={6} md={4}>
+            <Typography variant="body2" color="text.secondary">
+              Estimated Time
+            </Typography>
+            <Typography variant="body1" fontWeight={600}>
+              {formatMinutes(a.estimated_time_minutes)}
+            </Typography>
+          </Grid>
+          <Grid item xs={12} sm={6} md={4}>
+            <Typography variant="body2" color="text.secondary">
+              Total Distance
+            </Typography>
+            <Typography variant="body1" fontWeight={600}>
+              {a.total_distance_mm.toFixed(1)} mm
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              Draw {a.pen_distance_mm.toFixed(1)} mm • Travel{" "}
+              {a.travel_distance_mm.toFixed(1)} mm
+            </Typography>
+          </Grid>
+          <Grid item xs={12} sm={6} md={4}>
+            <Typography variant="body2" color="text.secondary">
+              Feedrates (assumed)
+            </Typography>
+            <Typography variant="body1" fontWeight={600}>
+              Draw {a.feedrate_assumptions_mm_per_min.draw} / Travel{" "}
+              {a.feedrate_assumptions_mm_per_min.travel} mm/min
+            </Typography>
+            {a.average_feedrate_mm_per_min && (
+              <Typography variant="caption" color="text.secondary">
+                Avg {a.average_feedrate_mm_per_min} • Min {a.min_feedrate_mm_per_min} • Max{" "}
+                {a.max_feedrate_mm_per_min}
+              </Typography>
+            )}
+          </Grid>
+        </Grid>
+      </Paper>
+    );
+  };
+
   const renderPreview = () => {
     if (!currentProject) {
       return (
@@ -447,6 +565,14 @@ export default function EditProject({ currentProject }) {
             <CodeIcon color="primary" />
             <Typography variant="h6">G-code Preview</Typography>
             <Chip label={selectedAsset.displayName} size="small" />
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={handleAnalyzeGcode}
+              disabled={gcodeAnalysis.loading}
+            >
+              {gcodeAnalysis.loading ? "Analyzing…" : "Analyze G-code"}
+            </Button>
           </Stack>
           <Paper
             variant="outlined"
@@ -471,6 +597,7 @@ export default function EditProject({ currentProject }) {
             {!gcodePreview.loading && !gcodePreview.error && (
               <Stack spacing={2}>
                 {renderGcodePlot()}
+                {renderGcodeAnalysis()}
                 <Typography
                   component="pre"
                   variant="body2"

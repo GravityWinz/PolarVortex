@@ -15,7 +15,6 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 import re
-from pydantic import BaseModel
 from .image_processor import ImageHelper
 from .config import Config, Settings
 from .project_models import ProjectCreate, ProjectResponse, ProjectListResponse
@@ -28,62 +27,23 @@ from .config_models import (
     ConfigurationResponse, GcodeSettings, GcodeSettingsUpdate
 )
 from .config_service import config_service
-from .plotter_simulator import PlotterSimulator, SIMULATOR_PORT_NAME
+from .plotter_models import (
+    PlotterConnectRequest,
+    GcodeRequest,
+    ProjectGcodeRunRequest,
+    SvgToGcodeRequest,
+    GcodeAnalysisResult,
+)
+from .plotter_service import plotter_service, GCODE_SEND_DELAY_SECONDS
+from .gcode_analyzer import analyze_gcode_file
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Global variables
-arduino = None
-websocket_connections: List[WebSocket] = []
-current_status = {
-    "connected": False,
-    "drawing": False,
-    "progress": 0,
-    "current_command": None,
-    "last_update": None,
-    "port": None,
-    "baud_rate": None
-}
-# Command/response log (session-only)
-command_log: List[Dict] = []
-
 # G-code upload validation
 ALLOWED_GCODE_EXTENSIONS = {".gcode", ".nc", ".txt"}
 MAX_GCODE_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
-GCODE_SEND_DELAY_SECONDS = 0.1  # delay between lines when streaming files
-
-# Background G-code job tracking
-gcode_jobs: Dict[str, Dict[str, Any]] = {}
-gcode_cancel_all = threading.Event()
-gcode_pause_all = threading.Event()
-
-# Helper to send a sequence of G-code commands in order
-async def execute_gcode_sequence(commands: List[str], sequence_name: str = "") -> List[Dict[str, Any]]:
-    """Execute a list of G-code commands sequentially and capture results."""
-    results: List[Dict[str, Any]] = []
-
-    for cmd in commands:
-        gcode = (cmd or "").strip()
-        if not gcode:
-            continue
-
-        response = await send_gcode_command(GcodeRequest(command=gcode))
-        result_entry = {
-            "command": gcode,
-            "success": response.get("success", False),
-            "response": response.get("response"),
-            "timestamp": response.get("timestamp"),
-            "error": response.get("error")
-        }
-        results.append(result_entry)
-
-        # Stop if a command failed to avoid cascading issues
-        if not result_entry["success"]:
-            break
-
-    return results
 
 # Initialize ImageHelper
 image_helper = ImageHelper()
@@ -97,8 +57,8 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
     logger.info("Shutting down PolarVortex API...")
-    if arduino and arduino.is_open:
-        arduino.close()
+    if plotter_service.arduino and getattr(plotter_service.arduino, "is_open", False):
+        plotter_service.arduino.close()
 
 app = FastAPI(
     title="PolarVortex API",
@@ -147,17 +107,18 @@ app.add_middleware(
 # Arduino connection setup
 def setup_arduino():
     """Initialize Arduino connection"""
-    global arduino
     try:
         # Try common Arduino ports
         ports = ['/dev/ttyUSB0', '/dev/ttyACM0', 'COM3', 'COM4', 'COM5', 'COM6']
         for port in ports:
             try:
-                arduino = serial.Serial(port, 9600, timeout=1)
+                plotter_service.arduino = serial.Serial(port, 9600, timeout=1)
                 logger.info(f"Arduino connected on {port}")
-                current_status["connected"] = True
+                plotter_service.current_status["connected"] = True
+                plotter_service.current_status["port"] = port
+                plotter_service.current_status["baud_rate"] = 9600
                 return True
-            except:
+            except Exception:
                 continue
         logger.warning("No Arduino found on common ports")
         return False
@@ -191,6 +152,7 @@ class ConnectionManager:
                 self.active_connections.remove(connection)
 
 manager = ConnectionManager()
+plotter_service.set_broadcaster(manager.broadcast)
 
 # Image processing is now handled by ImageHelper class
 
@@ -202,7 +164,7 @@ async def root():
         "message": "PolarVortex API",
         "version": "1.0.0",
         "status": "running",
-        "arduino_connected": current_status["connected"]
+        "arduino_connected": plotter_service.current_status["connected"]
     }
 
 @app.get("/health")
@@ -214,14 +176,14 @@ async def health_check():
             "status": "healthy",
             "timestamp": datetime.now().isoformat(),
             "version": "1.0.0",
-            "arduino_connected": current_status["connected"]
+            "arduino_connected": plotter_service.current_status["connected"]
         }
         
         # Check if Arduino is responding (if connected)
-        if arduino and arduino.is_open:
+        if plotter_service.arduino and getattr(plotter_service.arduino, "is_open", False):
             try:
-                arduino.write(b'PING\n')
-                response = arduino.readline().decode().strip()
+                plotter_service.arduino.write(b'PING\n')
+                response = plotter_service.arduino.readline().decode().strip()
                 health_status["arduino_response"] = response
             except Exception as e:
                 health_status["arduino_response"] = f"error: {str(e)}"
@@ -242,17 +204,17 @@ async def health_check():
 async def get_status():
     """Get current system status"""
     try:
-        if arduino and arduino.is_open:
-            arduino.write(b'STATUS\n')
-            response = arduino.readline().decode().strip()
-            current_status["last_update"] = datetime.now().isoformat()
+        if plotter_service.arduino and getattr(plotter_service.arduino, "is_open", False):
+            plotter_service.arduino.write(b'STATUS\n')
+            response = plotter_service.arduino.readline().decode().strip()
+            plotter_service.current_status["last_update"] = datetime.now().isoformat()
             return {
                 "status": response,
                 "connected": True,
-                "drawing": current_status["drawing"],
-                "progress": current_status["progress"],
-                "current_command": current_status["current_command"],
-                "last_update": current_status["last_update"]
+                "drawing": plotter_service.current_status["drawing"],
+                "progress": plotter_service.current_status["progress"],
+                "current_command": plotter_service.current_status["current_command"],
+                "last_update": plotter_service.current_status["last_update"]
             }
         else:
             return {
@@ -261,7 +223,7 @@ async def get_status():
                 "drawing": False,
                 "progress": 0,
                 "current_command": None,
-                "last_update": current_status["last_update"]
+                "last_update": plotter_service.current_status["last_update"]
             }
     except Exception as e:
         logger.error(f"Status error: {e}")
@@ -271,131 +233,22 @@ async def get_status():
 @app.get("/plotter/ports")
 async def get_available_ports():
     """Get list of available serial ports"""
-    try:
-        ports = []
-        
-        # Add simulator port first
-        ports.append({
-            "device": SIMULATOR_PORT_NAME,
-            "description": "PolarVortex Plotter Simulator",
-            "manufacturer": "PolarVortex",
-            "hwid": "SIMULATOR"
-        })
-        
-        # Add real serial ports
-        for port in serial.tools.list_ports.comports():
-            ports.append({
-                "device": port.device,
-                "description": port.description,
-                "manufacturer": port.manufacturer if port.manufacturer else "",
-                "hwid": port.hwid
-            })
-        return {"ports": ports}
-    except Exception as e:
-        logger.error(f"Error listing ports: {e}")
-        return {"ports": [], "error": str(e)}
-
-class PlotterConnectRequest(BaseModel):
-    port: str
-    baud_rate: int = 9600
+    return plotter_service.get_available_ports()
 
 @app.post("/plotter/connect")
 async def connect_plotter(request: PlotterConnectRequest):
     """Connect to plotter with specified port and baud rate"""
-    global arduino
-    try:
-        # Disconnect if already connected
-        if arduino and arduino.is_open:
-            arduino.close()
-        
-        # Check if connecting to simulator
-        if request.port == SIMULATOR_PORT_NAME:
-            # Create simulator instance
-            arduino = PlotterSimulator(request.port, request.baud_rate, timeout=2)
-            logger.info(f"Connected to plotter simulator on {request.port} at {request.baud_rate} baud")
-        else:
-            # Connect to real serial port
-            arduino = serial.Serial(request.port, request.baud_rate, timeout=2)
-            logger.info(f"Connected to plotter on {request.port} at {request.baud_rate} baud")
-        
-        # Update status
-        current_status["connected"] = True
-        current_status["port"] = request.port
-        current_status["baud_rate"] = request.baud_rate
-        
-        # Clear any existing input buffer
-        arduino.reset_input_buffer()
-
-        # Execute any configured on-connect G-code
-        startup_results: List[Dict[str, Any]] = []
-        gcode_settings = config_service.get_gcode_settings()
-        if gcode_settings.on_connect:
-            startup_results = await execute_gcode_sequence(gcode_settings.on_connect, "on_connect")
-            logger.info(
-                "Executed on-connect G-code sequence with %d commands (success=%s)",
-                len(startup_results),
-                all(item.get("success") for item in startup_results) if startup_results else True
-            )
-        
-        return {
-            "success": True,
-            "port": request.port,
-            "baud_rate": request.baud_rate,
-            "message": f"Connected to {request.port}",
-            "startup_gcode": {
-                "commands_sent": len(startup_results),
-                "results": startup_results
-            }
-        }
-    except serial.SerialException as e:
-        logger.error(f"Serial connection error: {e}")
-        current_status["connected"] = False
-        return {"success": False, "error": f"Failed to connect: {str(e)}"}
-    except Exception as e:
-        logger.error(f"Connection error: {e}")
-        current_status["connected"] = False
-        return {"success": False, "error": str(e)}
+    return await plotter_service.connect_plotter(request)
 
 @app.post("/plotter/disconnect")
 async def disconnect_plotter():
     """Disconnect from plotter"""
-    global arduino
-    try:
-        if arduino and arduino.is_open:
-            arduino.close()
-            logger.info("Disconnected from plotter")
-        
-        arduino = None
-        current_status["connected"] = False
-        current_status["port"] = None
-        current_status["baud_rate"] = None
-        
-        return {"success": True, "message": "Disconnected"}
-    except Exception as e:
-        logger.error(f"Disconnect error: {e}")
-        return {"success": False, "error": str(e)}
+    return await plotter_service.disconnect_plotter()
 
 @app.get("/plotter/connection")
 async def get_connection_status():
     """Get current connection status"""
-    return {
-        "connected": current_status["connected"],
-        "port": current_status["port"],
-        "baud_rate": current_status["baud_rate"],
-        "is_open": arduino.is_open if arduino else False
-    }
-
-class GcodeRequest(BaseModel):
-    command: str
-
-class ProjectGcodeRunRequest(BaseModel):
-    filename: str
-
-class SvgToGcodeRequest(BaseModel):
-    filename: str
-    paper_size: str = "A4"
-    fit_mode: str = "fit"  # fit | center
-    pen_mapping: Optional[str] = None
+    return plotter_service.get_connection_status()
 
 
 def _resolve_paper_dimensions(paper_size: str) -> tuple[float, float, str]:
@@ -414,153 +267,27 @@ def _resolve_paper_dimensions(paper_size: str) -> tuple[float, float, str]:
         raise HTTPException(status_code=400, detail="No paper configurations found")
     return float(paper.width), float(paper.height), paper.paper_size
 
-def _response_contains_ok(responses: List[str]) -> bool:
-    """Check if any response line includes an OK acknowledgement."""
-    return any(line.lower().startswith("ok") for line in responses)
-
-
-async def read_arduino_response(timeout_seconds: float = 3.0) -> List[str]:
-    """Read response from Arduino until 'ok' or timeout"""
-    responses = []
-    if not arduino or not arduino.is_open:
-        return responses
-    
-    start_time = datetime.now()
-    while (datetime.now() - start_time).total_seconds() < timeout_seconds:
-        if arduino.in_waiting > 0:
-            try:
-                line = arduino.readline().decode('utf-8', errors='ignore').strip()
-                if line:
-                    responses.append(line)
-                    # Marlin typically responds with "ok" or "ok N"
-                    if line.lower().startswith('ok'):
-                        break
-            except Exception as e:
-                logger.warning(f"Error reading response: {e}")
-                break
-        else:
-            await asyncio.sleep(0.01)  # Small delay to avoid busy waiting
-    
-    return responses
-
 @app.post("/plotter/gcode")
 async def send_gcode_command(request: GcodeRequest):
     """Send G-code command to plotter and read response"""
-    try:
-        if not arduino or not arduino.is_open:
-            return {"success": False, "error": "Plotter not connected"}
-        
-        gcode = request.command.strip()
-        if not gcode:
-            return {"success": False, "error": "Empty command"}
-        
-        # Send command with an explicit newline terminator so manual entries are processed
-        command_bytes = gcode.encode('utf-8')
-        arduino.write(command_bytes)
-        arduino.write(b"\n")
-        logger.info(f"Sent G-code: {gcode}")
-        
-        # Read response with busy-aware retries up to a total wait
-        responses: List[str] = []
-        ok_received = False
-        busy_seen = False
-        start_wait = datetime.now()
-        max_wait_seconds = 20.0
-
-        while (datetime.now() - start_wait).total_seconds() < max_wait_seconds:
-            chunk = await read_arduino_response(timeout_seconds=1.5)
-            if chunk:
-                responses.extend(chunk)
-                if _response_contains_ok(chunk):
-                    ok_received = True
-                    break
-                if any("busy" in r.lower() for r in chunk):
-                    busy_seen = True
-            else:
-                await asyncio.sleep(0.3)
-
-        # Combine multi-line responses
-        response_text = "\n".join(responses) if responses else "No response"
-        success = ok_received or busy_seen
-        error_text = None
-        if not ok_received and not busy_seen:
-            error_text = "No 'ok' received from printer; holding next commands to avoid buffer overrun"
-            logger.warning("%s (command='%s', response='%s')", error_text, gcode, response_text)
-        elif busy_seen and not ok_received:
-            logger.warning("Printer busy without final ok; continuing (command='%s', response='%s')", gcode, response_text)
-        
-        # Log command/response
-        log_entry = {
-            "timestamp": datetime.now().isoformat(),
-            "command": gcode,
-            "response": response_text
-        }
-        command_log.append(log_entry)
-        
-        # Keep log size manageable (last 1000 entries)
-        if len(command_log) > 1000:
-            command_log.pop(0)
-        
-        # Broadcast via WebSocket
-        await manager.broadcast(json.dumps({
-            "type": "gcode_response",
-            "command": gcode,
-            "response": response_text,
-            "ok_received": ok_received,
-            "timestamp": log_entry["timestamp"]
-        }))
-        
-        return {
-            "success": success,
-            "command": gcode,
-            "response": response_text,
-            "responses": responses,
-            "ok_received": ok_received,
-            "error": error_text,
-            "timestamp": log_entry["timestamp"]
-        }
-    except Exception as e:
-        logger.error(f"G-code command error: {e}")
-        error_msg = str(e)
-        return {"success": False, "error": error_msg, "command": request.command}
+    return await plotter_service.send_gcode_command(request)
 
 
 @app.post("/plotter/gcode/preprint")
 async def run_preprint_gcode():
     """Run configured G-code commands before starting a print"""
-    try:
-        settings = config_service.get_gcode_settings()
-        if not settings.before_print:
-            return {
-                "success": True,
-                "results": [],
-                "message": "No pre-print G-code configured"
-            }
-
-        results = await execute_gcode_sequence(settings.before_print, "before_print")
-        success = all(item.get("success") for item in results) if results else True
-
-        return {
-            "success": success,
-            "results": results,
-            "message": "Pre-print G-code executed" if success else "Pre-print G-code had errors"
-        }
-    except Exception as e:
-        logger.error(f"Pre-print G-code error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return await plotter_service.run_preprint_gcode()
 
 
 @app.get("/plotter/log")
 async def get_command_log():
     """Get command/response log (session-only)"""
-    return {"log": command_log, "count": len(command_log)}
+    return plotter_service.get_command_log()
 
 @app.post("/plotter/log/clear")
 async def clear_command_log():
     """Clear command/response log"""
-    global command_log
-    command_log = []
-    return {"success": True, "message": "Log cleared"}
+    return plotter_service.clear_command_log()
 
 @app.get("/projects/{project_id}/images")
 async def get_project_images(project_id: str):
@@ -912,13 +639,58 @@ async def upload_gcode_to_project(
         logger.error(f"G-code upload error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.get("/projects/{project_id}/gcode/{filename:path}/analysis", response_model=GcodeAnalysisResult)
+async def analyze_project_gcode(project_id: str, filename: str):
+    """Analyze a stored G-code file and return bounds, distances, and ETA."""
+    try:
+        project = project_service.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        gcode_files = project.gcode_files or []
+        requested_name = Path(filename).name
+        stored_match = None
+        for stored in gcode_files:
+            if filename == stored or requested_name == Path(stored).name:
+                stored_match = stored
+                break
+
+        if not stored_match:
+            raise HTTPException(status_code=404, detail="G-code file not found for this project")
+
+        project_dir = project_service._get_project_directory(project_id).resolve()
+        file_path = (project_dir / stored_match).resolve()
+
+        # Prevent path traversal outside project directory
+        if project_dir not in file_path.parents and project_dir != file_path:
+            raise HTTPException(status_code=400, detail="Invalid file path")
+
+        if not file_path.exists() or not file_path.is_file():
+            raise HTTPException(status_code=404, detail="G-code file missing on disk")
+
+        analysis = analyze_gcode_file(file_path)
+        analysis["filename"] = stored_match
+
+        return GcodeAnalysisResult(**analysis)
+    except HTTPException:
+        raise
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"G-code analysis error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to analyze G-code file")
+
+
 @app.post("/projects/{project_id}/gcode/run")
 async def run_project_gcode(project_id: str, request: ProjectGcodeRunRequest):
     """
     Stream a stored project G-code file to the plotter in a background thread.
     """
     try:
-        if not arduino or not arduino.is_open:
+        if not plotter_service.arduino or not getattr(plotter_service.arduino, "is_open", False):
             raise HTTPException(status_code=400, detail="Plotter not connected")
 
         project = project_service.get_project(project_id)
@@ -951,10 +723,10 @@ async def run_project_gcode(project_id: str, request: ProjectGcodeRunRequest):
 
         job_id = str(uuid.uuid4())
         # Clear any global cancel flag before starting a new job
-        gcode_cancel_all.clear()
-        gcode_pause_all.clear()
+        plotter_service.gcode_cancel_all.clear()
+        plotter_service.gcode_pause_all.clear()
 
-        gcode_jobs[job_id] = {
+        plotter_service.gcode_jobs[job_id] = {
             "status": "queued",
             "project_id": project_id,
             "filename": request.filename,
@@ -974,8 +746,8 @@ async def run_project_gcode(project_id: str, request: ProjectGcodeRunRequest):
             )
             thread.start()
         else:
-            gcode_jobs[job_id]["status"] = "completed"
-            gcode_jobs[job_id]["finished_at"] = datetime.now().isoformat()
+            plotter_service.gcode_jobs[job_id]["status"] = "completed"
+            plotter_service.gcode_jobs[job_id]["finished_at"] = datetime.now().isoformat()
 
         return {
             "success": True,
@@ -983,7 +755,7 @@ async def run_project_gcode(project_id: str, request: ProjectGcodeRunRequest):
             "project_id": project_id,
             "filename": request.filename,
             "queued": len(commands),
-            "status": gcode_jobs[job_id]["status"],
+            "status": plotter_service.gcode_jobs[job_id]["status"],
         }
     except HTTPException:
         raise
@@ -996,33 +768,37 @@ def _run_gcode_commands_thread(job_id: str, commands: List[str], filename: str):
     """Background thread runner to stream G-code commands."""
     async def runner():
         try:
-            gcode_jobs[job_id]["status"] = "running"
-            gcode_jobs[job_id]["started_at"] = datetime.now().isoformat()
+            jobs = plotter_service.gcode_jobs
+            cancel_event = plotter_service.gcode_cancel_all
+            pause_event = plotter_service.gcode_pause_all
+
+            jobs[job_id]["status"] = "running"
+            jobs[job_id]["started_at"] = datetime.now().isoformat()
             results: List[Dict[str, Any]] = []
 
             for cmd in commands:
-                if gcode_cancel_all.is_set() or gcode_jobs[job_id].get("cancel_requested"):
-                    gcode_jobs[job_id]["status"] = "canceled"
-                    gcode_jobs[job_id]["finished_at"] = datetime.now().isoformat()
-                    gcode_jobs[job_id]["results"] = results
+                if cancel_event.is_set() or jobs[job_id].get("cancel_requested"):
+                    jobs[job_id]["status"] = "canceled"
+                    jobs[job_id]["finished_at"] = datetime.now().isoformat()
+                    jobs[job_id]["results"] = results
                     return
 
                 # Handle pause
-                if gcode_pause_all.is_set():
-                    gcode_jobs[job_id]["status"] = "paused"
-                    gcode_jobs[job_id]["paused"] = True
-                    while gcode_pause_all.is_set():
+                if pause_event.is_set():
+                    jobs[job_id]["status"] = "paused"
+                    jobs[job_id]["paused"] = True
+                    while pause_event.is_set():
                         await asyncio.sleep(0.1)
-                        if gcode_cancel_all.is_set() or gcode_jobs[job_id].get("cancel_requested"):
-                            gcode_jobs[job_id]["status"] = "canceled"
-                            gcode_jobs[job_id]["finished_at"] = datetime.now().isoformat()
-                            gcode_jobs[job_id]["results"] = results
+                        if cancel_event.is_set() or jobs[job_id].get("cancel_requested"):
+                            jobs[job_id]["status"] = "canceled"
+                            jobs[job_id]["finished_at"] = datetime.now().isoformat()
+                            jobs[job_id]["results"] = results
                             return
-                    gcode_jobs[job_id]["status"] = "running"
-                    gcode_jobs[job_id]["paused"] = False
+                    jobs[job_id]["status"] = "running"
+                    jobs[job_id]["paused"] = False
 
                 try:
-                    resp = await send_gcode_command(GcodeRequest(command=cmd))
+                    resp = await plotter_service.send_gcode_command(GcodeRequest(command=cmd))
                 except Exception as e:
                     resp = {"success": False, "error": str(e), "command": cmd}
                 results.append(resp)
@@ -1031,90 +807,28 @@ def _run_gcode_commands_thread(job_id: str, commands: List[str], filename: str):
                 # Yield control and add a small delay to avoid overrun
                 await asyncio.sleep(GCODE_SEND_DELAY_SECONDS)
 
-            gcode_jobs[job_id]["status"] = "completed" if all(r.get("success") for r in results) else "failed"
-            gcode_jobs[job_id]["finished_at"] = datetime.now().isoformat()
-            gcode_jobs[job_id]["results"] = results
+            jobs[job_id]["status"] = "completed" if all(r.get("success") for r in results) else "failed"
+            jobs[job_id]["finished_at"] = datetime.now().isoformat()
+            jobs[job_id]["results"] = results
         except Exception as e:
             logger.error(f"G-code job {job_id} failed: {e}")
-            gcode_jobs[job_id]["status"] = "failed"
-            gcode_jobs[job_id]["error"] = str(e)
-            gcode_jobs[job_id]["finished_at"] = datetime.now().isoformat()
+            jobs[job_id]["status"] = "failed"
+            jobs[job_id]["error"] = str(e)
+            jobs[job_id]["finished_at"] = datetime.now().isoformat()
 
     asyncio.run(runner())
-
-
-def cancel_all_gcode_jobs():
-    """Request cancellation of all running/queued G-code jobs."""
-    gcode_cancel_all.set()
-    for job_id, job in gcode_jobs.items():
-        if job.get("status") in {"queued", "running"}:
-            job["cancel_requested"] = True
-    gcode_pause_all.clear()
 
 
 @app.post("/plotter/stop")
 async def stop_plotter():
     """Stop plotter immediately and cancel any running G-code jobs."""
-    try:
-        cancel_all_gcode_jobs()
-
-        stop_sent = False
-        if arduino and arduino.is_open:
-            try:
-                arduino.write(b"M112\n")  # Emergency stop
-                stop_sent = True
-            except Exception as e:
-                logger.warning(f"Failed to send stop command: {e}")
-
-        current_status["drawing"] = False
-        current_status["current_command"] = None
-
-        return {
-            "success": True,
-            "message": "Stop requested",
-            "stop_sent": stop_sent,
-            "canceled_jobs": [
-                job_id for job_id, job in gcode_jobs.items() if job.get("cancel_requested")
-            ],
-        }
-    except Exception as e:
-        logger.error(f"Stop error: {e}")
-        return {"success": False, "error": str(e)}
+    return await plotter_service.stop_plotter()
 
 
 @app.post("/plotter/pause")
 async def pause_plotter():
     """Toggle pause/resume: on pause send M0, on resume clear pause flag."""
-    try:
-        was_paused = gcode_pause_all.is_set()
-        if was_paused:
-            gcode_pause_all.clear()
-            for job in gcode_jobs.values():
-                if job.get("status") == "paused":
-                    job["status"] = "running"
-                    job["paused"] = False
-            return {"success": True, "message": "Resume requested", "paused": False}
-
-        # Request pause
-        gcode_pause_all.set()
-        for job in gcode_jobs.values():
-            if job.get("status") in {"queued", "running"}:
-                job["paused"] = True
-                job["status"] = "paused"
-
-        # Send M0 best-effort
-        pause_sent = False
-        if arduino and arduino.is_open:
-            try:
-                arduino.write(b"M0\n")
-                pause_sent = True
-            except Exception as e:
-                logger.warning(f"Failed to send pause command: {e}")
-
-        return {"success": True, "message": "Pause requested", "paused": True, "pause_sent": pause_sent}
-    except Exception as e:
-        logger.error(f"Pause error: {e}")
-        return {"success": False, "error": str(e)}
+    return await plotter_service.pause_plotter()
 
 # Project Management Endpoints
 @app.post("/projects", response_model=ProjectResponse)
