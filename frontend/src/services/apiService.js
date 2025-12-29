@@ -519,16 +519,6 @@ export async function deletePlotter(plotterId) {
   }
 }
 
-export async function getDefaultPlotter() {
-  try {
-    const response = await fetch(`${BASE_URL}/config/plotters/default`);
-    return await response.json();
-  } catch (err) {
-    console.error("Error fetching default plotter:", err);
-    return { error: err.message };
-  }
-}
-
 // Configuration Management
 export async function rebuildConfiguration() {
   try {
