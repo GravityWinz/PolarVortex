@@ -429,6 +429,16 @@ export async function getDefaultPaper() {
   }
 }
 
+export async function getDefaultPlotter() {
+  try {
+    const response = await fetch(`${BASE_URL}/config/plotters/default`);
+    return await response.json();
+  } catch (err) {
+    console.error("Error fetching default plotter:", err);
+    return { error: err.message };
+  }
+}
+
 // Plotter Configuration API
 export async function getPlotters() {
   try {
