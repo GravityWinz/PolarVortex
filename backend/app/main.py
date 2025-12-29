@@ -464,19 +464,24 @@ async def send_gcode_command(request: GcodeRequest):
         responses = await read_arduino_response(timeout_seconds=3.0)
         ok_received = _response_contains_ok(responses)
 
-        # If printer reports busy and no OK, wait a bit longer and retry once
-        if (not ok_received) and any("busy" in r.lower() for r in responses):
+        # If printer reports busy and no OK, wait and retry a few times
+        busy_seen = any("busy" in r.lower() for r in responses)
+        retries = 0
+        max_retries = 5
+        while (not ok_received) and busy_seen and retries < max_retries:
             await asyncio.sleep(0.5)
-            extra = await read_arduino_response(timeout_seconds=2.0)
+            extra = await read_arduino_response(timeout_seconds=1.5)
+            retries += 1
             if extra:
                 responses.extend(extra)
                 ok_received = _response_contains_ok(responses)
+                busy_seen = any("busy" in r.lower() for r in extra) or busy_seen
         
         # Combine multi-line responses
         response_text = "\n".join(responses) if responses else "No response"
-        success = ok_received
+        success = ok_received or (busy_seen and not ok_received)
         error_text = None
-        if not ok_received:
+        if not ok_received and not busy_seen:
             error_text = "No 'ok' received from printer; holding next commands to avoid buffer overrun"
             logger.warning("%s (command='%s', response='%s')", error_text, gcode, response_text)
         
