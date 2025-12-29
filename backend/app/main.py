@@ -463,6 +463,14 @@ async def send_gcode_command(request: GcodeRequest):
         # Read response
         responses = await read_arduino_response(timeout_seconds=3.0)
         ok_received = _response_contains_ok(responses)
+
+        # If printer reports busy and no OK, wait a bit longer and retry once
+        if (not ok_received) and any("busy" in r.lower() for r in responses):
+            await asyncio.sleep(0.5)
+            extra = await read_arduino_response(timeout_seconds=2.0)
+            if extra:
+                responses.extend(extra)
+                ok_received = _response_contains_ok(responses)
         
         # Combine multi-line responses
         response_text = "\n".join(responses) if responses else "No response"
