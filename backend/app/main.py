@@ -460,30 +460,36 @@ async def send_gcode_command(request: GcodeRequest):
         arduino.write(b"\n")
         logger.info(f"Sent G-code: {gcode}")
         
-        # Read response
-        responses = await read_arduino_response(timeout_seconds=3.0)
-        ok_received = _response_contains_ok(responses)
+        # Read response with busy-aware retries up to a total wait
+        responses: List[str] = []
+        ok_received = False
+        busy_seen = False
+        start_wait = datetime.now()
+        max_wait_seconds = 12.0
 
-        # If printer reports busy and no OK, wait and retry a few times
-        busy_seen = any("busy" in r.lower() for r in responses)
-        retries = 0
-        max_retries = 5
-        while (not ok_received) and busy_seen and retries < max_retries:
-            await asyncio.sleep(0.5)
-            extra = await read_arduino_response(timeout_seconds=1.5)
-            retries += 1
-            if extra:
-                responses.extend(extra)
-                ok_received = _response_contains_ok(responses)
-                busy_seen = any("busy" in r.lower() for r in extra) or busy_seen
+        while (datetime.now() - start_wait).total_seconds() < max_wait_seconds:
+            chunk = await read_arduino_response(timeout_seconds=1.5)
+            if chunk:
+                responses.extend(chunk)
+                if _response_contains_ok(chunk):
+                    ok_received = True
+                    break
+                if any("busy" in r.lower() for r in chunk):
+                    busy_seen = True
+            await asyncio.sleep(0.3)
         
         # Combine multi-line responses
         response_text = "\n".join(responses) if responses else "No response"
-        success = ok_received or (busy_seen and not ok_received)
+        success = ok_received or (busy_seen and ok_received)
         error_text = None
-        if not ok_received and not busy_seen:
-            error_text = "No 'ok' received from printer; holding next commands to avoid buffer overrun"
-            logger.warning("%s (command='%s', response='%s')", error_text, gcode, response_text)
+        if not ok_received:
+            if busy_seen:
+                error_text = "Printer reported busy without final ok; proceeding with caution"
+                logger.warning("%s (command='%s', response='%s')", error_text, gcode, response_text)
+                success = True  # treat as soft success to keep stream moving
+            else:
+                error_text = "No 'ok' received from printer; holding next commands to avoid buffer overrun"
+                logger.warning("%s (command='%s', response='%s')", error_text, gcode, response_text)
         
         # Log command/response
         log_entry = {
