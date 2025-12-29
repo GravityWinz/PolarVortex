@@ -465,7 +465,7 @@ async def send_gcode_command(request: GcodeRequest):
         ok_received = False
         busy_seen = False
         start_wait = datetime.now()
-        max_wait_seconds = 12.0
+        max_wait_seconds = 20.0
 
         while (datetime.now() - start_wait).total_seconds() < max_wait_seconds:
             chunk = await read_arduino_response(timeout_seconds=1.5)
@@ -476,20 +476,18 @@ async def send_gcode_command(request: GcodeRequest):
                     break
                 if any("busy" in r.lower() for r in chunk):
                     busy_seen = True
-            await asyncio.sleep(0.3)
-        
+            else:
+                await asyncio.sleep(0.3)
+
         # Combine multi-line responses
         response_text = "\n".join(responses) if responses else "No response"
-        success = ok_received or (busy_seen and ok_received)
+        success = ok_received or busy_seen
         error_text = None
-        if not ok_received:
-            if busy_seen:
-                error_text = "Printer reported busy without final ok; proceeding with caution"
-                logger.warning("%s (command='%s', response='%s')", error_text, gcode, response_text)
-                success = True  # treat as soft success to keep stream moving
-            else:
-                error_text = "No 'ok' received from printer; holding next commands to avoid buffer overrun"
-                logger.warning("%s (command='%s', response='%s')", error_text, gcode, response_text)
+        if not ok_received and not busy_seen:
+            error_text = "No 'ok' received from printer; holding next commands to avoid buffer overrun"
+            logger.warning("%s (command='%s', response='%s')", error_text, gcode, response_text)
+        elif busy_seen and not ok_received:
+            logger.warning("Printer busy without final ok; continuing (command='%s', response='%s')", gcode, response_text)
         
         # Log command/response
         log_entry = {
