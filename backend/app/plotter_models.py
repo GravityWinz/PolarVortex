@@ -1,4 +1,4 @@
-from typing import Optional, Dict
+from typing import Optional, Dict, Literal
 
 from pydantic import BaseModel
 
@@ -21,6 +21,7 @@ class SvgToGcodeRequest(BaseModel):
     paper_size: str = "A4"
     fit_mode: str = "fit"  # fit | center
     pen_mapping: Optional[str] = None
+    origin_mode: Literal["lower_left", "center"] = "lower_left"
 
 
 class GcodeAnalysisResult(BaseModel):
@@ -42,3 +43,15 @@ class GcodeAnalysisResult(BaseModel):
     max_feedrate_mm_per_min: Optional[float] = None
     min_feedrate_mm_per_min: Optional[float] = None
     absolute_mode: bool = True
+
+
+class SvgAnalysisResult(BaseModel):
+    filename: Optional[str] = None
+    path_count: int
+    segment_count: int
+    total_length_mm: float
+    bounds: Optional[Dict[str, float]] = None
+    width_mm: Optional[float] = None
+    height_mm: Optional[float] = None
+    viewbox: Optional[Dict[str, float]] = None
+    scale_used_mm_per_unit: float

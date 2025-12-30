@@ -33,9 +33,11 @@ from .plotter_models import (
     ProjectGcodeRunRequest,
     SvgToGcodeRequest,
     GcodeAnalysisResult,
+    SvgAnalysisResult,
 )
 from .plotter_service import plotter_service, GCODE_SEND_DELAY_SECONDS
 from .gcode_analyzer import analyze_gcode_file
+from .svg_analyzer import analyze_svg_file
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -403,6 +405,7 @@ async def convert_svg_to_gcode(project_id: str, request: SvgToGcodeRequest):
             "paper_size": request.paper_size,
             "fit_mode": request.fit_mode,
             "pen_mapping": request.pen_mapping,
+            "origin_mode": getattr(request, "origin_mode", "lower_left"),
         })
         # #endregion
         project = project_service.get_project(project_id)
@@ -442,6 +445,7 @@ async def convert_svg_to_gcode(project_id: str, request: SvgToGcodeRequest):
             paper_height_mm=paper_height_mm,
             fit_mode=request.fit_mode,
             pen_mapping=request.pen_mapping,
+            origin_mode=getattr(request, "origin_mode", "lower_left"),
         )
 
         stored_name = str(Path("gcode") / gcode_filename)
@@ -682,6 +686,40 @@ async def analyze_project_gcode(project_id: str, filename: str):
     except Exception as e:
         logger.error(f"G-code analysis error: {e}")
         raise HTTPException(status_code=500, detail="Failed to analyze G-code file")
+
+
+@app.get("/projects/{project_id}/svg/{filename:path}/analysis", response_model=SvgAnalysisResult)
+async def analyze_project_svg(project_id: str, filename: str):
+    """Analyze a stored SVG file and return bounds and path statistics."""
+    try:
+        project = project_service.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        project_dir = project_service._get_project_directory(project_id).resolve()
+        file_path = (project_dir / filename).resolve()
+
+        if project_dir not in file_path.parents and project_dir != file_path:
+            raise HTTPException(status_code=400, detail="Invalid file path")
+
+        if not file_path.exists() or not file_path.is_file():
+            raise HTTPException(status_code=404, detail="SVG file not found")
+
+        if file_path.suffix.lower() != ".svg":
+            raise HTTPException(status_code=400, detail="File is not an SVG")
+
+        analysis = analyze_svg_file(file_path)
+        analysis["filename"] = filename
+        return SvgAnalysisResult(**analysis)
+    except HTTPException:
+        raise
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"SVG analysis error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to analyze SVG file")
 
 
 @app.post("/projects/{project_id}/gcode/run")
@@ -1052,11 +1090,11 @@ async def export_project_vectorization_svg(project_id: str):
         # Get the most recent SVG file
         latest_svg = max(svg_files, key=lambda f: f.stat().st_mtime)
         
-        # Return the SVG file
+        # Return the SVG file inline (avoid forced download)
         return FileResponse(
             path=str(latest_svg),
             media_type="image/svg+xml",
-            filename=latest_svg.name
+            headers={"Content-Disposition": "inline"}
         )
         
     except HTTPException:

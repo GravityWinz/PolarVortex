@@ -628,6 +628,8 @@ class ConfigurationService:
         return GcodeSettings(
             on_connect=defaults.get("on_connect", []),
             before_print=defaults.get("before_print", []),
+            pen_up_command=defaults.get("pen_up_command", "M280 P0 S110"),
+            pen_down_command=defaults.get("pen_down_command", "M280 P0 S130"),
         )
 
     def update_gcode_settings(self, gcode_data: GcodeSettingsUpdate) -> GcodeSettings:

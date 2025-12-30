@@ -5,7 +5,7 @@ import shlex
 import time
 import textwrap
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Dict, Literal, Optional
 
 logger = logging.getLogger(__name__)
 # Write debug logs inside the repo so paths work in containers and on host
@@ -30,6 +30,76 @@ def _get_default_gcode_settings():
         on_connect = ["G90", "G21", "M280 P0 S110"]
 
     return _Fallback()
+
+
+def _get_stroke_value(elem) -> str:
+    """Return the stroke color for an SVG element, falling back to style attr."""
+    stroke = elem.get("stroke")
+    if stroke:
+        return stroke
+    style = elem.get("style", "")
+    for part in style.split(";"):
+        if ":" not in part:
+            continue
+        key, value = part.split(":", 1)
+        if key.strip() == "stroke":
+            return value.strip()
+    return "none"
+
+
+def sort_svg_by_stroke(svg_path: Path) -> Path:
+    """
+    Reorder drawable SVG elements so they are grouped by stroke color.
+
+    This ensures plotting is done one color at a time before switching pens.
+    """
+    try:
+        import xml.etree.ElementTree as ET
+
+        tree = ET.parse(svg_path)
+        root = tree.getroot()
+
+        drawable_tags = {
+            "path",
+            "line",
+            "polyline",
+            "polygon",
+            "rect",
+            "circle",
+            "ellipse",
+        }
+
+        original_children = list(root)
+        preserved = []
+        color_order = []
+        color_groups: Dict[str, list] = {}
+
+        for child in original_children:
+            tag = child.tag.rsplit("}", 1)[-1] if "}" in child.tag else child.tag
+            if tag in drawable_tags:
+                stroke = _get_stroke_value(child)
+                if stroke not in color_order:
+                    color_order.append(stroke)
+                color_groups.setdefault(stroke, []).append(child)
+            else:
+                preserved.append(child)
+
+        # If nothing to sort, return original
+        if not color_order:
+            return svg_path
+
+        # Rebuild child list: keep preserved elements, then grouped drawables by stroke order
+        new_children = preserved + [
+            elem for color in color_order for elem in color_groups.get(color, [])
+        ]
+        root[:] = new_children
+
+        sorted_path = svg_path.with_name(f"{svg_path.stem}_colorsorted.svg")
+        tree.write(sorted_path, encoding="utf-8", xml_declaration=True)
+        return sorted_path
+    except Exception:
+        logger.warning("SVG color sort failed, using original file", exc_info=True)
+        return svg_path
 
 
 def build_vpype_config_content() -> str:
@@ -102,6 +172,7 @@ def ensure_vpype_config(path: Path = DEFAULT_VPYPE_CONFIG) -> Path:
 
 
 FitMode = Literal["fit", "center"]
+OriginMode = Literal["lower_left", "center"]
 
 
 def _dbg_log(hypothesis: str, location: str, message: str, data: Optional[dict] = None, run_id: str = "pre-fix"):
@@ -132,16 +203,21 @@ def build_vpype_pipeline(
     output_path: Path,
     config_path: Optional[Path] = DEFAULT_VPYPE_CONFIG,
     profile: str = DEFAULT_GWRITE_PROFILE,
+    origin_mode: OriginMode = "lower_left",
 ) -> str:
     """Build a vpype pipeline string for SVG->G-code conversion."""
     width, height = float(paper_width_mm), float(paper_height_mm)
-    # `layout` keeps things centered by default. With `--fit-to-margins 0` it
-    # scales uniformly to fit the page, avoiding the deprecated/invalid
-    # `--origin` flag we previously passed to `scaleto`.
-    if fit_mode == "fit":
-        place_cmd = f"layout --fit-to-margins 0 {width}mmx{height}mm"
-    else:
-        place_cmd = f"layout {width}mmx{height}mm"
+    # Always scale to the selected page size and center on the page.
+    place_cmd = f"layout --fit-to-margins 0 {width}mmx{height}mm"
+
+    # Optionally shift origin to the page center so SVGs that assume (0,0) is
+    # at the lower-left can still be centered on the page. When centering the
+    # origin we translate left/down by half the page so the page center becomes
+    # (0,0) in the emitted G-code.
+    translate_cmd = ""
+    if origin_mode == "center":
+        # `translate` treats leading '-' as an option, so use '--' to stop option parsing.
+        translate_cmd = f"translate -- {-width / 2:.3f}mm {-height / 2:.3f}mm"
 
     # vpype-gcode plugin provides `gwrite` for G-code export
     # Commands in vpype are space-separated (no shell pipes needed)
@@ -154,13 +230,16 @@ def build_vpype_pipeline(
         else:
             logger.warning("vpype config not found at %s, falling back to defaults", config_path)
 
-    pipeline = (
-        f"{config_arg}"
-        f'read "{svg_path}" '
-        f"{place_cmd} "
-        f'gwrite --profile {profile} \"{output_path}\"'
-    )
-    return pipeline
+    pipeline_parts = [
+        config_arg,
+        f'read "{svg_path}"',
+        place_cmd,
+    ]
+    if translate_cmd:
+        pipeline_parts.append(translate_cmd)
+    pipeline_parts.append(f'gwrite --profile {profile} "{output_path}"')
+
+    return " ".join(part for part in pipeline_parts if part)
 
 
 async def run_vpype_pipeline(pipeline: str) -> None:
@@ -193,6 +272,7 @@ async def convert_svg_to_gcode_file(
     paper_height_mm: float,
     fit_mode: FitMode = "fit",
     pen_mapping: Optional[str] = None,  # reserved for future use
+    origin_mode: OriginMode = "lower_left",
 ) -> None:
     """Convert SVG to G-code using vpype CLI."""
     # #region agent log
@@ -203,16 +283,20 @@ async def convert_svg_to_gcode_file(
         "paper_height_mm": paper_height_mm,
         "fit_mode": fit_mode,
         "pen_mapping": pen_mapping,
+        "origin_mode": origin_mode,
     })
     # #endregion
+    sorted_svg_path = sort_svg_by_stroke(svg_path)
+
     pipeline = build_vpype_pipeline(
-        svg_path=svg_path,
+        svg_path=sorted_svg_path,
         paper_width_mm=paper_width_mm,
         paper_height_mm=paper_height_mm,
         fit_mode=fit_mode,
         output_path=output_path,
         config_path=DEFAULT_VPYPE_CONFIG,
         profile=DEFAULT_GWRITE_PROFILE,
+        origin_mode=origin_mode,
     )
     await run_vpype_pipeline(pipeline)
     # #region agent log

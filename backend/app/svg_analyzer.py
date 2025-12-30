@@ -1,0 +1,138 @@
+"""
+SVG analysis utilities.
+
+Parses an SVG and returns basic statistics such as extents and path length.
+Uses svgpathtools for reliable geometry parsing.
+"""
+import logging
+import math
+from pathlib import Path
+from typing import Any, Dict, Optional, Tuple
+
+from svgpathtools import Path as SvgPath
+from svgpathtools import svg2paths2
+
+logger = logging.getLogger(__name__)
+
+
+def _parse_length_to_mm(value: Optional[str]) -> Optional[float]:
+    """Convert an SVG length string to millimeters."""
+    if not value:
+        return None
+
+    val = value.strip()
+    unit = "".join([c for c in val if c.isalpha()]).lower()
+    try:
+        number = float(val.replace(unit, "")) if unit else float(val)
+    except ValueError:
+        return None
+
+    if unit in {"mm", ""}:
+        return number
+    if unit == "cm":
+        return number * 10.0
+    if unit in {"in", "inch"}:
+        return number * 25.4
+    if unit == "pt":  # 1 pt = 1/72 inch
+        return number * 25.4 / 72.0
+    if unit == "pc":  # 1 pc = 12 pt
+        return number * 25.4 / 6.0
+    if unit == "px":
+        return number * (25.4 / 96.0)  # assume 96 dpi
+
+    return None
+
+
+def _compute_scale(svg_attr: Dict[str, Any]) -> Tuple[float, float, Optional[Dict[str, float]]]:
+    """Determine scaling from SVG units to millimeters using width/height or viewBox."""
+    view_box_raw = svg_attr.get("viewBox") or svg_attr.get("viewbox")
+    view_box = None
+    vb_width = vb_height = None
+    if view_box_raw:
+        try:
+            parts = [float(x) for x in view_box_raw.strip().split()]
+            if len(parts) == 4:
+                _, _, vb_width, vb_height = parts
+                view_box = {"minX": parts[0], "minY": parts[1], "width": vb_width, "height": vb_height}
+        except Exception:
+            logger.debug("Unable to parse viewBox: %s", view_box_raw)
+
+    width_mm = _parse_length_to_mm(svg_attr.get("width"))
+    height_mm = _parse_length_to_mm(svg_attr.get("height"))
+
+    if vb_width and width_mm:
+        scale_x = width_mm / vb_width
+    elif width_mm:
+        scale_x = width_mm / (vb_width or width_mm)
+    else:
+        scale_x = 25.4 / 96.0
+
+    if vb_height and height_mm:
+        scale_y = height_mm / vb_height
+    elif height_mm:
+        scale_y = height_mm / (vb_height or height_mm)
+    else:
+        scale_y = 25.4 / 96.0
+
+    return float(scale_x), float(scale_y), view_box
+
+
+def analyze_svg_file(file_path: Path) -> Dict[str, Any]:
+    """Analyze an SVG file and return geometry statistics."""
+    path_obj = Path(file_path)
+    if not path_obj.exists() or not path_obj.is_file():
+        raise FileNotFoundError(f"SVG file not found: {path_obj}")
+    if path_obj.stat().st_size == 0:
+        raise ValueError("SVG file is empty")
+
+    try:
+        paths, attributes, svg_attr = svg2paths2(str(path_obj))
+    except Exception as exc:
+        logger.error("Failed to parse SVG: %s", exc)
+        raise ValueError(f"Failed to parse SVG: {exc}") from exc
+
+    scale_x, scale_y, view_box = _compute_scale(svg_attr)
+    length_scale = (scale_x + scale_y) / 2.0 if not math.isclose(scale_x, scale_y) else scale_x
+
+    min_x = min_y = math.inf
+    max_x = max_y = -math.inf
+    total_length_mm = 0.0
+    segment_count = 0
+
+    for path in paths:
+        if not isinstance(path, SvgPath):
+            continue
+        try:
+            x0, x1, y0, y1 = path.bbox()
+        except Exception:
+            continue
+        min_x = min(min_x, x0 * scale_x)
+        max_x = max(max_x, x1 * scale_x)
+        min_y = min(min_y, y0 * scale_y)
+        max_y = max(max_y, y1 * scale_y)
+        segment_count += len(path)
+        try:
+            total_length_mm += path.length() * length_scale
+        except Exception:
+            continue
+
+    bounds = None
+    width_mm = height_mm = None
+    if min_x is not math.inf and max_x is not -math.inf:
+        bounds = {"minX": min_x, "maxX": max_x, "minY": min_y, "maxY": max_y}
+        width_mm = max_x - min_x
+        height_mm = max_y - min_y
+
+    return {
+        "path_count": len(paths),
+        "segment_count": segment_count,
+        "total_length_mm": round(total_length_mm, 4),
+        "bounds": bounds,
+        "width_mm": round(width_mm, 4) if width_mm is not None else None,
+        "height_mm": round(height_mm, 4) if height_mm is not None else None,
+        "viewbox": view_box,
+        "scale_used_mm_per_unit": round(length_scale, 6),
+    }
+
+
+
