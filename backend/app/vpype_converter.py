@@ -37,9 +37,9 @@ def build_vpype_config_content() -> str:
     gcode = _get_default_gcode_settings()
     pen_up = getattr(gcode, "pen_up_command", "M280 P0 S110") or "M280 P0 S110"
     pen_down = getattr(gcode, "pen_down_command", "M280 P0 S130") or "M280 P0 S130"
-    on_connect = getattr(gcode, "on_connect", None) or []
-    # Ensure pen is up in document_start
-    doc_start_lines = list(on_connect)
+    before_print = getattr(gcode, "before_print", None) or []
+    # Ensure pen is up in document_start and include only pre-print sequence
+    doc_start_lines = [*before_print]
     if pen_up not in doc_start_lines:
         doc_start_lines.append(pen_up)
     document_start = "\n".join(doc_start_lines)
