@@ -109,21 +109,22 @@ app.add_middleware(
 
 # Arduino connection setup
 def setup_arduino():
-    """Initialize Arduino connection"""
+    """Initialize Arduino connection using configured/overridden port list."""
     try:
-        # Try common Arduino ports
-        ports = ['/dev/ttyUSB0', '/dev/ttyACM0', 'COM3', 'COM4', 'COM5', 'COM6']
+        ports = Settings.get_arduino_ports()
+        baud = Settings.ARDUINO_BAUDRATE
+        timeout = Settings.ARDUINO_TIMEOUT
         for port in ports:
             try:
-                plotter_service.arduino = serial.Serial(port, 9600, timeout=1)
+                plotter_service.arduino = serial.Serial(port, baud, timeout=timeout)
                 logger.info(f"Arduino connected on {port}")
                 plotter_service.current_status["connected"] = True
                 plotter_service.current_status["port"] = port
-                plotter_service.current_status["baud_rate"] = 9600
+                plotter_service.current_status["baud_rate"] = baud
                 return True
             except Exception:
                 continue
-        logger.warning("No Arduino found on common ports")
+        logger.warning("No Arduino found on configured/common ports")
         return False
     except Exception as e:
         logger.error(f"Arduino connection error: {e}")

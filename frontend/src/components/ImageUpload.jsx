@@ -36,10 +36,7 @@ import {
 } from "@mui/material";
 import React, { useCallback, useState } from "react";
 import logoImage from "../assets/PolarVortexLogo_small.png";
-import {
-  resolveApiBaseUrl,
-  uploadImageToProject,
-} from "../services/apiService";
+import { uploadImageToProject } from "../services/apiService";
 
 /**
  * Image Upload component for PolarVortex
@@ -60,8 +57,6 @@ export default function ImageUpload({ project, onUploadComplete }) {
     maxWidth: 800,
     maxHeight: 600,
   });
-  const [directoryName, setDirectoryName] = useState("");
-  const [nameCollision, setNameCollision] = useState(false);
 
   // Handle file selection
   const handleFileSelect = useCallback((event) => {
@@ -104,43 +99,12 @@ export default function ImageUpload({ project, onUploadComplete }) {
     setErrorMessage("");
     setUploadStatus("idle");
 
-    // Set default directory name to image name (without extension)
-    const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
-    setDirectoryName(nameWithoutExt);
-
     // Create preview
     const reader = new FileReader();
     reader.onload = (e) => {
       setPreviewUrl(e.target.result);
     };
     reader.readAsDataURL(file);
-  };
-
-  // Check for name collision
-  const checkNameCollision = async (name) => {
-    try {
-      const response = await fetch(
-        `${resolveApiBaseUrl()}/check-directory/${encodeURIComponent(name)}`
-      );
-      const result = await response.json();
-      return result.exists;
-    } catch (error) {
-      console.error("Error checking directory name:", error);
-      return false;
-    }
-  };
-
-  // Handle directory name change
-  const handleDirectoryNameChange = async (event) => {
-    const newName = event.target.value;
-    setDirectoryName(newName);
-
-    if (newName.trim()) {
-      const collision = await checkNameCollision(newName);
-      setNameCollision(collision);
-    } else {
-      setNameCollision(false);
-    }
   };
 
   // Remove selected file
@@ -164,7 +128,6 @@ export default function ImageUpload({ project, onUploadComplete }) {
       // Backend expects field name 'file' and 'settings'
       formData.append("file", selectedFile);
       formData.append("settings", JSON.stringify(processingSettings));
-      formData.append("directory_name", directoryName); // Add directory name
 
       const response = await uploadImageToProject(project.id, formData);
 
@@ -289,26 +252,6 @@ export default function ImageUpload({ project, onUploadComplete }) {
             </Box>
           </Paper>
 
-          {/* Directory Name Input */}
-          {selectedFile && (
-            <Box sx={{ mt: 2 }}>
-              <TextField
-                fullWidth
-                label="Directory Name"
-                value={directoryName}
-                onChange={handleDirectoryNameChange}
-                error={nameCollision}
-                helperText={
-                  nameCollision
-                    ? "A directory with this name already exists. Please choose a different name."
-                    : "This will be the name of the directory where your image is stored."
-                }
-                disabled={uploadStatus === "uploading"}
-                sx={{ mb: 2 }}
-              />
-            </Box>
-          )}
-
           {/* File Actions */}
           {selectedFile && (
             <Stack direction="row" spacing={2} sx={{ mt: 2 }}>
@@ -318,8 +261,6 @@ export default function ImageUpload({ project, onUploadComplete }) {
                 onClick={handleUpload}
                 disabled={
                   uploadStatus === "uploading" ||
-                  nameCollision ||
-                  !directoryName.trim() ||
                   !project
                 }
                 fullWidth
