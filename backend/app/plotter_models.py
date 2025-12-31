@@ -1,4 +1,4 @@
-from typing import Optional, Dict, Literal
+from typing import Optional, Dict, Literal, Any
 
 from pydantic import BaseModel
 
@@ -19,9 +19,9 @@ class ProjectGcodeRunRequest(BaseModel):
 class SvgToGcodeRequest(BaseModel):
     filename: str
     paper_size: str = "A4"
-    fit_mode: str = "fit"  # fit | center
     pen_mapping: Optional[str] = None
     origin_mode: Literal["lower_left", "center"] = "lower_left"
+    rotate_90: bool = False
 
 
 class GcodeAnalysisResult(BaseModel):
@@ -55,3 +55,4 @@ class SvgAnalysisResult(BaseModel):
     height_mm: Optional[float] = None
     viewbox: Optional[Dict[str, float]] = None
     scale_used_mm_per_unit: float
+    metadata: Optional[Dict[str, Any]] = None

@@ -20,6 +20,7 @@ import {
   DialogTitle,
   Divider,
   FormControl,
+  FormControlLabel,
   Grid,
   IconButton,
   InputLabel,
@@ -32,19 +33,19 @@ import {
   Paper,
   Select,
   Stack,
+  Switch,
   Tooltip,
-  TextField,
   Typography,
 } from "@mui/material";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   convertSvgToGcode,
   deleteProjectFile,
+  getPapers,
   getProject,
   getProjectAssets,
   getProjectFileText,
   getProjectFileUrl,
-  getPapers,
   getProjectGcodeAnalysis,
   getProjectSvgAnalysis,
 } from "../services/apiService";
@@ -184,8 +185,7 @@ export default function EditProject({ currentProject }) {
   const [convertTarget, setConvertTarget] = useState(null);
   const [convertOptions, setConvertOptions] = useState({
     paperSize: "",
-    fitMode: "fit",
-    penMapping: "default",
+    rotate90: false,
   });
   const [convertLoading, setConvertLoading] = useState(false);
   const [convertError, setConvertError] = useState("");
@@ -389,10 +389,9 @@ export default function EditProject({ currentProject }) {
       await convertSvgToGcode(currentProject.id, {
         filename: convertTarget.filename,
         paper_size: convertOptions.paperSize,
-        fit_mode: convertOptions.fitMode,
-        pen_mapping: convertOptions.penMapping,
-        origin_mode:
-          convertOptions.fitMode === "center" ? "center" : "lower_left",
+        pen_mapping: null,
+        origin_mode: "center",
+        rotate_90: Boolean(convertOptions.rotate90),
       });
       await loadAssets();
       setConvertDialogOpen(false);
@@ -587,8 +586,8 @@ export default function EditProject({ currentProject }) {
             </Typography>
             {a.average_feedrate_mm_per_min && (
               <Typography variant="caption" color="text.secondary">
-                Avg {a.average_feedrate_mm_per_min} • Min {a.min_feedrate_mm_per_min} • Max{" "}
-                {a.max_feedrate_mm_per_min}
+                Avg {a.average_feedrate_mm_per_min} • Min{" "}
+                {a.min_feedrate_mm_per_min} • Max {a.max_feedrate_mm_per_min}
               </Typography>
             )}
           </Grid>
@@ -641,6 +640,13 @@ export default function EditProject({ currentProject }) {
             size="small"
             label={`Paths: ${a.path_count} • Segments: ${a.segment_count}`}
           />
+          {a.metadata?.generator_version && (
+            <Chip
+              size="small"
+              color="primary"
+              label={`Gen: v${a.metadata.generator_version}`}
+            />
+          )}
         </Stack>
         <Grid container spacing={2}>
           <Grid item xs={12} sm={6} md={4}>
@@ -676,6 +682,30 @@ export default function EditProject({ currentProject }) {
               </Typography>
             )}
           </Grid>
+          {a.metadata && (
+            <Grid item xs={12}>
+              <Typography variant="body2" color="text.secondary" gutterBottom>
+                Metadata
+              </Typography>
+              <Stack spacing={0.5}>
+                {a.metadata.source_image && (
+                  <Typography variant="body2">
+                    Source: {a.metadata.source_image}
+                  </Typography>
+                )}
+                {a.metadata.generated_at && (
+                  <Typography variant="body2">
+                    Generated: {a.metadata.generated_at}
+                  </Typography>
+                )}
+                {a.metadata.parameters && (
+                  <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+                    Params: {JSON.stringify(a.metadata.parameters)}
+                  </Typography>
+                )}
+              </Stack>
+            </Grid>
+          )}
         </Grid>
       </Paper>
     );
@@ -1026,7 +1056,8 @@ export default function EditProject({ currentProject }) {
               >
                 {paperOptions.map((paper) => (
                   <MenuItem key={paper.id} value={paper.id || paper.paper_size}>
-                    {paper.name || paper.paper_size} ({paper.width}×{paper.height}mm)
+                    {paper.name || paper.paper_size} ({paper.width}×
+                    {paper.height}mm)
                     {paper.is_default ? " • default" : ""}
                   </MenuItem>
                 ))}
@@ -1043,35 +1074,23 @@ export default function EditProject({ currentProject }) {
               )}
             </FormControl>
 
-            <FormControl fullWidth>
-              <InputLabel>Fit / Center</InputLabel>
-              <Select
-                label="Fit / Center"
-                value={convertOptions.fitMode}
-                onChange={(e) =>
-                  setConvertOptions((prev) => ({
-                    ...prev,
-                    fitMode: e.target.value,
-                  }))
-                }
-              >
-                <MenuItem value="fit">Fit to page</MenuItem>
-                <MenuItem value="center">Center on page</MenuItem>
-              </Select>
-            </FormControl>
-
-            <TextField
-              label="Pen Mapping (placeholder)"
-              value={convertOptions.penMapping}
-              onChange={(e) =>
-                setConvertOptions((prev) => ({
-                  ...prev,
-                  penMapping: e.target.value,
-                }))
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={convertOptions.rotate90}
+                  onChange={(e) =>
+                    setConvertOptions((prev) => ({
+                      ...prev,
+                      rotate90: e.target.checked,
+                    }))
+                  }
+                  color="primary"
+                />
               }
-              helperText="E.g., pen color or channel to use"
-              fullWidth
+              label="Rotate 90° clockwise (landscape)"
             />
+
+            {/* Fit/center and pen mapping removed; we always center without pen mapping. */}
 
             {convertError && <Alert severity="error">{convertError}</Alert>}
           </Stack>

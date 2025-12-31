@@ -14,6 +14,7 @@ import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
+from datetime import datetime
 import re
 from .image_processor import ImageHelper
 from .config import Config, Settings
@@ -403,9 +404,9 @@ async def convert_svg_to_gcode(project_id: str, request: SvgToGcodeRequest):
             "project_id": project_id,
             "filename": request.filename,
             "paper_size": request.paper_size,
-            "fit_mode": request.fit_mode,
             "pen_mapping": request.pen_mapping,
             "origin_mode": getattr(request, "origin_mode", "lower_left"),
+            "rotate_90": getattr(request, "rotate_90", False),
         })
         # #endregion
         project = project_service.get_project(project_id)
@@ -429,12 +430,15 @@ async def convert_svg_to_gcode(project_id: str, request: SvgToGcodeRequest):
         gcode_dir.mkdir(parents=True, exist_ok=True)
 
         base_name = svg_path.stem
-        gcode_filename = f"{base_name}_converted.gcode"
+        timecode = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        gcode_filename = f"{base_name}_{timecode}.gcode"
         target_path = gcode_dir / gcode_filename
         # Ensure unique filename
-        if target_path.exists():
-            gcode_filename = f"{base_name}_converted_{uuid.uuid4().hex[:8]}.gcode"
+        suffix = 1
+        while target_path.exists():
+            gcode_filename = f"{base_name}_{timecode}_{suffix}.gcode"
             target_path = gcode_dir / gcode_filename
+            suffix += 1
 
         paper_width_mm, paper_height_mm, resolved_paper_size = _resolve_paper_dimensions(request.paper_size)
 
@@ -443,9 +447,10 @@ async def convert_svg_to_gcode(project_id: str, request: SvgToGcodeRequest):
             output_path=target_path,
             paper_width_mm=paper_width_mm,
             paper_height_mm=paper_height_mm,
-            fit_mode=request.fit_mode,
             pen_mapping=request.pen_mapping,
             origin_mode=getattr(request, "origin_mode", "lower_left"),
+            rotate_90=getattr(request, "rotate_90", False),
+            generation_tag=timecode,
         )
 
         stored_name = str(Path("gcode") / gcode_filename)
@@ -989,7 +994,13 @@ async def vectorize_project_image(project_id: str,
         vectorizer = PolargraphVectorizer()
         
         # Vectorize the image with SVG creation in project directory
-        result = vectorizer.vectorize_image(image_data, settings, str(project_dir))
+        base_name = Path(project.source_image).stem
+        result = vectorizer.vectorize_image(
+            image_data,
+            settings,
+            str(project_dir),
+            base_filename=base_name,
+        )
         
         # Generate plotting commands
         machine_settings = {

@@ -710,11 +710,17 @@ class ConfigurationService:
         for plotter in self.config_data.get('plotters', []):
             if plotter['id'] == plotter_id:
                 gcode_data = plotter.get('gcode_sequences', self._get_default_gcode_sequences())
+                pen_up = gcode_data.get('pen_up_command')
+                if pen_up is None:
+                    pen_up = "M280 P0 S110"
+                pen_down = gcode_data.get('pen_down_command')
+                if pen_down is None:
+                    pen_down = "M280 P0 S130"
                 return GcodeSettings(
                     on_connect=gcode_data.get('on_connect', []),
                     before_print=gcode_data.get('before_print', []),
-                    pen_up_command=gcode_data.get('pen_up_command', "M280 P0 S110"),
-                    pen_down_command=gcode_data.get('pen_down_command', "M280 P0 S130"),
+                    pen_up_command=pen_up,
+                    pen_down_command=pen_down,
                 )
         return None
 
@@ -726,13 +732,17 @@ class ConfigurationService:
                 update_payload = gcode_data.dict(exclude_unset=True)
 
                 if 'on_connect' in update_payload:
-                    existing['on_connect'] = update_payload['on_connect'] or []
+                    if update_payload['on_connect'] is not None:
+                        existing['on_connect'] = update_payload['on_connect']
                 if 'before_print' in update_payload:
-                    existing['before_print'] = update_payload['before_print'] or []
+                    if update_payload['before_print'] is not None:
+                        existing['before_print'] = update_payload['before_print']
                 if 'pen_up_command' in update_payload:
-                    existing['pen_up_command'] = update_payload['pen_up_command'] or "M280 P0 S110"
+                    if update_payload['pen_up_command'] is not None:
+                        existing['pen_up_command'] = update_payload['pen_up_command']
                 if 'pen_down_command' in update_payload:
-                    existing['pen_down_command'] = update_payload['pen_down_command'] or "M280 P0 S130"
+                    if update_payload['pen_down_command'] is not None:
+                        existing['pen_down_command'] = update_payload['pen_down_command']
 
                 plotter['gcode_sequences'] = existing
                 self._save_configurations()
