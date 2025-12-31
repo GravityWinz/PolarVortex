@@ -144,6 +144,22 @@ export async function deleteProjectFile(projectId, filename) {
   return data;
 }
 
+export async function getProjectSvgAnalysis(projectId, filename) {
+  const safePath = (filename || "").split("/").map(encodeURIComponent).join("/");
+  const url = `${BASE_URL}/projects/${projectId}/svg/${safePath}/analysis`;
+  const response = await fetch(url);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(
+      data.detail ||
+        data.error ||
+        data.message ||
+        `Failed to analyze SVG: ${response.statusText}`
+    );
+  }
+  return data;
+}
+
 export async function getProjectGcodeAnalysis(projectId, filename) {
   const safePath = (filename || "").split("/").map(encodeURIComponent).join("/");
   const url = `${BASE_URL}/projects/${projectId}/gcode/${safePath}/analysis`;

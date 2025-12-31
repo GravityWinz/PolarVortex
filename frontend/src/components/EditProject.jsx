@@ -6,6 +6,7 @@ import {
   Image as ImageIcon,
   Refresh as RefreshIcon,
   Article as SvgIcon,
+  AutoGraph as VectorizeIcon,
 } from "@mui/icons-material";
 import {
   Alert,
@@ -19,6 +20,7 @@ import {
   DialogTitle,
   Divider,
   FormControl,
+  FormControlLabel,
   Grid,
   IconButton,
   InputLabel,
@@ -31,20 +33,23 @@ import {
   Paper,
   Select,
   Stack,
-  TextField,
+  Switch,
+  Tooltip,
   Typography,
 } from "@mui/material";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   convertSvgToGcode,
   deleteProjectFile,
+  getPapers,
   getProject,
   getProjectAssets,
   getProjectFileText,
   getProjectFileUrl,
-  getPapers,
   getProjectGcodeAnalysis,
+  getProjectSvgAnalysis,
 } from "../services/apiService";
+import VectorizeDialog from "./VectorizeDialog";
 
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "bmp", "webp"];
 const SVG_EXTENSIONS = ["svg"];
@@ -155,12 +160,18 @@ export default function EditProject({ currentProject }) {
   const [loadingAssets, setLoadingAssets] = useState(false);
   const [assetError, setAssetError] = useState("");
   const [selectedAsset, setSelectedAsset] = useState(null);
+  const [projectDetails, setProjectDetails] = useState(null);
   const [gcodePreview, setGcodePreview] = useState({
     loading: false,
     content: "",
     error: "",
   });
   const [gcodeAnalysis, setGcodeAnalysis] = useState({
+    loading: false,
+    data: null,
+    error: "",
+  });
+  const [svgAnalysis, setSvgAnalysis] = useState({
     loading: false,
     data: null,
     error: "",
@@ -174,13 +185,14 @@ export default function EditProject({ currentProject }) {
   const [convertTarget, setConvertTarget] = useState(null);
   const [convertOptions, setConvertOptions] = useState({
     paperSize: "",
-    fitMode: "fit",
-    penMapping: "default",
+    rotate90: false,
   });
   const [convertLoading, setConvertLoading] = useState(false);
   const [convertError, setConvertError] = useState("");
   const [paperOptions, setPaperOptions] = useState([]);
   const [paperLoadError, setPaperLoadError] = useState("");
+  const [vectorizeDialogOpen, setVectorizeDialogOpen] = useState(false);
+  const [vectorizeProject, setVectorizeProject] = useState(null);
 
   const hasAssets = useMemo(
     () =>
@@ -192,6 +204,7 @@ export default function EditProject({ currentProject }) {
 
   const loadAssets = async () => {
     if (!currentProject?.id) {
+      setProjectDetails(null);
       setAssets({ images: [], svgs: [], gcode: [] });
       setSelectedAsset(null);
       return;
@@ -214,6 +227,7 @@ export default function EditProject({ currentProject }) {
         projectResponse?.gcode_files || []
       );
       setAssets(grouped);
+      setProjectDetails(projectResponse || null);
 
       const first =
         grouped.images[0] || grouped.svgs[0] || grouped.gcode[0] || null;
@@ -257,7 +271,7 @@ export default function EditProject({ currentProject }) {
     if (!selectedAsset || selectedAsset.type !== "gcode" || !currentProject) {
       setGcodePreview({ loading: false, content: "", error: "" });
       setGcodeAnalysis({ loading: false, data: null, error: "" });
-      setGcodeAnalysis({ loading: false, data: null, error: "" });
+      setSvgAnalysis({ loading: false, data: null, error: "" });
       return;
     }
 
@@ -299,6 +313,12 @@ export default function EditProject({ currentProject }) {
     setGcodeGeometry(parsed);
   }, [selectedAsset, gcodePreview.content]);
 
+  useEffect(() => {
+    if (selectedAsset?.type !== "svg") {
+      setSvgAnalysis({ loading: false, data: null, error: "" });
+    }
+  }, [selectedAsset]);
+
   const handleDeleteAsset = async (asset) => {
     if (!currentProject || !asset) return;
     const confirmed = window.confirm(
@@ -337,6 +357,24 @@ export default function EditProject({ currentProject }) {
     }
   };
 
+  const handleAnalyzeSvg = async () => {
+    if (!currentProject || !selectedAsset) return;
+    setSvgAnalysis({ loading: true, data: null, error: "" });
+    try {
+      const result = await getProjectSvgAnalysis(
+        currentProject.id,
+        selectedAsset.filename
+      );
+      setSvgAnalysis({ loading: false, data: result, error: "" });
+    } catch (err) {
+      setSvgAnalysis({
+        loading: false,
+        data: null,
+        error: err.message || "Failed to analyze SVG",
+      });
+    }
+  };
+
   const openConvertDialog = (asset) => {
     setConvertTarget(asset);
     setConvertError("");
@@ -351,8 +389,9 @@ export default function EditProject({ currentProject }) {
       await convertSvgToGcode(currentProject.id, {
         filename: convertTarget.filename,
         paper_size: convertOptions.paperSize,
-        fit_mode: convertOptions.fitMode,
-        pen_mapping: convertOptions.penMapping,
+        pen_mapping: null,
+        origin_mode: "center",
+        rotate_90: Boolean(convertOptions.rotate90),
       });
       await loadAssets();
       setConvertDialogOpen(false);
@@ -362,6 +401,23 @@ export default function EditProject({ currentProject }) {
     } finally {
       setConvertLoading(false);
     }
+  };
+
+  const isVectorizableAsset = (asset) => {
+    if (!asset || asset.type !== "image") return false;
+    const sourceImage = projectDetails?.source_image;
+    return Boolean(sourceImage && asset.filename === sourceImage);
+  };
+
+  const openVectorizeDialog = (asset) => {
+    if (!currentProject || !isVectorizableAsset(asset)) return;
+    setVectorizeProject(projectDetails || currentProject);
+    setVectorizeDialogOpen(true);
+  };
+
+  const handleCloseVectorizeDialog = () => {
+    setVectorizeDialogOpen(false);
+    setVectorizeProject(null);
   };
 
   const renderGcodePlot = () => {
@@ -462,6 +518,9 @@ export default function EditProject({ currentProject }) {
     return `${secs}s`;
   };
 
+  const fmt = (val, digits = 2) =>
+    val === null || val === undefined ? "—" : Number(val).toFixed(digits);
+
   const renderGcodeAnalysis = () => {
     if (gcodeAnalysis.loading) {
       return (
@@ -489,9 +548,7 @@ export default function EditProject({ currentProject }) {
           <Typography variant="subtitle1">G-code Analysis</Typography>
           <Chip
             size="small"
-            label={`${(a.width_mm ?? 0).toFixed(2)}×${(a.height_mm ?? 0).toFixed(
-              2
-            )} mm`}
+            label={`${fmt(a.width_mm)}×${fmt(a.height_mm)} mm`}
           />
           <Chip
             size="small"
@@ -529,11 +586,126 @@ export default function EditProject({ currentProject }) {
             </Typography>
             {a.average_feedrate_mm_per_min && (
               <Typography variant="caption" color="text.secondary">
-                Avg {a.average_feedrate_mm_per_min} • Min {a.min_feedrate_mm_per_min} • Max{" "}
-                {a.max_feedrate_mm_per_min}
+                Avg {a.average_feedrate_mm_per_min} • Min{" "}
+                {a.min_feedrate_mm_per_min} • Max {a.max_feedrate_mm_per_min}
               </Typography>
             )}
           </Grid>
+          <Grid item xs={12} sm={6} md={4}>
+            <Typography variant="body2" color="text.secondary">
+              Bounds (min → max)
+            </Typography>
+            <Typography variant="body1" fontWeight={600}>
+              X: {fmt(a.bounds?.minX)} → {fmt(a.bounds?.maxX)} mm
+            </Typography>
+            <Typography variant="body1" fontWeight={600}>
+              Y: {fmt(a.bounds?.minY)} → {fmt(a.bounds?.maxY)} mm
+            </Typography>
+          </Grid>
+        </Grid>
+      </Paper>
+    );
+  };
+
+  const renderSvgAnalysis = () => {
+    if (svgAnalysis.loading) {
+      return (
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
+          <CircularProgress size={18} />
+          <Typography variant="body2">Analyzing SVG…</Typography>
+        </Stack>
+      );
+    }
+
+    if (svgAnalysis.error) {
+      return (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {svgAnalysis.error}
+        </Alert>
+      );
+    }
+
+    if (!svgAnalysis.data) return null;
+
+    const a = svgAnalysis.data;
+    return (
+      <Paper variant="outlined" sx={{ p: 2, mb: 2, bgcolor: "grey.50" }}>
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+          <Typography variant="subtitle1">SVG Analysis</Typography>
+          <Chip
+            size="small"
+            label={`${fmt(a.width_mm)}×${fmt(a.height_mm)} mm`}
+          />
+          <Chip
+            size="small"
+            label={`Paths: ${a.path_count} • Segments: ${a.segment_count}`}
+          />
+          {a.metadata?.generator_version && (
+            <Chip
+              size="small"
+              color="primary"
+              label={`Gen: v${a.metadata.generator_version}`}
+            />
+          )}
+        </Stack>
+        <Grid container spacing={2}>
+          <Grid item xs={12} sm={6} md={4}>
+            <Typography variant="body2" color="text.secondary">
+              Total Path Length
+            </Typography>
+            <Typography variant="body1" fontWeight={600}>
+              {fmt(a.total_length_mm, 1)} mm
+            </Typography>
+          </Grid>
+          <Grid item xs={12} sm={6} md={4}>
+            <Typography variant="body2" color="text.secondary">
+              Bounds (min → max)
+            </Typography>
+            <Typography variant="body1" fontWeight={600}>
+              X: {fmt(a.bounds?.minX)} → {fmt(a.bounds?.maxX)} mm
+            </Typography>
+            <Typography variant="body1" fontWeight={600}>
+              Y: {fmt(a.bounds?.minY)} → {fmt(a.bounds?.maxY)} mm
+            </Typography>
+          </Grid>
+          <Grid item xs={12} sm={6} md={4}>
+            <Typography variant="body2" color="text.secondary">
+              Scale Used
+            </Typography>
+            <Typography variant="body1" fontWeight={600}>
+              {fmt(a.scale_used_mm_per_unit, 4)} mm/unit
+            </Typography>
+            {a.viewbox && (
+              <Typography variant="caption" color="text.secondary">
+                viewBox {fmt(a.viewbox.minX, 1)},{fmt(a.viewbox.minY, 1)} →{" "}
+                {fmt(a.viewbox.width, 1)}×{fmt(a.viewbox.height, 1)}
+              </Typography>
+            )}
+          </Grid>
+          {a.metadata && (
+            <Grid item xs={12}>
+              <Typography variant="body2" color="text.secondary" gutterBottom>
+                Metadata
+              </Typography>
+              <Stack spacing={0.5}>
+                {a.metadata.source_image && (
+                  <Typography variant="body2">
+                    Source: {a.metadata.source_image}
+                  </Typography>
+                )}
+                {a.metadata.generated_at && (
+                  <Typography variant="body2">
+                    Generated: {a.metadata.generated_at}
+                  </Typography>
+                )}
+                {a.metadata.parameters && (
+                  <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+                    Params: {JSON.stringify(a.metadata.parameters)}
+                  </Typography>
+                )}
+              </Stack>
+            </Grid>
+          )}
         </Grid>
       </Paper>
     );
@@ -627,7 +799,28 @@ export default function EditProject({ currentProject }) {
             {isSvg ? "SVG Preview" : "Image Preview"}
           </Typography>
           <Chip label={selectedAsset.displayName} size="small" />
+          {!isSvg && isVectorizableAsset(selectedAsset) && (
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<VectorizeIcon fontSize="small" />}
+              onClick={() => openVectorizeDialog(selectedAsset)}
+            >
+              Vectorize
+            </Button>
+          )}
+          {isSvg && (
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={handleAnalyzeSvg}
+              disabled={svgAnalysis.loading}
+            >
+              {svgAnalysis.loading ? "Analyzing…" : "Analyze SVG"}
+            </Button>
+          )}
         </Stack>
+        {isSvg && renderSvgAnalysis()}
         <Paper
           variant="outlined"
           sx={{
@@ -678,6 +871,23 @@ export default function EditProject({ currentProject }) {
             disablePadding
             secondaryAction={
               <Stack direction="row" spacing={0.5}>
+                {isVectorizableAsset(item) && (
+                  <Tooltip title="Vectorize image">
+                    <span>
+                      <IconButton
+                        edge="end"
+                        aria-label={`vectorize ${item.displayName}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openVectorizeDialog(item);
+                        }}
+                        size="small"
+                      >
+                        <VectorizeIcon fontSize="small" />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                )}
                 {item.type === "svg" && (
                   <IconButton
                     edge="end"
@@ -846,7 +1056,8 @@ export default function EditProject({ currentProject }) {
               >
                 {paperOptions.map((paper) => (
                   <MenuItem key={paper.id} value={paper.id || paper.paper_size}>
-                    {paper.name || paper.paper_size} ({paper.width}×{paper.height}mm)
+                    {paper.name || paper.paper_size} ({paper.width}×
+                    {paper.height}mm)
                     {paper.is_default ? " • default" : ""}
                   </MenuItem>
                 ))}
@@ -863,35 +1074,23 @@ export default function EditProject({ currentProject }) {
               )}
             </FormControl>
 
-            <FormControl fullWidth>
-              <InputLabel>Fit / Center</InputLabel>
-              <Select
-                label="Fit / Center"
-                value={convertOptions.fitMode}
-                onChange={(e) =>
-                  setConvertOptions((prev) => ({
-                    ...prev,
-                    fitMode: e.target.value,
-                  }))
-                }
-              >
-                <MenuItem value="fit">Fit to page</MenuItem>
-                <MenuItem value="center">Center on page</MenuItem>
-              </Select>
-            </FormControl>
-
-            <TextField
-              label="Pen Mapping (placeholder)"
-              value={convertOptions.penMapping}
-              onChange={(e) =>
-                setConvertOptions((prev) => ({
-                  ...prev,
-                  penMapping: e.target.value,
-                }))
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={convertOptions.rotate90}
+                  onChange={(e) =>
+                    setConvertOptions((prev) => ({
+                      ...prev,
+                      rotate90: e.target.checked,
+                    }))
+                  }
+                  color="primary"
+                />
               }
-              helperText="E.g., pen color or channel to use"
-              fullWidth
+              label="Rotate 90° clockwise (landscape)"
             />
+
+            {/* Fit/center and pen mapping removed; we always center without pen mapping. */}
 
             {convertError && <Alert severity="error">{convertError}</Alert>}
           </Stack>
@@ -912,6 +1111,12 @@ export default function EditProject({ currentProject }) {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <VectorizeDialog
+        open={vectorizeDialogOpen}
+        onClose={handleCloseVectorizeDialog}
+        project={vectorizeProject}
+      />
     </Box>
   );
 }

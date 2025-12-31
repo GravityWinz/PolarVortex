@@ -14,3 +14,4 @@ PyYAML==6.0.1
 vpype[all]==1.15.0
 # Adds gcode export command for vpype
 vpype-gcode>=0.10.0
+svgpathtools==1.6.1

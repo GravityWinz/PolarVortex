@@ -191,3 +191,5 @@ def analyze_gcode_file(
     }
 
 
+
+
