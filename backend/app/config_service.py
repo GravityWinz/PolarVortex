@@ -644,7 +644,10 @@ class ConfigurationService:
             target_id = self.config_data["plotters"][0]["id"]
 
         updated = self.update_plotter_gcode_settings(target_id, gcode_data)
-        return updated or self.get_gcode_settings()
+        if not updated:
+            # Surface failure so callers can react instead of silently falling back
+            raise RuntimeError("Failed to update G-code settings: target plotter not found")
+        return updated
 
     def get_all_configurations(self) -> ConfigurationResponse:
         """Get all configurations (plotters and papers)"""

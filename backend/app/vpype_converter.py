@@ -307,6 +307,7 @@ async def convert_svg_to_gcode_file(
     })
     # #endregion
     sorted_svg_path = sort_svg_by_stroke(svg_path, generation_tag=generation_tag)
+    cleanup_sorted = sorted_svg_path != svg_path
 
     try:
         pipeline = build_vpype_pipeline(
@@ -339,13 +340,16 @@ async def convert_svg_to_gcode_file(
             output_path.write_text(header + original, encoding="utf-8")
         except Exception:
             logger.debug("Failed to write G-code metadata header", exc_info=True)
-    finally:
-        # Clean up the temp colorsorted file if we created one.
-        try:
-            if sorted_svg_path != svg_path and sorted_svg_path.exists():
+
+        # Clean up the temp colorsorted file if we created one (after subprocess fully completed).
+        if cleanup_sorted and sorted_svg_path.exists():
+            try:
                 sorted_svg_path.unlink()
-        except Exception:
-            logger.debug("Failed to delete temp colorsorted SVG %s", sorted_svg_path, exc_info=True)
+            except Exception:
+                logger.debug("Failed to delete temp colorsorted SVG %s", sorted_svg_path, exc_info=True)
+    finally:
+        # Leave the temp file on failure for debugging.
+        pass
     # #region agent log
     _dbg_log("H1", "vpype_converter.py:91", "convert_svg_to_gcode_file done", {"output_exists": output_path.exists()})
     # #endregion
