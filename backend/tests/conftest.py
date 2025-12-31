@@ -45,16 +45,16 @@ def temp_env(tmp_path, monkeypatch):
 
     _reload_app_modules()
 
-    import app.config_service as config_service
-    import app.project_service as project_service
+    from app.config_service import config_service as cfg_service
+    from app.project_service import project_service as proj_service
 
     # Ensure fresh config and project storage
-    config_service.config_file_path = Path(cfg_path)
-    config_service.config_data = config_service._get_default_config()
-    config_service._save_configurations()
+    cfg_service.config_file_path = Path(cfg_path)
+    cfg_service.config_data = cfg_service._get_default_config()
+    cfg_service._save_configurations()
 
-    project_service.project_storage_path = Path(config_service.config.project_storage)
-    project_service._ensure_project_storage_exists()
+    proj_service.project_storage_path = Path(cfg_service.config.project_storage)
+    proj_service._ensure_project_storage_exists()
 
     yield
 
