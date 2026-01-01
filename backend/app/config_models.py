@@ -83,11 +83,11 @@ class PaperSettings(BaseModel):
 class PlotterCreate(BaseModel):
     """Model for creating a new plotter configuration"""
     name: str = Field(..., description="Name of the plotter configuration")
-    plotter_type: PlotterType = Field(..., description="Type of plotter")
-    width: float = Field(..., description="Plotting area width in mm")
-    height: float = Field(..., description="Plotting area height in mm")
-    mm_per_rev: float = Field(..., description="Millimeters per motor revolution")
-    steps_per_rev: float = Field(..., description="Steps per motor revolution")
+    plotter_type: PlotterType = Field(default=PlotterType.POLARGRAPH, description="Type of plotter")
+    width: float = Field(default=1000.0, description="Plotting area width in mm")
+    height: float = Field(default=1000.0, description="Plotting area height in mm")
+    mm_per_rev: float = Field(default=95.0, description="Millimeters per motor revolution")
+    steps_per_rev: float = Field(default=200.0, description="Steps per motor revolution")
     max_speed: float = Field(default=100.0, description="Maximum speed in mm/s")
     acceleration: float = Field(default=50.0, description="Acceleration in mm/s²")
     pen_up_position: float = Field(default=10.0, description="Pen up position in mm")

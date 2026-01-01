@@ -10,6 +10,10 @@ This project uses FastAPI (backend) and Vite/React (frontend). Tests are split i
   - Run all: `pytest backend/app --cov=backend.app`
   - Quiet: `pytest backend/app -q`
   - Filter: `pytest backend/app -k upload`
+- Run inside Docker:
+  - Build (if needed): `docker compose build backend`
+  - One-off test run: `docker compose run --rm backend pytest -q`
+  - Against running container: `docker  compose up -d backend && docker compose exec backend pytest -q`
 - Areas covered:
   - Project lifecycle (create/get/delete)
   - Upload validation (image/gcode) and path traversal guards
@@ -30,11 +34,13 @@ This project uses FastAPI (backend) and Vite/React (frontend). Tests are split i
 ## Quick start
 
 Backend:
+
 1) `cd backend`
 2) `pip install -r requirements-dev.txt`
 3) `pytest backend/app --cov=backend.app`
 
 Frontend:
+
 1) `cd frontend`
 2) `npm install`
 3) `npm run test:unit`
@@ -44,4 +50,3 @@ Frontend:
 - Tests avoid real hardware: serial access is mocked via the simulator in app code.
 - Frontend tests stub network with MSW; ensure no live backend is required.
 - Use `-k` or `--runInBand` (Vitest: `--runInBand`) if debugging single tests.
-

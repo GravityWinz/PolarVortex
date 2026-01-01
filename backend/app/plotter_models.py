@@ -19,7 +19,7 @@ class ProjectGcodeRunRequest(BaseModel):
 class SvgToGcodeRequest(BaseModel):
     filename: str
     paper_size: str = "A4"
-    pen_mapping: Optional[str] = None
+    pen_mapping: Optional[Dict[str, Any]] = None
     origin_mode: Literal["lower_left", "center"] = "lower_left"
     rotate_90: bool = False
 
