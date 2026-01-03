@@ -37,7 +37,7 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   convertSvgToGcode,
   deleteProjectFile,
@@ -48,12 +48,20 @@ import {
   getProjectFileUrl,
   getProjectGcodeAnalysis,
   getProjectSvgAnalysis,
+  uploadGcodeToProject,
+  uploadImageToProject,
 } from "../services/apiService";
 import VectorizeDialog from "./VectorizeDialog";
 
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "bmp", "webp"];
 const SVG_EXTENSIONS = ["svg"];
 const GCODE_EXTENSIONS = ["gcode", "nc", "txt"];
+const DEFAULT_UPLOAD_SETTINGS = {
+  threshold: 128,
+  invert: false,
+  dither: true,
+  resolution: "medium",
+};
 
 function normalizeAsset(filename, meta = {}, typeOverride) {
   const ext = (filename || "").split(".").pop()?.toLowerCase() || "";
@@ -193,6 +201,13 @@ export default function EditProject({ currentProject }) {
   const [paperLoadError, setPaperLoadError] = useState("");
   const [vectorizeDialogOpen, setVectorizeDialogOpen] = useState(false);
   const [vectorizeProject, setVectorizeProject] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const defaultPaper = useMemo(() => {
+    if (!paperOptions.length) return null;
+    return paperOptions.find((p) => p.is_default) || paperOptions[0] || null;
+  }, [paperOptions]);
 
   const hasAssets = useMemo(
     () =>
@@ -403,6 +418,59 @@ export default function EditProject({ currentProject }) {
     }
   };
 
+  const handleUploadFile = async (file) => {
+    if (!file || !currentProject) return;
+    const name = (file.name || "").toLowerCase();
+    const ext = name.match(/\.[^.]+$/)?.[0]?.slice(1) || "";
+    const isSvg = ext === "svg";
+    const isGcode = GCODE_EXTENSIONS.includes(ext);
+    const isImage = file.type.startsWith("image/") || isSvg;
+
+    if (!isImage && !isGcode) {
+      setAssetError(
+        "Unsupported file type. Use image/SVG or G-code (.gcode/.nc/.txt)."
+      );
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      setAssetError("File size must be less than 10MB");
+      return;
+    }
+
+    setAssetError("");
+    setUploading(true);
+    try {
+      if (isGcode) {
+        const formData = new FormData();
+        formData.append("file", file);
+        await uploadGcodeToProject(currentProject.id, formData);
+      } else {
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("settings", JSON.stringify(DEFAULT_UPLOAD_SETTINGS));
+        await uploadImageToProject(currentProject.id, formData);
+      }
+
+      await loadAssets();
+    } catch (err) {
+      setAssetError(err.message || "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleFileInputChange = async (event) => {
+    const file = event.target.files?.[0];
+    // Reset input so the same file can be selected again
+    event.target.value = "";
+    await handleUploadFile(file);
+  };
+
+  const triggerFilePicker = () => {
+    fileInputRef.current?.click();
+  };
+
   const isVectorizableAsset = (asset) => {
     if (!asset || asset.type !== "image") return false;
     const sourceImage = projectDetails?.source_image;
@@ -421,15 +489,73 @@ export default function EditProject({ currentProject }) {
   };
 
   const renderGcodePlot = () => {
-    if (!gcodeGeometry.bounds || gcodeGeometry.segments.length === 0) {
+    const printableSegments = (gcodeGeometry.segments || []).filter(
+      (seg) => seg.penDown
+    );
+
+    const calcBounds = (segments) => {
+      if (!segments.length) return null;
+      return segments.reduce(
+        (acc, seg) => ({
+          minX: Math.min(acc.minX, seg.from.x, seg.to.x),
+          maxX: Math.max(acc.maxX, seg.from.x, seg.to.x),
+          minY: Math.min(acc.minY, seg.from.y, seg.to.y),
+          maxY: Math.max(acc.maxY, seg.from.y, seg.to.y),
+        }),
+        {
+          minX: Infinity,
+          maxX: -Infinity,
+          minY: Infinity,
+          maxY: -Infinity,
+        }
+      );
+    };
+
+    const bounds = calcBounds(printableSegments);
+
+    const paperWidth = defaultPaper ? Number(defaultPaper.width) || 0 : 0;
+    const paperHeight = defaultPaper ? Number(defaultPaper.height) || 0 : 0;
+    const paperBox =
+      paperWidth > 0 && paperHeight > 0
+        ? {
+            minX: -paperWidth / 2,
+            maxX: paperWidth / 2,
+            minY: -paperHeight / 2,
+            maxY: paperHeight / 2,
+          }
+        : null;
+
+    // Expand bounds to include paper rectangle so both fit the viewport
+    const combinedBounds = bounds
+      ? {
+          minX: Math.min(
+            bounds.minX,
+            paperBox ? paperBox.minX : bounds.minX
+          ),
+          maxX: Math.max(
+            bounds.maxX,
+            paperBox ? paperBox.maxX : bounds.maxX
+          ),
+          minY: Math.min(
+            bounds.minY,
+            paperBox ? paperBox.minY : bounds.minY
+          ),
+          maxY: Math.max(
+            bounds.maxY,
+            paperBox ? paperBox.maxY : bounds.maxY
+          ),
+        }
+      : paperBox;
+
+    if (!bounds || printableSegments.length === 0) {
       return (
         <Alert severity="info" sx={{ mb: 2 }}>
-          No drawable moves found in this G-code (need G0/G1 with X/Y).
+          No printable moves found (only travel moves present).
         </Alert>
       );
     }
 
-    const { minX, maxX, minY, maxY } = gcodeGeometry.bounds;
+    const { minX, maxX, minY, maxY } = combinedBounds || bounds;
     const width = 640;
     const height = 420;
     const padding = 16;
@@ -450,10 +576,7 @@ export default function EditProject({ currentProject }) {
         <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
           <CodeIcon color="primary" />
           <Typography variant="subtitle1">G-code Plot Preview</Typography>
-          <Chip
-            label={`${gcodeGeometry.segments.length} segments`}
-            size="small"
-          />
+          <Chip label={`${printableSegments.length} segments`} size="small" />
         </Stack>
         <Paper
           variant="outlined"
@@ -480,7 +603,32 @@ export default function EditProject({ currentProject }) {
               fill="white"
               stroke="#e0e0e0"
             />
-            {gcodeGeometry.segments.map((seg, idx) => {
+            {paperBox && (
+              <rect
+                x={Math.min(
+                  mapPoint(paperBox.minX, paperBox.minY).x,
+                  mapPoint(paperBox.maxX, paperBox.maxY).x
+                )}
+                y={Math.min(
+                  mapPoint(paperBox.minX, paperBox.minY).y,
+                  mapPoint(paperBox.maxX, paperBox.maxY).y
+                )}
+                width={Math.abs(
+                  mapPoint(paperBox.maxX, paperBox.minY).x -
+                    mapPoint(paperBox.minX, paperBox.minY).x
+                )}
+                height={Math.abs(
+                  mapPoint(paperBox.minX, paperBox.maxY).y -
+                    mapPoint(paperBox.minX, paperBox.minY).y
+                )}
+                fill="none"
+                stroke="#8bc34a"
+                strokeWidth={1.5}
+                strokeDasharray="6 4"
+                opacity={0.9}
+              />
+            )}
+            {printableSegments.map((seg, idx) => {
               const from = mapPoint(seg.from.x, seg.from.y);
               const to = mapPoint(seg.to.x, seg.to.y);
               return (
@@ -951,14 +1099,29 @@ export default function EditProject({ currentProject }) {
             </Typography>
           )}
         </Box>
-        <Button
-          variant="outlined"
-          startIcon={<RefreshIcon />}
-          onClick={loadAssets}
-          disabled={loadingAssets || !currentProject}
-        >
-          Refresh
-        </Button>
+        <Stack direction="row" spacing={1}>
+          <input
+            type="file"
+            hidden
+            ref={fileInputRef}
+            onChange={handleFileInputChange}
+          />
+          <Button
+            variant="contained"
+            onClick={triggerFilePicker}
+            disabled={!currentProject || uploading}
+          >
+            {uploading ? "Uploading…" : "Upload"}
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<RefreshIcon />}
+            onClick={loadAssets}
+            disabled={loadingAssets || !currentProject}
+          >
+            Refresh
+          </Button>
+        </Stack>
       </Stack>
 
       <Grid container spacing={3}>

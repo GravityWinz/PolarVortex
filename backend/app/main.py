@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 
 # G-code upload validation
 # txt is excluded to enforce stricter extension checks in tests/CI
-ALLOWED_GCODE_EXTENSIONS = {".gcode", ".nc"}
+ALLOWED_GCODE_EXTENSIONS = {".gcode", ".nc", ".txt"}
 MAX_GCODE_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
 
 # Initialize ImageHelper

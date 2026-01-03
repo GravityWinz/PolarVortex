@@ -298,7 +298,8 @@ class Config:
             'image/jpg',
             'image/png',
             'image/gif',
-            'image/bmp'
+            'image/bmp',
+            'image/svg+xml',
         ])
     
     @property
