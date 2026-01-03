@@ -196,7 +196,9 @@ class PlotterService:
             ok_received = False
             busy_seen = False
             start_wait = datetime.now()
-            max_wait_seconds = 20.0
+            base_wait_seconds = 20.0
+            busy_wait_seconds = 120.0  # allow extra time when printer reports busy
+            max_wait_seconds = base_wait_seconds
 
             while (datetime.now() - start_wait).total_seconds() < max_wait_seconds:
                 chunk = await self.read_arduino_response(timeout_seconds=1.5)
@@ -207,17 +209,19 @@ class PlotterService:
                         break
                     if any("busy" in r.lower() for r in chunk):
                         busy_seen = True
+                        max_wait_seconds = max(max_wait_seconds, busy_wait_seconds)
                 else:
                     await asyncio.sleep(0.3)
 
             response_text = "\n".join(responses) if responses else "No response"
-            success = ok_received or busy_seen
+            success = ok_received
             error_text = None
-            if not ok_received and not busy_seen:
-                error_text = "No 'ok' received from printer; holding next commands to avoid buffer overrun"
+            if not ok_received:
+                if busy_seen:
+                    error_text = "Printer reported busy and no 'ok' arrived before timeout; pausing further commands"
+                else:
+                    error_text = "No 'ok' received from printer; holding next commands to avoid buffer overrun"
                 logger.warning("%s (command='%s', response='%s')", error_text, gcode, response_text)
-            elif busy_seen and not ok_received:
-                logger.warning("Printer busy without final ok; continuing (command='%s', response='%s')", gcode, response_text)
 
             log_entry = {
                 "timestamp": datetime.now().isoformat(),
