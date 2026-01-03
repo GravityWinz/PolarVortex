@@ -4,9 +4,17 @@ import {
   DeleteOutline as DeleteIcon,
   InsertDriveFile as FileIcon,
   Image as ImageIcon,
+  ArrowDownward as PanDownIcon,
+  ArrowBack as PanLeftIcon,
+  ArrowForward as PanRightIcon,
+  ArrowUpward as PanUpIcon,
   Refresh as RefreshIcon,
+  CenterFocusStrong as ResetPanIcon,
+  RestartAlt as ResetZoomIcon,
   Article as SvgIcon,
   AutoGraph as VectorizeIcon,
+  ZoomIn as ZoomInIcon,
+  ZoomOut as ZoomOutIcon,
 } from "@mui/icons-material";
 import {
   Alert,
@@ -62,6 +70,7 @@ const DEFAULT_UPLOAD_SETTINGS = {
   dither: true,
   resolution: "medium",
 };
+const PAN_STEP = 10;
 
 function normalizeAsset(filename, meta = {}, typeOverride) {
   const ext = (filename || "").split(".").pop()?.toLowerCase() || "";
@@ -203,6 +212,8 @@ export default function EditProject({ currentProject }) {
   const [vectorizeProject, setVectorizeProject] = useState(null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);
+  const [gcodeZoom, setGcodeZoom] = useState(1);
+  const [gcodePan, setGcodePan] = useState({ x: 0, y: 0 });
 
   const defaultPaper = useMemo(() => {
     if (!paperOptions.length) return null;
@@ -471,6 +482,14 @@ export default function EditProject({ currentProject }) {
     fileInputRef.current?.click();
   };
 
+  const clampZoom = (value) => Math.min(4, Math.max(0.25, value));
+  const handleZoomIn = () => setGcodeZoom((z) => clampZoom(z + 0.25));
+  const handleZoomOut = () => setGcodeZoom((z) => clampZoom(z - 0.25));
+  const handleZoomReset = () => setGcodeZoom(1);
+  const handlePan = (dx, dy) =>
+    setGcodePan((p) => ({ x: p.x + dx, y: p.y + dy }));
+  const handlePanReset = () => setGcodePan({ x: 0, y: 0 });
+
   const isVectorizableAsset = (asset) => {
     if (!asset || asset.type !== "image") return false;
     const sourceImage = projectDetails?.source_image;
@@ -528,22 +547,10 @@ export default function EditProject({ currentProject }) {
     // Expand bounds to include paper rectangle so both fit the viewport
     const combinedBounds = bounds
       ? {
-          minX: Math.min(
-            bounds.minX,
-            paperBox ? paperBox.minX : bounds.minX
-          ),
-          maxX: Math.max(
-            bounds.maxX,
-            paperBox ? paperBox.maxX : bounds.maxX
-          ),
-          minY: Math.min(
-            bounds.minY,
-            paperBox ? paperBox.minY : bounds.minY
-          ),
-          maxY: Math.max(
-            bounds.maxY,
-            paperBox ? paperBox.maxY : bounds.maxY
-          ),
+          minX: Math.min(bounds.minX, paperBox ? paperBox.minX : bounds.minX),
+          maxX: Math.max(bounds.maxX, paperBox ? paperBox.maxX : bounds.maxX),
+          minY: Math.min(bounds.minY, paperBox ? paperBox.minY : bounds.minY),
+          maxY: Math.max(bounds.maxY, paperBox ? paperBox.maxY : bounds.maxY),
         }
       : paperBox;
 
@@ -563,12 +570,15 @@ export default function EditProject({ currentProject }) {
     const spanY = Math.max(maxY - minY, 1);
     const scaleX = (width - padding * 2) / spanX;
     const scaleY = (height - padding * 2) / spanY;
-    const scale = Math.min(scaleX, scaleY);
+    const baseScale = Math.min(scaleX, scaleY);
+    const scale = baseScale * gcodeZoom;
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
 
     const mapPoint = (x, y) => ({
-      x: padding + (x - minX) * scale,
+      x: width / 2 + (x - centerX - gcodePan.x) * scale,
       // Flip Y so higher Y is up visually
-      y: height - padding - (y - minY) * scale,
+      y: height / 2 - (y - centerY - gcodePan.y) * scale,
     });
 
     return (
@@ -577,6 +587,103 @@ export default function EditProject({ currentProject }) {
           <CodeIcon color="primary" />
           <Typography variant="subtitle1">G-code Plot Preview</Typography>
           <Chip label={`${printableSegments.length} segments`} size="small" />
+          <Box sx={{ flexGrow: 1 }} />
+          <Stack direction="row" spacing={0.5} alignItems="center">
+            <IconButton
+              size="small"
+              onClick={handleZoomOut}
+              aria-label="Zoom out"
+              disabled={gcodeZoom <= 0.25}
+            >
+              <ZoomOutIcon fontSize="small" />
+            </IconButton>
+            <Typography
+              variant="caption"
+              sx={{ minWidth: 46, textAlign: "center" }}
+            >
+              {Math.round(gcodeZoom * 100)}%
+            </Typography>
+            <IconButton
+              size="small"
+              onClick={handleZoomIn}
+              aria-label="Zoom in"
+              disabled={gcodeZoom >= 4}
+            >
+              <ZoomInIcon fontSize="small" />
+            </IconButton>
+            <Tooltip title="Reset zoom">
+              <span>
+                <IconButton
+                  size="small"
+                  onClick={handleZoomReset}
+                  aria-label="Reset zoom"
+                  disabled={gcodeZoom === 1}
+                >
+                  <ResetZoomIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+          </Stack>
+          <Stack spacing={0.25} alignItems="center" sx={{ ml: 1 }}>
+            <Tooltip title="Pan up">
+              <span>
+                <IconButton
+                  size="small"
+                  onClick={() => handlePan(0, -PAN_STEP)}
+                  aria-label="Pan up"
+                >
+                  <PanUpIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Stack direction="row" spacing={0.25} alignItems="center">
+              <Tooltip title="Pan left">
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={() => handlePan(-PAN_STEP, 0)}
+                    aria-label="Pan left"
+                  >
+                    <PanLeftIcon fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+              <Tooltip title="Reset pan">
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={handlePanReset}
+                    aria-label="Reset pan"
+                    disabled={gcodePan.x === 0 && gcodePan.y === 0}
+                  >
+                    <ResetPanIcon fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+              <Tooltip title="Pan right">
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={() => handlePan(PAN_STEP, 0)}
+                    aria-label="Pan right"
+                  >
+                    <PanRightIcon fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+            </Stack>
+            <Tooltip title="Pan down">
+              <span>
+                <IconButton
+                  size="small"
+                  onClick={() => handlePan(0, PAN_STEP)}
+                  aria-label="Pan down"
+                >
+                  <PanDownIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+          </Stack>
         </Stack>
         <Paper
           variant="outlined"
