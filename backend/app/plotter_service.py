@@ -196,20 +196,32 @@ class PlotterService:
             ok_received = False
             busy_seen = False
             start_wait = datetime.now()
-            base_wait_seconds = 20.0
-            busy_wait_seconds = 120.0  # allow extra time when printer reports busy
-            max_wait_seconds = base_wait_seconds
+            last_progress = datetime.now()
+            max_total_seconds = 300.0  # hard cap
+            idle_timeout_seconds = 30.0
+            busy_idle_timeout_seconds = 120.0
 
-            while (datetime.now() - start_wait).total_seconds() < max_wait_seconds:
+            while True:
+                total_elapsed = (datetime.now() - start_wait).total_seconds()
+                idle_elapsed = (datetime.now() - last_progress).total_seconds()
+
+                # Stop if we exceeded overall or idle thresholds
+                if total_elapsed >= max_total_seconds:
+                    break
+                if busy_seen and idle_elapsed >= busy_idle_timeout_seconds:
+                    break
+                if not busy_seen and idle_elapsed >= idle_timeout_seconds:
+                    break
+
                 chunk = await self.read_arduino_response(timeout_seconds=1.5)
                 if chunk:
+                    last_progress = datetime.now()
                     responses.extend(chunk)
                     if self._response_contains_ok(chunk):
                         ok_received = True
                         break
                     if any("busy" in r.lower() for r in chunk):
                         busy_seen = True
-                        max_wait_seconds = max(max_wait_seconds, busy_wait_seconds)
                 else:
                     await asyncio.sleep(0.3)
 
