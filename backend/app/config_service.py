@@ -2,7 +2,6 @@ import os
 import yaml
 import json
 import uuid
-import copy
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from pathlib import Path
@@ -95,14 +94,7 @@ class ConfigurationService:
             raise RuntimeError(f"Error creating default configuration file: {e}")
     
     def _get_default_config(self) -> Dict[str, Any]:
-        """Get default configuration with plotters and papers.
-
-        If a config is already loaded, reuse it as the template so regenerated
-        files keep current settings.
-        """
-        if hasattr(self, "config_data") and self.config_data:
-            return copy.deepcopy(self.config_data)
-
+        """Get default configuration with plotters and papers."""
         return {
             "api": {
                 "title": "PolarVortex API",
