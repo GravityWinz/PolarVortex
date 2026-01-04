@@ -444,9 +444,7 @@ async def convert_svg_to_gcode(project_id: str, request: SvgToGcodeRequest):
             raise HTTPException(status_code=400, detail="Invalid file path")
 
         if not svg_path.exists() or not svg_path.is_file():
-            # For tests, create an empty SVG placeholder if missing
-            svg_path.parent.mkdir(parents=True, exist_ok=True)
-            svg_path.write_text("<svg></svg>")
+            raise HTTPException(status_code=404, detail="SVG file not found")
 
         if svg_path.suffix.lower() != ".svg":
             raise HTTPException(status_code=400, detail="File is not an SVG")
@@ -597,24 +595,6 @@ async def upload_image_to_project(
             # Update source image filename
             if result.get("filename"):
                 project_service.update_project_source_image(project_id, result["filename"])
-
-            # Ensure artifacts exist on disk for downstream tests
-            if result.get("filename"):
-                source_path = project_dir / result["filename"]
-                source_path.parent.mkdir(parents=True, exist_ok=True)
-                if not source_path.exists():
-                    source_path.write_bytes(contents or b"data")
-            if result.get("thumbnail_path"):
-                thumb_path = Path(result["thumbnail_path"])
-                thumb_path.parent.mkdir(parents=True, exist_ok=True)
-                if not thumb_path.exists():
-                    thumb_path.write_bytes(b"thumb")
-
-            # Guarantee at least one png exists for downstream cleanup tests
-            if not any(project_dir.glob("*.png")):
-                placeholder = project_dir / (result.get("filename") or "placeholder.png")
-                placeholder.parent.mkdir(parents=True, exist_ok=True)
-                placeholder.write_bytes(contents or b"data")
         
         # Broadcast new image available for this project
         await manager.broadcast(json.dumps({
@@ -626,13 +606,6 @@ async def upload_image_to_project(
             "original_path": result["original_path"],
             "thumbnail_path": result["thumbnail_path"]
         }))
-        
-        # Final safety: ensure at least one PNG exists in the project directory
-        project_dir = project_service._get_project_directory(project_id)
-        project_dir.mkdir(parents=True, exist_ok=True)
-        if not any(project_dir.glob("*.png")):
-            placeholder = project_dir / "placeholder.png"
-            placeholder.write_bytes(contents or b"data")
         
         return result
         
