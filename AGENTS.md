@@ -29,6 +29,8 @@ PolarVortex controls a polargraph plotter with a React + Material UI frontend an
 - Handles image processing and Arduino serial communication.
 - Communicates with a Marlin-based controller (no custom Arduino/firmware in this repo); ensure commands stay compatible with the Marlin dialect used by the plotter.
 - Add or maintain notes on Python/FastAPI versions, key endpoints, and testing approach alongside the code.
+- All dynamic files will be stored in the /app/local_storage folder such as config files log files ect
+- when adding any new configuration parameters, appropriate default values will be created and used in the  _get_default_config routine
 
 ## Firmware/Controller
 

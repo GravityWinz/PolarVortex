@@ -69,11 +69,11 @@ class ConfigurationService:
                 self.config_data[section] = default_config[section]
                 needs_update = True
 
-        # Ensure gcode section exists
-        if 'gcode_sequences' not in self.config_data:
-            self.config_data['gcode_sequences'] = self._get_default_gcode_sequences()
+        # Remove legacy top-level gcode_sequences (now per-plotter)
+        if 'gcode_sequences' in self.config_data:
+            self.config_data.pop('gcode_sequences', None)
             needs_update = True
-        
+
         # Save updated configuration if needed
         if needs_update:
             self._save_configurations()
@@ -94,7 +94,7 @@ class ConfigurationService:
             raise RuntimeError(f"Error creating default configuration file: {e}")
     
     def _get_default_config(self) -> Dict[str, Any]:
-        """Get default configuration with sample plotters and papers"""
+        """Get default configuration with plotters and papers."""
         return {
             "api": {
                 "title": "PolarVortex API",
@@ -159,7 +159,6 @@ class ConfigurationService:
                 "default_dither": True,
                 "default_invert": False
             },
-            "gcode_sequences": self._get_default_gcode_sequences(),
             "plotters": self._get_default_plotters(),
             "papers": self._get_default_papers()
         }
@@ -176,10 +175,11 @@ class ConfigurationService:
                 "mm_per_rev": 95.0,
                 "steps_per_rev": 200.0,
                 "max_speed": 100.0,
-                "acceleration": 50.0,
-                "pen_up_position": 10.0,
-                "pen_down_position": 0.0,
-                "pen_speed": 20.0,
+            "acceleration": 50.0,
+            "pen_up_position": 10.0,
+            "pen_down_position": 0.0,
+            "pen_speed": 20.0,
+            "gcode_sequences": self._get_default_gcode_sequences(),
                 "home_position_x": 0.0,
                 "home_position_y": 0.0,
                 "is_default": True,
@@ -261,7 +261,7 @@ class ConfigurationService:
             # US paper sizes
             {
                 "id": str(uuid.uuid4()),
-                "name": "US A Size (216×279mm)",
+                "name": "US A (8.50x11.00 in)",
                 "paper_size": "A",
                 "width": 216.0,
                 "height": 279.0,
@@ -272,7 +272,7 @@ class ConfigurationService:
             },
             {
                 "id": str(uuid.uuid4()),
-                "name": "US B Size (279×432mm)",
+                "name": "US B Size (11.0x17.0 in)",
                 "paper_size": "B",
                 "width": 279.0,
                 "height": 432.0,
@@ -283,7 +283,7 @@ class ConfigurationService:
             },
             {
                 "id": str(uuid.uuid4()),
-                "name": "US C Size (432×559mm)",
+                "name": "US C Size (17.0x22.0 in)",
                 "paper_size": "C",
                 "width": 432.0,
                 "height": 559.0,
@@ -294,7 +294,7 @@ class ConfigurationService:
             },
             {
                 "id": str(uuid.uuid4()),
-                "name": "US D Size (559×864mm)",
+                "name": "US D Size (22.0x34.0 in)",
                 "paper_size": "D",
                 "width": 559.0,
                 "height": 864.0,
@@ -305,7 +305,7 @@ class ConfigurationService:
             },
             {
                 "id": str(uuid.uuid4()),
-                "name": "Letter Size (216×279mm)",
+                "name": "Letter Size (8.50x11.00 in)",
                 "paper_size": "Letter",
                 "width": 216.0,
                 "height": 279.0,
@@ -316,7 +316,7 @@ class ConfigurationService:
             },
             {
                 "id": str(uuid.uuid4()),
-                "name": "Legal Size (216×356mm)",
+                "name": "Legal Size (8.50x14.0 in)",
                 "paper_size": "Legal",
                 "width": 216.0,
                 "height": 356.0,
@@ -327,7 +327,7 @@ class ConfigurationService:
             },
             {
                 "id": str(uuid.uuid4()),
-                "name": "Tabloid Size (279×432mm)",
+                "name": "Tabloid Size (11.0x17.0 in)",
                 "paper_size": "Tabloid",
                 "width": 279.0,
                 "height": 432.0,
@@ -348,7 +348,9 @@ class ConfigurationService:
             ],
             "before_print": [
                 "G92 X0 Y0 Z0; set home position"
-            ]
+            ],
+            "pen_up_command": "M280 P0 S110",
+            "pen_down_command": "M280 P0 S130",
         }
     
     def _validate_and_repair_config(self):
@@ -381,13 +383,18 @@ class ConfigurationService:
         
         # Ensure all plotters have required fields
         for plotter in self.config_data.get('plotters', []):
-            required_fields = ['id', 'name', 'plotter_type', 'width', 'height', 'mm_per_rev', 'steps_per_rev']
+            required_fields = [
+                'id', 'name', 'plotter_type', 'width', 'height',
+                'mm_per_rev', 'steps_per_rev', 'gcode_sequences'
+            ]
             for field in required_fields:
                 if field not in plotter:
                     if field == 'id':
                         plotter[field] = str(uuid.uuid4())
                     elif field in ['width', 'height', 'mm_per_rev', 'steps_per_rev']:
                         plotter[field] = 0.0
+                    elif field == 'gcode_sequences':
+                        plotter[field] = self._get_default_gcode_sequences()
                     elif field == 'plotter_type':
                         plotter[field] = 'polargraph'
                     else:
@@ -447,6 +454,11 @@ class ConfigurationService:
             "pen_up_position": plotter_data.pen_up_position,
             "pen_down_position": plotter_data.pen_down_position,
             "pen_speed": plotter_data.pen_speed,
+            "gcode_sequences": (
+                plotter_data.gcode_sequences.dict()
+                if plotter_data.gcode_sequences is not None
+                else GcodeSettings().dict()
+            ),
             "home_position_x": plotter_data.home_position_x,
             "home_position_y": plotter_data.home_position_y,
             "is_default": plotter_data.is_default,
@@ -486,6 +498,11 @@ class ConfigurationService:
                 for key, value in update_data.items():
                     if key == 'plotter_type':
                         plotter[key] = value.value
+                    elif key == 'gcode_sequences' and value is not None:
+                        if isinstance(value, dict):
+                            plotter[key] = value
+                        else:
+                            plotter[key] = value.dict()
                     else:
                         plotter[key] = value
                 
@@ -589,6 +606,41 @@ class ConfigurationService:
                 return self._dict_to_paper_response(paper)
         return None
     
+    def get_default_plotter_id(self) -> Optional[str]:
+        default = self.get_default_plotter()
+        return default.id if default else None
+
+    def get_gcode_settings(self) -> GcodeSettings:
+        """Return automatic G-code sequences for the default plotter."""
+        default_plotter = self.get_default_plotter()
+        if default_plotter:
+            return default_plotter.gcode_sequences
+        # Fallback: ensure we always return a model
+        defaults = self._get_default_gcode_sequences()
+        return GcodeSettings(
+            on_connect=defaults.get("on_connect", []),
+            before_print=defaults.get("before_print", []),
+            pen_up_command=defaults.get("pen_up_command", "M280 P0 S110"),
+            pen_down_command=defaults.get("pen_down_command", "M280 P0 S130"),
+        )
+
+    def update_gcode_settings(self, gcode_data: GcodeSettingsUpdate) -> GcodeSettings:
+        """Update automatic G-code sequences on the default plotter."""
+        # Try default plotter, else first plotter, else create defaults
+        target_id = self.get_default_plotter_id()
+        if not target_id and self.config_data.get("plotters"):
+            target_id = self.config_data["plotters"][0]["id"]
+        if not target_id:
+            # No plotters present; seed defaults
+            self.config_data["plotters"] = self._get_default_plotters()
+            target_id = self.config_data["plotters"][0]["id"]
+
+        updated = self.update_plotter_gcode_settings(target_id, gcode_data)
+        if not updated:
+            # Surface failure so callers can react instead of silently falling back
+            raise RuntimeError("Failed to update G-code settings: target plotter not found")
+        return updated
+
     def get_all_configurations(self) -> ConfigurationResponse:
         """Get all configurations (plotters and papers)"""
         plotters = [self._dict_to_plotter_response(plotter) for plotter in self.config_data['plotters']]
@@ -606,6 +658,7 @@ class ConfigurationService:
     
     def _dict_to_plotter_response(self, plotter_dict: Dict[str, Any]) -> PlotterResponse:
         """Convert dictionary to PlotterResponse"""
+        gcode_data = plotter_dict.get('gcode_sequences', self._get_default_gcode_sequences())
         return PlotterResponse(
             id=plotter_dict['id'],
             name=plotter_dict['name'],
@@ -619,6 +672,12 @@ class ConfigurationService:
             pen_up_position=plotter_dict['pen_up_position'],
             pen_down_position=plotter_dict['pen_down_position'],
             pen_speed=plotter_dict['pen_speed'],
+            gcode_sequences=GcodeSettings(
+                on_connect=gcode_data.get('on_connect', []),
+                before_print=gcode_data.get('before_print', []),
+                pen_up_command=gcode_data.get('pen_up_command', "M280 P0 S110"),
+                pen_down_command=gcode_data.get('pen_down_command', "M280 P0 S130"),
+            ),
             home_position_x=plotter_dict['home_position_x'],
             home_position_y=plotter_dict['home_position_y'],
             is_default=plotter_dict['is_default'],
@@ -641,28 +700,49 @@ class ConfigurationService:
         )
 
 
-    def get_gcode_settings(self) -> GcodeSettings:
-        """Return automatic G-code sequences"""
-        gcode_data = self.config_data.get('gcode_sequences', self._get_default_gcode_sequences())
-        return GcodeSettings(
-            on_connect=gcode_data.get('on_connect', []),
-            before_print=gcode_data.get('before_print', [])
-        )
+    def get_plotter_gcode_settings(self, plotter_id: str) -> Optional[GcodeSettings]:
+        """Return automatic G-code sequences for a specific plotter"""
+        for plotter in self.config_data.get('plotters', []):
+            if plotter['id'] == plotter_id:
+                gcode_data = plotter.get('gcode_sequences', self._get_default_gcode_sequences())
+                pen_up = gcode_data.get('pen_up_command')
+                if pen_up is None:
+                    pen_up = "M280 P0 S110"
+                pen_down = gcode_data.get('pen_down_command')
+                if pen_down is None:
+                    pen_down = "M280 P0 S130"
+                return GcodeSettings(
+                    on_connect=gcode_data.get('on_connect', []),
+                    before_print=gcode_data.get('before_print', []),
+                    pen_up_command=pen_up,
+                    pen_down_command=pen_down,
+                )
+        return None
 
-    def update_gcode_settings(self, gcode_data: GcodeSettingsUpdate) -> GcodeSettings:
-        """Update automatic G-code sequences"""
-        existing = self.config_data.get('gcode_sequences', self._get_default_gcode_sequences())
-        update_payload = gcode_data.dict(exclude_unset=True)
+    def update_plotter_gcode_settings(self, plotter_id: str, gcode_data: GcodeSettingsUpdate) -> Optional[GcodeSettings]:
+        """Update automatic G-code sequences for a specific plotter"""
+        for plotter in self.config_data.get('plotters', []):
+            if plotter['id'] == plotter_id:
+                existing = plotter.get('gcode_sequences', self._get_default_gcode_sequences())
+                update_payload = gcode_data.dict(exclude_unset=True)
 
-        if 'on_connect' in update_payload:
-            existing['on_connect'] = update_payload['on_connect'] or []
-        if 'before_print' in update_payload:
-            existing['before_print'] = update_payload['before_print'] or []
+                if 'on_connect' in update_payload:
+                    if update_payload['on_connect'] is not None:
+                        existing['on_connect'] = update_payload['on_connect']
+                if 'before_print' in update_payload:
+                    if update_payload['before_print'] is not None:
+                        existing['before_print'] = update_payload['before_print']
+                if 'pen_up_command' in update_payload:
+                    if update_payload['pen_up_command'] is not None:
+                        existing['pen_up_command'] = update_payload['pen_up_command']
+                if 'pen_down_command' in update_payload:
+                    if update_payload['pen_down_command'] is not None:
+                        existing['pen_down_command'] = update_payload['pen_down_command']
 
-        # Persist and return as model
-        self.config_data['gcode_sequences'] = existing
-        self._save_configurations()
-        return self.get_gcode_settings()
+                plotter['gcode_sequences'] = existing
+                self._save_configurations()
+                return self.get_plotter_gcode_settings(plotter_id)
+        return None
 
     def rebuild_default_config(self):
         """Force rebuild the configuration with all default values"""

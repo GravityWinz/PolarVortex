@@ -19,3 +19,4 @@ vpype-gcode>=0.10.0
 # Alternative packages for Windows (uncomment if needed)
 # opencv-python==4.8.1.78
 # numpy==1.24.3
+svgpathtools==1.6.1

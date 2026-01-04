@@ -4,8 +4,9 @@ FROM python:3.11
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY requirements.txt ./
-RUN pip install -r requirements.txt
+# Copy both base and dev requirement sets so dev install can extend base without recursion
+COPY requirements.txt requirements-dev.txt ./
+RUN pip install -r requirements-dev.txt
 COPY . .
 
 # Set environment variable to disable frozen modules validation

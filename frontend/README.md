@@ -62,6 +62,14 @@ To preview the production build locally:
 npm run preview
 ```
 
+## Testing
+
+- Run unit/component tests (Vitest + Testing Library + MSW):
+  ```bash
+  npm run test:unit
+  ```
+- Use `npm run test` for watch mode during development.
+
 ## Project Structure
 
 ```

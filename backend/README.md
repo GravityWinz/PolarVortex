@@ -114,6 +114,14 @@ docker build -t polarvortex-backend .
 docker run -p 8000:8000 --device=/dev/ttyUSB0 polarvortex-backend
 ```
 
+## Testing
+
+- Run unit/integration suite with isolated temp storage:
+  ```bash
+  pytest backend/app --cov=backend.app
+  ```
+- Add `-q` for quieter output or `-k <filter>` to target specific tests.
+
 ## API Documentation
 
 Once the server is running, visit:

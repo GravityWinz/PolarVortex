@@ -1,4 +1,28 @@
-.PHONY: help dev prod build clean logs status restart
+.PHONY: help dev prod build clean logs status restart build-backend build-frontend push-backend push-frontend build-all push-all
+
+# Local helper for building and pushing images
+OWNER := GravityWinz
+BACKEND_IMAGE := ghcr.io/$(OWNER)/polarvortex-backend
+FRONTEND_IMAGE := ghcr.io/$(OWNER)/polarvortex-frontend
+
+
+build-backend:
+	docker build -t $(BACKEND_IMAGE):local -f backend/Dockerfile backend
+
+build-frontend:
+	docker build -t $(FRONTEND_IMAGE):local -f frontend/Dockerfile frontend
+
+push-backend:
+	docker tag $(BACKEND_IMAGE):local $(BACKEND_IMAGE):latest
+	docker push $(BACKEND_IMAGE):latest
+
+push-frontend:
+	docker tag $(FRONTEND_IMAGE):local $(FRONTEND_IMAGE):latest
+	docker push $(FRONTEND_IMAGE):latest
+
+build-all: build-backend build-frontend
+push-all: push-backend push-frontend
+
 
 # Default target
 help:

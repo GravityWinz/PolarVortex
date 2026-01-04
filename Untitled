@@ -1,1 +1,0 @@
-vpype failed: Usage: vpype [OPTIONS] COMMAND1 [ARGS]... [COMMAND2 [ARGS]...]... Error: No such option: --origin Did you mean --config?

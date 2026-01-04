@@ -175,7 +175,8 @@ class Config:
                     'image/jpg',
                     'image/png',
                     'image/gif',
-                    'image/bmp'
+                    'image/bmp',
+                    'image/svg+xml'
                 ],
                 "resolution_presets": {
                     "low": [400, 300],
@@ -292,7 +293,8 @@ class Config:
             'image/jpg',
             'image/png',
             'image/gif',
-            'image/bmp'
+            'image/bmp',
+            'image/svg+xml',
         ])
     
     @property

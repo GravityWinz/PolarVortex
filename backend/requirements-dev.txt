@@ -38,4 +38,6 @@ psutil==5.9.6
 
 # Development Tools
 watchdog==3.0.0
+svgpathtools==1.6.1
+
 

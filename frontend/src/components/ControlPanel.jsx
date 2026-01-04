@@ -37,6 +37,7 @@ import {
   getAvailablePorts,
   getCommandLog,
   getConnectionStatus,
+  getDefaultPlotter,
   resolveApiBaseUrl,
   resolveWsBaseUrl,
   runProjectGcode,
@@ -59,6 +60,8 @@ export default function ControlPanel({ currentProject }) {
   const [commandInput, setCommandInput] = useState("");
   const [motionMode, setMotionMode] = useState("relative"); // "absolute" or "relative"
   const [penState, setPenState] = useState("up"); // "up" or "down"
+  const [penUpCommand, setPenUpCommand] = useState("M280 P0 S110");
+  const [penDownCommand, setPenDownCommand] = useState("M280 P0 S130");
   const [logPage, setLogPage] = useState(1);
   const LOG_PAGE_SIZE = 25;
   const [expandedEntries, setExpandedEntries] = useState(new Set());
@@ -76,6 +79,7 @@ export default function ControlPanel({ currentProject }) {
     loadPorts();
     checkConnectionStatus();
     loadCommandLog();
+    loadDefaultPlotterPenCommands();
   }, []);
 
   useEffect(() => {
@@ -426,6 +430,18 @@ export default function ControlPanel({ currentProject }) {
     }
   };
 
+  const loadDefaultPlotterPenCommands = async () => {
+    try {
+      const plotter = await getDefaultPlotter();
+      const up = plotter?.gcode_sequences?.pen_up_command;
+      const down = plotter?.gcode_sequences?.pen_down_command;
+      if (up) setPenUpCommand(up);
+      if (down) setPenDownCommand(down);
+    } catch (err) {
+      console.error("Failed to load pen commands from plotter config", err);
+    }
+  };
+
   const handleHome = () => {
     sendCommand("G28");
   };
@@ -445,8 +461,7 @@ export default function ControlPanel({ currentProject }) {
 
   const handleTogglePen = async () => {
     const target = penState === "up" ? "down" : "up";
-    // Pen up/down commands: up = S33, down = S160
-    const cmd = target === "up" ? "M280 P0 S33" : "M280 P0 S160";
+    const cmd = target === "up" ? penUpCommand : penDownCommand;
     const prev = penState;
     setPenState(target);
     if (!connected) return;
@@ -1102,8 +1117,8 @@ export default function ControlPanel({ currentProject }) {
                   <Tooltip
                     title={
                       penState === "up"
-                        ? "Pen Up: M280 P0 S33 (click to send pen down)"
-                        : "Pen Down: M280 P0 S160 (click to send pen up)"
+                        ? `Pen Up: ${penUpCommand} (click to send pen down)`
+                        : `Pen Down: ${penDownCommand} (click to send pen up)`
                     }
                     arrow
                   >

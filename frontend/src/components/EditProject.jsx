@@ -4,8 +4,17 @@ import {
   DeleteOutline as DeleteIcon,
   InsertDriveFile as FileIcon,
   Image as ImageIcon,
+  ArrowDownward as PanDownIcon,
+  ArrowBack as PanLeftIcon,
+  ArrowForward as PanRightIcon,
+  ArrowUpward as PanUpIcon,
   Refresh as RefreshIcon,
+  CenterFocusStrong as ResetPanIcon,
+  RestartAlt as ResetZoomIcon,
   Article as SvgIcon,
+  AutoGraph as VectorizeIcon,
+  ZoomIn as ZoomInIcon,
+  ZoomOut as ZoomOutIcon,
 } from "@mui/icons-material";
 import {
   Alert,
@@ -19,6 +28,7 @@ import {
   DialogTitle,
   Divider,
   FormControl,
+  FormControlLabel,
   Grid,
   IconButton,
   InputLabel,
@@ -31,23 +41,36 @@ import {
   Paper,
   Select,
   Stack,
-  TextField,
+  Switch,
+  Tooltip,
   Typography,
 } from "@mui/material";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   convertSvgToGcode,
   deleteProjectFile,
+  getPapers,
   getProject,
   getProjectAssets,
   getProjectFileText,
   getProjectFileUrl,
-  getPapers,
+  getProjectGcodeAnalysis,
+  getProjectSvgAnalysis,
+  uploadGcodeToProject,
+  uploadImageToProject,
 } from "../services/apiService";
+import VectorizeDialog from "./VectorizeDialog";
 
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "bmp", "webp"];
 const SVG_EXTENSIONS = ["svg"];
 const GCODE_EXTENSIONS = ["gcode", "nc", "txt"];
+const DEFAULT_UPLOAD_SETTINGS = {
+  threshold: 128,
+  invert: false,
+  dither: true,
+  resolution: "medium",
+};
+const PAN_STEP = 10;
 
 function normalizeAsset(filename, meta = {}, typeOverride) {
   const ext = (filename || "").split(".").pop()?.toLowerCase() || "";
@@ -154,9 +177,20 @@ export default function EditProject({ currentProject }) {
   const [loadingAssets, setLoadingAssets] = useState(false);
   const [assetError, setAssetError] = useState("");
   const [selectedAsset, setSelectedAsset] = useState(null);
+  const [projectDetails, setProjectDetails] = useState(null);
   const [gcodePreview, setGcodePreview] = useState({
     loading: false,
     content: "",
+    error: "",
+  });
+  const [gcodeAnalysis, setGcodeAnalysis] = useState({
+    loading: false,
+    data: null,
+    error: "",
+  });
+  const [svgAnalysis, setSvgAnalysis] = useState({
+    loading: false,
+    data: null,
     error: "",
   });
   const [deletingFile, setDeletingFile] = useState(null);
@@ -168,13 +202,23 @@ export default function EditProject({ currentProject }) {
   const [convertTarget, setConvertTarget] = useState(null);
   const [convertOptions, setConvertOptions] = useState({
     paperSize: "",
-    fitMode: "fit",
-    penMapping: "default",
+    rotate90: false,
   });
   const [convertLoading, setConvertLoading] = useState(false);
   const [convertError, setConvertError] = useState("");
   const [paperOptions, setPaperOptions] = useState([]);
   const [paperLoadError, setPaperLoadError] = useState("");
+  const [vectorizeDialogOpen, setVectorizeDialogOpen] = useState(false);
+  const [vectorizeProject, setVectorizeProject] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef(null);
+  const [gcodeZoom, setGcodeZoom] = useState(1);
+  const [gcodePan, setGcodePan] = useState({ x: 0, y: 0 });
+
+  const defaultPaper = useMemo(() => {
+    if (!paperOptions.length) return null;
+    return paperOptions.find((p) => p.is_default) || paperOptions[0] || null;
+  }, [paperOptions]);
 
   const hasAssets = useMemo(
     () =>
@@ -186,6 +230,7 @@ export default function EditProject({ currentProject }) {
 
   const loadAssets = async () => {
     if (!currentProject?.id) {
+      setProjectDetails(null);
       setAssets({ images: [], svgs: [], gcode: [] });
       setSelectedAsset(null);
       return;
@@ -208,6 +253,7 @@ export default function EditProject({ currentProject }) {
         projectResponse?.gcode_files || []
       );
       setAssets(grouped);
+      setProjectDetails(projectResponse || null);
 
       const first =
         grouped.images[0] || grouped.svgs[0] || grouped.gcode[0] || null;
@@ -250,6 +296,8 @@ export default function EditProject({ currentProject }) {
   useEffect(() => {
     if (!selectedAsset || selectedAsset.type !== "gcode" || !currentProject) {
       setGcodePreview({ loading: false, content: "", error: "" });
+      setGcodeAnalysis({ loading: false, data: null, error: "" });
+      setSvgAnalysis({ loading: false, data: null, error: "" });
       return;
     }
 
@@ -291,6 +339,12 @@ export default function EditProject({ currentProject }) {
     setGcodeGeometry(parsed);
   }, [selectedAsset, gcodePreview.content]);
 
+  useEffect(() => {
+    if (selectedAsset?.type !== "svg") {
+      setSvgAnalysis({ loading: false, data: null, error: "" });
+    }
+  }, [selectedAsset]);
+
   const handleDeleteAsset = async (asset) => {
     if (!currentProject || !asset) return;
     const confirmed = window.confirm(
@@ -311,6 +365,42 @@ export default function EditProject({ currentProject }) {
     }
   };
 
+  const handleAnalyzeGcode = async () => {
+    if (!currentProject || !selectedAsset) return;
+    setGcodeAnalysis({ loading: true, data: null, error: "" });
+    try {
+      const result = await getProjectGcodeAnalysis(
+        currentProject.id,
+        selectedAsset.filename
+      );
+      setGcodeAnalysis({ loading: false, data: result, error: "" });
+    } catch (err) {
+      setGcodeAnalysis({
+        loading: false,
+        data: null,
+        error: err.message || "Failed to analyze G-code",
+      });
+    }
+  };
+
+  const handleAnalyzeSvg = async () => {
+    if (!currentProject || !selectedAsset) return;
+    setSvgAnalysis({ loading: true, data: null, error: "" });
+    try {
+      const result = await getProjectSvgAnalysis(
+        currentProject.id,
+        selectedAsset.filename
+      );
+      setSvgAnalysis({ loading: false, data: result, error: "" });
+    } catch (err) {
+      setSvgAnalysis({
+        loading: false,
+        data: null,
+        error: err.message || "Failed to analyze SVG",
+      });
+    }
+  };
+
   const openConvertDialog = (asset) => {
     setConvertTarget(asset);
     setConvertError("");
@@ -325,8 +415,9 @@ export default function EditProject({ currentProject }) {
       await convertSvgToGcode(currentProject.id, {
         filename: convertTarget.filename,
         paper_size: convertOptions.paperSize,
-        fit_mode: convertOptions.fitMode,
-        pen_mapping: convertOptions.penMapping,
+        pen_mapping: null,
+        origin_mode: "center",
+        rotate_90: Boolean(convertOptions.rotate90),
       });
       await loadAssets();
       setConvertDialogOpen(false);
@@ -338,16 +429,140 @@ export default function EditProject({ currentProject }) {
     }
   };
 
+  const handleUploadFile = async (file) => {
+    if (!file || !currentProject) return;
+    const name = (file.name || "").toLowerCase();
+    const ext = name.match(/\.[^.]+$/)?.[0]?.slice(1) || "";
+    const isSvg = ext === "svg";
+    const isGcode = GCODE_EXTENSIONS.includes(ext);
+    const isImage = file.type.startsWith("image/") || isSvg;
+
+    if (!isImage && !isGcode) {
+      setAssetError(
+        "Unsupported file type. Use image/SVG or G-code (.gcode/.nc/.txt)."
+      );
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      setAssetError("File size must be less than 10MB");
+      return;
+    }
+
+    setAssetError("");
+    setUploading(true);
+    try {
+      if (isGcode) {
+        const formData = new FormData();
+        formData.append("file", file);
+        await uploadGcodeToProject(currentProject.id, formData);
+      } else {
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("settings", JSON.stringify(DEFAULT_UPLOAD_SETTINGS));
+        await uploadImageToProject(currentProject.id, formData);
+      }
+
+      await loadAssets();
+    } catch (err) {
+      setAssetError(err.message || "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleFileInputChange = async (event) => {
+    const file = event.target.files?.[0];
+    // Reset input so the same file can be selected again
+    event.target.value = "";
+    await handleUploadFile(file);
+  };
+
+  const triggerFilePicker = () => {
+    fileInputRef.current?.click();
+  };
+
+  const clampZoom = (value) => Math.min(4, Math.max(0.25, value));
+  const handleZoomIn = () => setGcodeZoom((z) => clampZoom(z + 0.25));
+  const handleZoomOut = () => setGcodeZoom((z) => clampZoom(z - 0.25));
+  const handleZoomReset = () => setGcodeZoom(1);
+  const handlePan = (dx, dy) =>
+    setGcodePan((p) => ({ x: p.x + dx, y: p.y + dy }));
+  const handlePanReset = () => setGcodePan({ x: 0, y: 0 });
+
+  const isVectorizableAsset = (asset) => {
+    if (!asset || asset.type !== "image") return false;
+    const sourceImage = projectDetails?.source_image;
+    return Boolean(sourceImage && asset.filename === sourceImage);
+  };
+
+  const openVectorizeDialog = (asset) => {
+    if (!currentProject || !isVectorizableAsset(asset)) return;
+    setVectorizeProject(projectDetails || currentProject);
+    setVectorizeDialogOpen(true);
+  };
+
+  const handleCloseVectorizeDialog = () => {
+    setVectorizeDialogOpen(false);
+    setVectorizeProject(null);
+  };
+
   const renderGcodePlot = () => {
-    if (!gcodeGeometry.bounds || gcodeGeometry.segments.length === 0) {
+    const printableSegments = (gcodeGeometry.segments || []).filter(
+      (seg) => seg.penDown
+    );
+
+    const calcBounds = (segments) => {
+      if (!segments.length) return null;
+      return segments.reduce(
+        (acc, seg) => ({
+          minX: Math.min(acc.minX, seg.from.x, seg.to.x),
+          maxX: Math.max(acc.maxX, seg.from.x, seg.to.x),
+          minY: Math.min(acc.minY, seg.from.y, seg.to.y),
+          maxY: Math.max(acc.maxY, seg.from.y, seg.to.y),
+        }),
+        {
+          minX: Infinity,
+          maxX: -Infinity,
+          minY: Infinity,
+          maxY: -Infinity,
+        }
+      );
+    };
+
+    const bounds = calcBounds(printableSegments);
+
+    const paperWidth = defaultPaper ? Number(defaultPaper.width) || 0 : 0;
+    const paperHeight = defaultPaper ? Number(defaultPaper.height) || 0 : 0;
+    const paperBox =
+      paperWidth > 0 && paperHeight > 0
+        ? {
+            minX: -paperWidth / 2,
+            maxX: paperWidth / 2,
+            minY: -paperHeight / 2,
+            maxY: paperHeight / 2,
+          }
+        : null;
+
+    // Expand bounds to include paper rectangle so both fit the viewport
+    const combinedBounds = bounds
+      ? {
+          minX: Math.min(bounds.minX, paperBox ? paperBox.minX : bounds.minX),
+          maxX: Math.max(bounds.maxX, paperBox ? paperBox.maxX : bounds.maxX),
+          minY: Math.min(bounds.minY, paperBox ? paperBox.minY : bounds.minY),
+          maxY: Math.max(bounds.maxY, paperBox ? paperBox.maxY : bounds.maxY),
+        }
+      : paperBox;
+
+    if (!bounds || printableSegments.length === 0) {
       return (
         <Alert severity="info" sx={{ mb: 2 }}>
-          No drawable moves found in this G-code (need G0/G1 with X/Y).
+          No printable moves found (only travel moves present).
         </Alert>
       );
     }
 
-    const { minX, maxX, minY, maxY } = gcodeGeometry.bounds;
+    const { minX, maxX, minY, maxY } = combinedBounds || bounds;
     const width = 640;
     const height = 420;
     const padding = 16;
@@ -355,12 +570,15 @@ export default function EditProject({ currentProject }) {
     const spanY = Math.max(maxY - minY, 1);
     const scaleX = (width - padding * 2) / spanX;
     const scaleY = (height - padding * 2) / spanY;
-    const scale = Math.min(scaleX, scaleY);
+    const baseScale = Math.min(scaleX, scaleY);
+    const scale = baseScale * gcodeZoom;
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
 
     const mapPoint = (x, y) => ({
-      x: padding + (x - minX) * scale,
+      x: width / 2 + (x - centerX - gcodePan.x) * scale,
       // Flip Y so higher Y is up visually
-      y: height - padding - (y - minY) * scale,
+      y: height / 2 - (y - centerY - gcodePan.y) * scale,
     });
 
     return (
@@ -368,10 +586,104 @@ export default function EditProject({ currentProject }) {
         <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
           <CodeIcon color="primary" />
           <Typography variant="subtitle1">G-code Plot Preview</Typography>
-          <Chip
-            label={`${gcodeGeometry.segments.length} segments`}
-            size="small"
-          />
+          <Chip label={`${printableSegments.length} segments`} size="small" />
+          <Box sx={{ flexGrow: 1 }} />
+          <Stack direction="row" spacing={0.5} alignItems="center">
+            <IconButton
+              size="small"
+              onClick={handleZoomOut}
+              aria-label="Zoom out"
+              disabled={gcodeZoom <= 0.25}
+            >
+              <ZoomOutIcon fontSize="small" />
+            </IconButton>
+            <Typography
+              variant="caption"
+              sx={{ minWidth: 46, textAlign: "center" }}
+            >
+              {Math.round(gcodeZoom * 100)}%
+            </Typography>
+            <IconButton
+              size="small"
+              onClick={handleZoomIn}
+              aria-label="Zoom in"
+              disabled={gcodeZoom >= 4}
+            >
+              <ZoomInIcon fontSize="small" />
+            </IconButton>
+            <Tooltip title="Reset zoom">
+              <span>
+                <IconButton
+                  size="small"
+                  onClick={handleZoomReset}
+                  aria-label="Reset zoom"
+                  disabled={gcodeZoom === 1}
+                >
+                  <ResetZoomIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+          </Stack>
+          <Stack spacing={0.25} alignItems="center" sx={{ ml: 1 }}>
+            <Tooltip title="Pan up">
+              <span>
+                <IconButton
+                  size="small"
+                  onClick={() => handlePan(0, -PAN_STEP)}
+                  aria-label="Pan up"
+                >
+                  <PanUpIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Stack direction="row" spacing={0.25} alignItems="center">
+              <Tooltip title="Pan left">
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={() => handlePan(-PAN_STEP, 0)}
+                    aria-label="Pan left"
+                  >
+                    <PanLeftIcon fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+              <Tooltip title="Reset pan">
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={handlePanReset}
+                    aria-label="Reset pan"
+                    disabled={gcodePan.x === 0 && gcodePan.y === 0}
+                  >
+                    <ResetPanIcon fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+              <Tooltip title="Pan right">
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={() => handlePan(PAN_STEP, 0)}
+                    aria-label="Pan right"
+                  >
+                    <PanRightIcon fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+            </Stack>
+            <Tooltip title="Pan down">
+              <span>
+                <IconButton
+                  size="small"
+                  onClick={() => handlePan(0, PAN_STEP)}
+                  aria-label="Pan down"
+                >
+                  <PanDownIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+          </Stack>
         </Stack>
         <Paper
           variant="outlined"
@@ -398,7 +710,32 @@ export default function EditProject({ currentProject }) {
               fill="white"
               stroke="#e0e0e0"
             />
-            {gcodeGeometry.segments.map((seg, idx) => {
+            {paperBox && (
+              <rect
+                x={Math.min(
+                  mapPoint(paperBox.minX, paperBox.minY).x,
+                  mapPoint(paperBox.maxX, paperBox.maxY).x
+                )}
+                y={Math.min(
+                  mapPoint(paperBox.minX, paperBox.minY).y,
+                  mapPoint(paperBox.maxX, paperBox.maxY).y
+                )}
+                width={Math.abs(
+                  mapPoint(paperBox.maxX, paperBox.minY).x -
+                    mapPoint(paperBox.minX, paperBox.minY).x
+                )}
+                height={Math.abs(
+                  mapPoint(paperBox.minX, paperBox.maxY).y -
+                    mapPoint(paperBox.minX, paperBox.minY).y
+                )}
+                fill="none"
+                stroke="#8bc34a"
+                strokeWidth={1.5}
+                strokeDasharray="6 4"
+                opacity={0.9}
+              />
+            )}
+            {printableSegments.map((seg, idx) => {
               const from = mapPoint(seg.from.x, seg.from.y);
               const to = mapPoint(seg.to.x, seg.to.y);
               return (
@@ -418,6 +755,214 @@ export default function EditProject({ currentProject }) {
           </Box>
         </Paper>
       </Box>
+    );
+  };
+
+  const formatMinutes = (minutes) => {
+    if (minutes == null) return "—";
+    const totalSeconds = Math.round(minutes * 60);
+    const hrs = Math.floor(totalSeconds / 3600);
+    const mins = Math.floor((totalSeconds % 3600) / 60);
+    const secs = totalSeconds % 60;
+    if (hrs > 0) {
+      return `${hrs}h ${mins}m ${secs}s`;
+    }
+    if (mins > 0) {
+      return `${mins}m ${secs}s`;
+    }
+    return `${secs}s`;
+  };
+
+  const fmt = (val, digits = 2) =>
+    val === null || val === undefined ? "—" : Number(val).toFixed(digits);
+
+  const renderGcodeAnalysis = () => {
+    if (gcodeAnalysis.loading) {
+      return (
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
+          <CircularProgress size={18} />
+          <Typography variant="body2">Analyzing G-code…</Typography>
+        </Stack>
+      );
+    }
+
+    if (gcodeAnalysis.error) {
+      return (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {gcodeAnalysis.error}
+        </Alert>
+      );
+    }
+
+    if (!gcodeAnalysis.data) return null;
+
+    const a = gcodeAnalysis.data;
+    return (
+      <Paper variant="outlined" sx={{ p: 2, mb: 2, bgcolor: "grey.50" }}>
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+          <Typography variant="subtitle1">G-code Analysis</Typography>
+          <Chip
+            size="small"
+            label={`${fmt(a.width_mm)}×${fmt(a.height_mm)} mm`}
+          />
+          <Chip
+            size="small"
+            label={`Segments: ${a.move_commands} (draw ${a.pen_moves} / travel ${a.travel_moves})`}
+          />
+        </Stack>
+        <Grid container spacing={2}>
+          <Grid item xs={12} sm={6} md={4}>
+            <Typography variant="body2" color="text.secondary">
+              Estimated Time
+            </Typography>
+            <Typography variant="body1" fontWeight={600}>
+              {formatMinutes(a.estimated_time_minutes)}
+            </Typography>
+          </Grid>
+          <Grid item xs={12} sm={6} md={4}>
+            <Typography variant="body2" color="text.secondary">
+              Total Distance
+            </Typography>
+            <Typography variant="body1" fontWeight={600}>
+              {a.total_distance_mm.toFixed(1)} mm
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              Draw {a.pen_distance_mm.toFixed(1)} mm • Travel{" "}
+              {a.travel_distance_mm.toFixed(1)} mm
+            </Typography>
+          </Grid>
+          <Grid item xs={12} sm={6} md={4}>
+            <Typography variant="body2" color="text.secondary">
+              Feedrates (assumed)
+            </Typography>
+            <Typography variant="body1" fontWeight={600}>
+              Draw {a.feedrate_assumptions_mm_per_min.draw} / Travel{" "}
+              {a.feedrate_assumptions_mm_per_min.travel} mm/min
+            </Typography>
+            {a.average_feedrate_mm_per_min && (
+              <Typography variant="caption" color="text.secondary">
+                Avg {a.average_feedrate_mm_per_min} • Min{" "}
+                {a.min_feedrate_mm_per_min} • Max {a.max_feedrate_mm_per_min}
+              </Typography>
+            )}
+          </Grid>
+          <Grid item xs={12} sm={6} md={4}>
+            <Typography variant="body2" color="text.secondary">
+              Bounds (min → max)
+            </Typography>
+            <Typography variant="body1" fontWeight={600}>
+              X: {fmt(a.bounds?.minX)} → {fmt(a.bounds?.maxX)} mm
+            </Typography>
+            <Typography variant="body1" fontWeight={600}>
+              Y: {fmt(a.bounds?.minY)} → {fmt(a.bounds?.maxY)} mm
+            </Typography>
+          </Grid>
+        </Grid>
+      </Paper>
+    );
+  };
+
+  const renderSvgAnalysis = () => {
+    if (svgAnalysis.loading) {
+      return (
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
+          <CircularProgress size={18} />
+          <Typography variant="body2">Analyzing SVG…</Typography>
+        </Stack>
+      );
+    }
+
+    if (svgAnalysis.error) {
+      return (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {svgAnalysis.error}
+        </Alert>
+      );
+    }
+
+    if (!svgAnalysis.data) return null;
+
+    const a = svgAnalysis.data;
+    return (
+      <Paper variant="outlined" sx={{ p: 2, mb: 2, bgcolor: "grey.50" }}>
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+          <Typography variant="subtitle1">SVG Analysis</Typography>
+          <Chip
+            size="small"
+            label={`${fmt(a.width_mm)}×${fmt(a.height_mm)} mm`}
+          />
+          <Chip
+            size="small"
+            label={`Paths: ${a.path_count} • Segments: ${a.segment_count}`}
+          />
+          {a.metadata?.generator_version && (
+            <Chip
+              size="small"
+              color="primary"
+              label={`Gen: v${a.metadata.generator_version}`}
+            />
+          )}
+        </Stack>
+        <Grid container spacing={2}>
+          <Grid item xs={12} sm={6} md={4}>
+            <Typography variant="body2" color="text.secondary">
+              Total Path Length
+            </Typography>
+            <Typography variant="body1" fontWeight={600}>
+              {fmt(a.total_length_mm, 1)} mm
+            </Typography>
+          </Grid>
+          <Grid item xs={12} sm={6} md={4}>
+            <Typography variant="body2" color="text.secondary">
+              Bounds (min → max)
+            </Typography>
+            <Typography variant="body1" fontWeight={600}>
+              X: {fmt(a.bounds?.minX)} → {fmt(a.bounds?.maxX)} mm
+            </Typography>
+            <Typography variant="body1" fontWeight={600}>
+              Y: {fmt(a.bounds?.minY)} → {fmt(a.bounds?.maxY)} mm
+            </Typography>
+          </Grid>
+          <Grid item xs={12} sm={6} md={4}>
+            <Typography variant="body2" color="text.secondary">
+              Scale Used
+            </Typography>
+            <Typography variant="body1" fontWeight={600}>
+              {fmt(a.scale_used_mm_per_unit, 4)} mm/unit
+            </Typography>
+            {a.viewbox && (
+              <Typography variant="caption" color="text.secondary">
+                viewBox {fmt(a.viewbox.minX, 1)},{fmt(a.viewbox.minY, 1)} →{" "}
+                {fmt(a.viewbox.width, 1)}×{fmt(a.viewbox.height, 1)}
+              </Typography>
+            )}
+          </Grid>
+          {a.metadata && (
+            <Grid item xs={12}>
+              <Typography variant="body2" color="text.secondary" gutterBottom>
+                Metadata
+              </Typography>
+              <Stack spacing={0.5}>
+                {a.metadata.source_image && (
+                  <Typography variant="body2">
+                    Source: {a.metadata.source_image}
+                  </Typography>
+                )}
+                {a.metadata.generated_at && (
+                  <Typography variant="body2">
+                    Generated: {a.metadata.generated_at}
+                  </Typography>
+                )}
+                {a.metadata.parameters && (
+                  <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+                    Params: {JSON.stringify(a.metadata.parameters)}
+                  </Typography>
+                )}
+              </Stack>
+            </Grid>
+          )}
+        </Grid>
+      </Paper>
     );
   };
 
@@ -447,6 +992,14 @@ export default function EditProject({ currentProject }) {
             <CodeIcon color="primary" />
             <Typography variant="h6">G-code Preview</Typography>
             <Chip label={selectedAsset.displayName} size="small" />
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={handleAnalyzeGcode}
+              disabled={gcodeAnalysis.loading}
+            >
+              {gcodeAnalysis.loading ? "Analyzing…" : "Analyze G-code"}
+            </Button>
           </Stack>
           <Paper
             variant="outlined"
@@ -471,6 +1024,7 @@ export default function EditProject({ currentProject }) {
             {!gcodePreview.loading && !gcodePreview.error && (
               <Stack spacing={2}>
                 {renderGcodePlot()}
+                {renderGcodeAnalysis()}
                 <Typography
                   component="pre"
                   variant="body2"
@@ -500,7 +1054,28 @@ export default function EditProject({ currentProject }) {
             {isSvg ? "SVG Preview" : "Image Preview"}
           </Typography>
           <Chip label={selectedAsset.displayName} size="small" />
+          {!isSvg && isVectorizableAsset(selectedAsset) && (
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<VectorizeIcon fontSize="small" />}
+              onClick={() => openVectorizeDialog(selectedAsset)}
+            >
+              Vectorize
+            </Button>
+          )}
+          {isSvg && (
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={handleAnalyzeSvg}
+              disabled={svgAnalysis.loading}
+            >
+              {svgAnalysis.loading ? "Analyzing…" : "Analyze SVG"}
+            </Button>
+          )}
         </Stack>
+        {isSvg && renderSvgAnalysis()}
         <Paper
           variant="outlined"
           sx={{
@@ -551,6 +1126,23 @@ export default function EditProject({ currentProject }) {
             disablePadding
             secondaryAction={
               <Stack direction="row" spacing={0.5}>
+                {isVectorizableAsset(item) && (
+                  <Tooltip title="Vectorize image">
+                    <span>
+                      <IconButton
+                        edge="end"
+                        aria-label={`vectorize ${item.displayName}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openVectorizeDialog(item);
+                        }}
+                        size="small"
+                      >
+                        <VectorizeIcon fontSize="small" />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                )}
                 {item.type === "svg" && (
                   <IconButton
                     edge="end"
@@ -614,14 +1206,29 @@ export default function EditProject({ currentProject }) {
             </Typography>
           )}
         </Box>
-        <Button
-          variant="outlined"
-          startIcon={<RefreshIcon />}
-          onClick={loadAssets}
-          disabled={loadingAssets || !currentProject}
-        >
-          Refresh
-        </Button>
+        <Stack direction="row" spacing={1}>
+          <input
+            type="file"
+            hidden
+            ref={fileInputRef}
+            onChange={handleFileInputChange}
+          />
+          <Button
+            variant="contained"
+            onClick={triggerFilePicker}
+            disabled={!currentProject || uploading}
+          >
+            {uploading ? "Uploading…" : "Upload"}
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<RefreshIcon />}
+            onClick={loadAssets}
+            disabled={loadingAssets || !currentProject}
+          >
+            Refresh
+          </Button>
+        </Stack>
       </Stack>
 
       <Grid container spacing={3}>
@@ -719,7 +1326,8 @@ export default function EditProject({ currentProject }) {
               >
                 {paperOptions.map((paper) => (
                   <MenuItem key={paper.id} value={paper.id || paper.paper_size}>
-                    {paper.name || paper.paper_size} ({paper.width}×{paper.height}mm)
+                    {paper.name || paper.paper_size} ({paper.width}×
+                    {paper.height}mm)
                     {paper.is_default ? " • default" : ""}
                   </MenuItem>
                 ))}
@@ -736,35 +1344,23 @@ export default function EditProject({ currentProject }) {
               )}
             </FormControl>
 
-            <FormControl fullWidth>
-              <InputLabel>Fit / Center</InputLabel>
-              <Select
-                label="Fit / Center"
-                value={convertOptions.fitMode}
-                onChange={(e) =>
-                  setConvertOptions((prev) => ({
-                    ...prev,
-                    fitMode: e.target.value,
-                  }))
-                }
-              >
-                <MenuItem value="fit">Fit to page</MenuItem>
-                <MenuItem value="center">Center on page</MenuItem>
-              </Select>
-            </FormControl>
-
-            <TextField
-              label="Pen Mapping (placeholder)"
-              value={convertOptions.penMapping}
-              onChange={(e) =>
-                setConvertOptions((prev) => ({
-                  ...prev,
-                  penMapping: e.target.value,
-                }))
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={convertOptions.rotate90}
+                  onChange={(e) =>
+                    setConvertOptions((prev) => ({
+                      ...prev,
+                      rotate90: e.target.checked,
+                    }))
+                  }
+                  color="primary"
+                />
               }
-              helperText="E.g., pen color or channel to use"
-              fullWidth
+              label="Rotate 90° clockwise (landscape)"
             />
+
+            {/* Fit/center and pen mapping removed; we always center without pen mapping. */}
 
             {convertError && <Alert severity="error">{convertError}</Alert>}
           </Stack>
@@ -785,6 +1381,12 @@ export default function EditProject({ currentProject }) {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <VectorizeDialog
+        open={vectorizeDialogOpen}
+        onClose={handleCloseVectorizeDialog}
+        project={vectorizeProject}
+      />
     </Box>
   );
 }

@@ -41,6 +41,11 @@ class ImageHelper:
         if not sanitized:
             sanitized = "unnamed_image"
         return sanitized
+
+    def _is_svg(self, file_content_type: str, file_name: str) -> bool:
+        """Detect SVG uploads by content type or extension."""
+        ext = Path(file_name or "").suffix.lower()
+        return file_content_type == "image/svg+xml" or ext == ".svg"
     
     def get_project_directory(self, project_id: str) -> Path:
         """Get the project directory path for a given project ID"""
@@ -223,8 +228,15 @@ class ImageHelper:
                       file_name: str, settings_json: str, project_id: str) -> Dict[str, Any]:
         """Complete upload processing workflow for a specific project - simplified to skip processing"""
         try:
+            is_svg = self._is_svg(file_content_type, file_name)
+
             # Validate file
-            self.validate_upload(file_content_type, file_size)
+            if is_svg:
+                # Apply only size check for SVG to allow unprocessed storage
+                if file_size > self.max_file_size:
+                    raise HTTPException(status_code=400, detail=f"File too large (max {self.max_file_size // (1024*1024)}MB)")
+            else:
+                self.validate_upload(file_content_type, file_size)
             
             # Ensure project directory exists
             project_dir = self.get_project_directory(project_id)
@@ -234,7 +246,9 @@ class ImageHelper:
             original_path = self.save_original_image(file_content, file_name, project_id)
             
             # Create thumbnail
-            thumb_path = self.create_thumbnail(file_content, file_name, project_id)
+            thumb_path = None
+            if not is_svg:
+                thumb_path = self.create_thumbnail(file_content, file_name, project_id)
             
             # Return simplified result without processing
             return {

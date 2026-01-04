@@ -13,7 +13,6 @@ import React, { useEffect, useState } from "react";
 import logoImage from "./assets/PolarVortexLogo_small.png";
 import ControlPanel from "./components/ControlPanel";
 import EditProject from "./components/EditProject";
-import GcodeSettings from "./components/GcodeSettings";
 import MenuBar from "./components/MenuBar";
 import PaperConfiguration from "./components/PaperConfiguration";
 import PlotterConfiguration from "./components/PlotterConfiguration";
@@ -190,12 +189,10 @@ function SettingsView() {
         <Tabs value={activeTab} onChange={handleTabChange} sx={{ mb: 3 }}>
           <Tab label="Paper Configuration" />
           <Tab label="Plotter Configuration" />
-          <Tab label="G-code" />
         </Tabs>
 
         {activeTab === 0 && <PaperConfiguration />}
         {activeTab === 1 && <PlotterConfiguration />}
-        {activeTab === 2 && <GcodeSettings />}
       </Paper>
     </Box>
   );
