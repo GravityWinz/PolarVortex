@@ -852,6 +852,9 @@ async def run_project_gcode(project_id: str, request: ProjectGcodeRunRequest):
             "project_id": project_id,
             "filename": request.filename,
             "commands_total": len(commands),
+            "lines_total": len(commands),
+            "lines_sent": 0,
+            "progress": 0,
             "started_at": None,
             "finished_at": None,
             "error": None,
@@ -894,7 +897,9 @@ async def run_project_gcode(project_id: str, request: ProjectGcodeRunRequest):
             "project_id": project_id,
             "filename": request.filename,
             "queued": len(commands),
+            "lines_total": len(commands),
             "status": plotter_service.gcode_jobs[job_id]["status"],
+            "progress": 0,
         }
     except HTTPException:
         raise
@@ -944,12 +949,24 @@ def _monitor_gcode_print(job_id: str, total_commands: int):
             if not core.printing and jobs[job_id].get("status") == "running":
                 jobs[job_id]["status"] = "completed"
                 jobs[job_id]["finished_at"] = datetime.now().isoformat()
+                # Set progress to 100% when completed
+                if jobs[job_id].get("lines_total", 0) > 0:
+                    jobs[job_id]["lines_sent"] = jobs[job_id]["lines_total"]
+                    jobs[job_id]["progress"] = 100
                 break
             
-            # Update progress
-            if core.mainqueue and core.queueindex > 0:
-                progress = int((core.queueindex / len(core.mainqueue)) * 100)
-                jobs[job_id]["progress"] = min(progress, 100)
+            # Update progress based on lines sent
+            if core.mainqueue and core.queueindex >= 0:
+                lines_sent = core.queueindex
+                lines_total = len(core.mainqueue)
+                jobs[job_id]["lines_sent"] = lines_sent
+                jobs[job_id]["lines_total"] = lines_total
+                
+                if lines_total > 0:
+                    progress = int((lines_sent / lines_total) * 100)
+                    jobs[job_id]["progress"] = min(progress, 100)
+                else:
+                    jobs[job_id]["progress"] = 0
             
             time.sleep(0.5)  # Check every 500ms
             
@@ -971,8 +988,9 @@ def _run_gcode_commands_thread(job_id: str, commands: List[str], filename: str):
             jobs[job_id]["status"] = "running"
             jobs[job_id]["started_at"] = datetime.now().isoformat()
             results: List[Dict[str, Any]] = []
+            total_commands = len(commands)
 
-            for cmd in commands:
+            for idx, cmd in enumerate(commands):
                 if cancel_event.is_set() or jobs[job_id].get("cancel_requested"):
                     jobs[job_id]["status"] = "canceled"
                     jobs[job_id]["finished_at"] = datetime.now().isoformat()
@@ -998,6 +1016,15 @@ def _run_gcode_commands_thread(job_id: str, commands: List[str], filename: str):
                 except Exception as e:
                     resp = {"success": False, "error": str(e), "command": cmd}
                 results.append(resp)
+                
+                # Update progress
+                lines_sent = idx + 1
+                jobs[job_id]["lines_sent"] = lines_sent
+                jobs[job_id]["lines_total"] = total_commands
+                if total_commands > 0:
+                    progress = int((lines_sent / total_commands) * 100)
+                    jobs[job_id]["progress"] = min(progress, 100)
+                
                 if not resp.get("success"):
                     break
                 # Yield control and add a small delay to avoid overrun
@@ -1006,6 +1033,10 @@ def _run_gcode_commands_thread(job_id: str, commands: List[str], filename: str):
             jobs[job_id]["status"] = "completed" if all(r.get("success") for r in results) else "failed"
             jobs[job_id]["finished_at"] = datetime.now().isoformat()
             jobs[job_id]["results"] = results
+            # Set progress to 100% when completed
+            if jobs[job_id]["status"] == "completed" and total_commands > 0:
+                jobs[job_id]["lines_sent"] = total_commands
+                jobs[job_id]["progress"] = 100
         except Exception as e:
             logger.error(f"G-code job {job_id} failed: {e}")
             jobs[job_id]["status"] = "failed"
@@ -1025,6 +1056,36 @@ async def stop_plotter():
 async def pause_plotter():
     """Toggle pause/resume: on pause send M0, on resume clear pause flag."""
     return await plotter_service.pause_plotter()
+
+
+@app.get("/plotter/jobs/{job_id}/progress")
+async def get_job_progress(job_id: str):
+    """Get progress information for a G-code job."""
+    try:
+        jobs = plotter_service.gcode_jobs
+        if job_id not in jobs:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        job = jobs[job_id]
+        return {
+            "success": True,
+            "job_id": job_id,
+            "status": job.get("status", "unknown"),
+            "filename": job.get("filename"),
+            "lines_sent": job.get("lines_sent", 0),
+            "lines_total": job.get("lines_total", 0),
+            "progress": job.get("progress", 0),
+            "started_at": job.get("started_at"),
+            "finished_at": job.get("finished_at"),
+            "paused": job.get("paused", False),
+            "error": job.get("error"),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get job progress error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # Project Management Endpoints
 @app.post("/projects", response_model=ProjectResponse)
