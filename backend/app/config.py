@@ -21,7 +21,7 @@ class Settings:
     ]
     
     # Arduino Configuration
-    ARDUINO_BAUDRATE: int = 9600
+    ARDUINO_BAUDRATE: int = 115200
     ARDUINO_TIMEOUT: int = 1
     ARDUINO_PORTS: List[str] = [
         '/dev/ttyUSB0',
@@ -155,7 +155,7 @@ class Config:
                 ]
             },
             "arduino": {
-                "baudrate": 9600,
+                "baudrate": 115200,
                 "timeout": 1,
                 "ports": [
                     '/dev/ttyUSB0',
@@ -259,7 +259,7 @@ class Config:
     @property
     def arduino_baudrate(self) -> int:
         """Get Arduino baudrate"""
-        return self.get('arduino.baudrate', 9600)
+        return self.get('arduino.baudrate', 115200)
     
     @property
     def arduino_timeout(self) -> int:
