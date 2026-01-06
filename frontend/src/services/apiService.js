@@ -249,6 +249,27 @@ export async function runProjectGcode(projectId, filename) {
   }
 }
 
+export async function getJobProgress(jobId) {
+  try {
+    const response = await fetch(`${BASE_URL}/plotter/jobs/${jobId}/progress`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    const data = await response.json();
+    if (!response.ok || data.success === false) {
+      throw new Error(data.detail || data.error || "Failed to get job progress");
+    }
+
+    return data;
+  } catch (err) {
+    console.error("Error getting job progress:", err);
+    throw err;
+  }
+}
+
 export async function togglePausePlotter() {
   try {
     const response = await fetch(`${BASE_URL}/plotter/pause`, {

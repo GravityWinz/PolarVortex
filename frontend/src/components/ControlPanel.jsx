@@ -19,6 +19,7 @@ import {
   IconButton,
   InputAdornment,
   InputLabel,
+  LinearProgress,
   MenuItem,
   Pagination,
   Paper,
@@ -38,6 +39,7 @@ import {
   getCommandLog,
   getConnectionStatus,
   getDefaultPlotter,
+  getJobProgress,
   resolveApiBaseUrl,
   resolveWsBaseUrl,
   runProjectGcode,
@@ -68,9 +70,17 @@ export default function ControlPanel({ currentProject }) {
   const [selectedProjectGcode, setSelectedProjectGcode] = useState("");
   const [gcodeRunning, setGcodeRunning] = useState(false);
   const [gcodePaused, setGcodePaused] = useState(false);
+  const [gcodeProgress, setGcodeProgress] = useState({
+    jobId: null,
+    linesSent: 0,
+    linesTotal: 0,
+    progress: 0,
+    status: null,
+  });
   const logContainerRef = useRef(null);
   const wsRef = useRef(null);
   const processedMessagesRef = useRef(new Set());
+  const progressPollIntervalRef = useRef(null);
 
   const baudRates = [9600, 19200, 38400, 57600, 115200, 250000];
 
@@ -406,18 +416,96 @@ export default function ControlPanel({ currentProject }) {
     }
     try {
       setGcodeRunning(true);
-      await runProjectGcode(currentProject.id, selectedProjectGcode);
+      setGcodeProgress({
+        jobId: null,
+        linesSent: 0,
+        linesTotal: 0,
+        progress: 0,
+        status: null,
+      });
+      
+      const result = await runProjectGcode(currentProject.id, selectedProjectGcode);
+      
+      // Start polling for progress if we got a job_id
+      if (result.job_id) {
+        setGcodeProgress({
+          jobId: result.job_id,
+          linesSent: 0,
+          linesTotal: result.lines_total || 0,
+          progress: 0,
+          status: result.status || "running",
+        });
+        
+        // Start polling for progress
+        startProgressPolling(result.job_id);
+      }
     } catch (err) {
       alert(`G-code run error: ${err.message}`);
-    } finally {
       setGcodeRunning(false);
+      setGcodeProgress({
+        jobId: null,
+        linesSent: 0,
+        linesTotal: 0,
+        progress: 0,
+        status: null,
+      });
     }
   };
+
+  const startProgressPolling = (jobId) => {
+    // Clear any existing interval
+    if (progressPollIntervalRef.current) {
+      clearInterval(progressPollIntervalRef.current);
+    }
+    
+    // Poll every 500ms
+    progressPollIntervalRef.current = setInterval(async () => {
+      try {
+        const progress = await getJobProgress(jobId);
+        
+        setGcodeProgress({
+          jobId: progress.job_id,
+          linesSent: progress.lines_sent || 0,
+          linesTotal: progress.lines_total || 0,
+          progress: progress.progress || 0,
+          status: progress.status || "unknown",
+        });
+        
+        // Stop polling if job is completed, failed, or canceled
+        if (["completed", "failed", "canceled"].includes(progress.status)) {
+          stopProgressPolling();
+          setGcodeRunning(false);
+        } else if (progress.status === "paused") {
+          setGcodePaused(true);
+        } else if (progress.status === "running") {
+          setGcodePaused(false);
+        }
+      } catch (err) {
+        console.error("Error polling job progress:", err);
+        // Don't stop polling on error, might be temporary
+      }
+    }, 500);
+  };
+
+  const stopProgressPolling = () => {
+    if (progressPollIntervalRef.current) {
+      clearInterval(progressPollIntervalRef.current);
+      progressPollIntervalRef.current = null;
+    }
+  };
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      stopProgressPolling();
+    };
+  }, []);
 
   const handleTogglePause = async () => {
     try {
       const res = await togglePausePlotter();
       setGcodePaused(res.paused);
+      // Progress polling will continue and update status automatically
     } catch (err) {
       alert(`Pause error: ${err.message}`);
     }
@@ -664,11 +752,13 @@ export default function ControlPanel({ currentProject }) {
                       variant="outlined"
                       clickable
                       disabled={!connected}
-                      onClick={() =>
+                      onClick={() => {
+                        stopProgressPolling();
+                        setGcodeRunning(false);
                         stopPlotter().catch((err) =>
                           alert(`Stop error: ${err.message}`)
-                        )
-                      }
+                        );
+                      }}
                       sx={{ fontWeight: "bold", textTransform: "none" }}
                     />
                     <Chip
@@ -686,6 +776,40 @@ export default function ControlPanel({ currentProject }) {
                       </Typography>
                     )}
                   </Box>
+                  {gcodeRunning && gcodeProgress.jobId && (
+                    <Box sx={{ width: "100%", mt: 1 }}>
+                      <Stack spacing={1}>
+                        <Box
+                          sx={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                          }}
+                        >
+                          <Typography variant="body2" color="text.secondary">
+                            Progress: {gcodeProgress.linesSent} / {gcodeProgress.linesTotal} lines
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            {gcodeProgress.progress}%
+                          </Typography>
+                        </Box>
+                        <LinearProgress
+                          variant="determinate"
+                          value={gcodeProgress.progress}
+                          sx={{ height: 8, borderRadius: 1 }}
+                        />
+                        {gcodeProgress.status && (
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            sx={{ textTransform: "capitalize" }}
+                          >
+                            Status: {gcodeProgress.status}
+                          </Typography>
+                        )}
+                      </Stack>
+                    </Box>
+                  )}
                 </Stack>
               )}
             </Paper>

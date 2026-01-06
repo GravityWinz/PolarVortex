@@ -20,7 +20,7 @@ class PlotterSimulator:
     All commands are logged to Docker container logs instead of being sent to hardware.
     """
     
-    def __init__(self, port: str, baudrate: int = 9600, timeout: Optional[float] = None):
+    def __init__(self, port: str, baudrate: int = 115200, timeout: Optional[float] = None):
         """
         Initialize the plotter simulator.
         
