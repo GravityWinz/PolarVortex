@@ -432,4 +432,5 @@ Thumbs.db
 /backend/local_storage.save/
 
 .env.production
-/Printrun/*
+.env.development
+.env
