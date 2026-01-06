@@ -102,6 +102,11 @@ function groupAssets(imageEntries = [], gcodeEntries = []) {
   const svgs = [];
 
   imageEntries.forEach((entry) => {
+    // Skip thumbnail files - they shouldn't appear in the asset viewer
+    if (entry.is_thumbnail) {
+      return;
+    }
+    
     const normalized = normalizeAsset(entry.filename, {
       is_thumbnail: entry.is_thumbnail,
       is_processed: entry.is_processed,
@@ -1244,8 +1249,7 @@ export default function EditProject({ currentProject }) {
               <Typography variant="h6">Asset Viewer</Typography>
             </Stack>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-              Select a file to preview. Includes images, thumbnails, SVGs, and
-              G-code.
+              Select a file to preview. Includes images, SVGs, and G-code.
             </Typography>
             <Divider sx={{ mb: 1 }} />
 

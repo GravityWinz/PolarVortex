@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, WebSocket, WebSocketDisconnect, HTTPException, Form
+from fastapi import FastAPI, UploadFile, WebSocket, WebSocketDisconnect, HTTPException, Form, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse, FileResponse
@@ -21,6 +21,7 @@ from .config import Config, Settings
 from .project_models import ProjectCreate, ProjectResponse, ProjectListResponse
 from .project_service import project_service
 from .vectorizer import PolargraphVectorizer, VectorizationSettings
+from .vectorizers import get_vectorizer, get_available_vectorizers, get_vectorizer_info
 from .vpype_converter import convert_svg_to_gcode_file
 from .config_models import (
     PlotterCreate, PlotterUpdate, PlotterResponse, PlotterListResponse,
@@ -1162,17 +1163,34 @@ async def delete_project(project_id: str):
 
 
 @app.post("/projects/{project_id}/vectorize")
-async def vectorize_project_image(project_id: str, 
-                                 blur_radius: int = 1,
-                                 posterize_levels: int = 5,
-                                 simplification_threshold: float = 2.0,
-                                 min_contour_area: int = 10,
-                                 color_tolerance: int = 10,
-                                 enable_color_separation: bool = True,
-                                 enable_contour_simplification: bool = True,
-                                 enable_noise_reduction: bool = True):
-    """Vectorize the source image of a project"""
+async def vectorize_project_image(
+    project_id: str,
+    algorithm: str = "polargraph",
+    settings: Dict[str, Any] = Body(default={}),
+    # Legacy query parameters for backward compatibility
+    blur_radius: Optional[int] = None,
+    posterize_levels: Optional[int] = None,
+    simplification_threshold: Optional[float] = None,
+    min_contour_area: Optional[int] = None,
+    color_tolerance: Optional[int] = None,
+    enable_color_separation: Optional[bool] = None,
+    enable_contour_simplification: Optional[bool] = None,
+    enable_noise_reduction: Optional[bool] = None
+):
+    """Vectorize the source image of a project
+    
+    Settings can be provided either:
+    1. As JSON body in 'settings' parameter (recommended for algorithm-specific settings)
+    2. As query parameters (legacy, for backward compatibility)
+    
+    If both are provided, query parameters override JSON body settings.
+    """
     try:
+        # Get the selected vectorizer
+        vectorizer = get_vectorizer(algorithm)
+        if not vectorizer:
+            raise HTTPException(status_code=400, detail=f"Unknown algorithm: {algorithm}")
+        
         # Verify project exists
         project = project_service.get_project(project_id)
         if not project:
@@ -1194,53 +1212,66 @@ async def vectorize_project_image(project_id: str,
         with open(source_image_path, 'rb') as f:
             image_data = f.read()
         
-        # Create vectorization settings
-        settings = VectorizationSettings(
-            blur_radius=blur_radius,
-            posterize_levels=posterize_levels,
-            simplification_threshold=simplification_threshold,
-            min_contour_area=min_contour_area,
-            color_tolerance=color_tolerance,
-            enable_color_separation=enable_color_separation,
-            enable_contour_simplification=enable_contour_simplification,
-            enable_noise_reduction=enable_noise_reduction
-        )
+        # Merge settings: start with JSON body, then override with query params if provided
+        # This allows backward compatibility while supporting algorithm-specific settings
+        merged_settings = settings.copy() if settings else {}
         
-        # Initialize vectorizer
-        vectorizer = PolargraphVectorizer()
+        # Override with query parameters if provided (for backward compatibility)
+        if blur_radius is not None:
+            merged_settings["blur_radius"] = blur_radius
+        if posterize_levels is not None:
+            merged_settings["posterize_levels"] = posterize_levels
+        if simplification_threshold is not None:
+            merged_settings["simplification_threshold"] = simplification_threshold
+        if min_contour_area is not None:
+            merged_settings["min_contour_area"] = min_contour_area
+        if color_tolerance is not None:
+            merged_settings["color_tolerance"] = color_tolerance
+        if enable_color_separation is not None:
+            merged_settings["enable_color_separation"] = enable_color_separation
+        if enable_contour_simplification is not None:
+            merged_settings["enable_contour_simplification"] = enable_contour_simplification
+        if enable_noise_reduction is not None:
+            merged_settings["enable_noise_reduction"] = enable_noise_reduction
         
-        # Vectorize the image with SVG creation in project directory
+        # Validate settings for the selected algorithm
+        # This will merge with defaults and validate/clamp values
+        validated_settings = vectorizer.validate_settings(merged_settings)
+        
+        # Vectorize the image
         base_name = Path(project.source_image).stem
         result = vectorizer.vectorize_image(
             image_data,
-            settings,
+            validated_settings,
             str(project_dir),
             base_filename=base_name,
         )
         
-        # Generate plotting commands
+        # Export to plotting commands (if supported)
         machine_settings = {
             "width": 1000,
             "height": 1000,
             "mm_per_rev": 95.0,
             "steps_per_rev": 200.0
         }
-        plotting_commands = vectorizer.export_to_plotting_commands(result, machine_settings)
+        plotting_commands = []
+        try:
+            plotting_commands = vectorizer.export_to_plotting_commands(result, machine_settings)
+        except NotImplementedError:
+            logger.warning(f"Plotting commands not supported for {algorithm}")
         
-        # Generate preview
-        preview = vectorizer.get_vectorization_preview(result)
+        # Get preview (if supported)
+        preview = ""
+        try:
+            preview = vectorizer.get_vectorization_preview(result)
+        except NotImplementedError:
+            logger.warning(f"Preview not supported for {algorithm}")
         
         # Update project with vectorization information
         svg_filename = Path(result.svg_path).name if result.svg_path else None
         vectorization_parameters = {
-            "blur_radius": settings.blur_radius,
-            "posterize_levels": settings.posterize_levels,
-            "simplification_threshold": settings.simplification_threshold,
-            "min_contour_area": settings.min_contour_area,
-            "color_tolerance": settings.color_tolerance,
-            "enable_color_separation": settings.enable_color_separation,
-            "enable_contour_simplification": settings.enable_contour_simplification,
-            "enable_noise_reduction": settings.enable_noise_reduction
+            "algorithm": algorithm,
+            **validated_settings
         }
         
         project_service.update_project_vectorization(
@@ -1257,6 +1288,7 @@ async def vectorize_project_image(project_id: str,
             "type": "image_vectorized",
             "project_id": project_id,
             "project_name": project.name,
+            "algorithm": algorithm,
             "total_paths": result.total_paths,
             "colors_detected": result.colors_detected,
             "processing_time": result.processing_time,
@@ -1265,6 +1297,7 @@ async def vectorize_project_image(project_id: str,
         
         return {
             "success": True,
+            "algorithm": algorithm,
             "project_id": project_id,
             "source_image": project.source_image,
             "vectorization_result": {
@@ -1277,16 +1310,7 @@ async def vectorize_project_image(project_id: str,
             "svg_path": result.svg_path,
             "plotting_commands": plotting_commands,
             "preview": preview,
-            "settings_used": {
-                "blur_radius": settings.blur_radius,
-                "posterize_levels": settings.posterize_levels,
-                "simplification_threshold": settings.simplification_threshold,
-                "min_contour_area": settings.min_contour_area,
-                "color_tolerance": settings.color_tolerance,
-                "enable_color_separation": settings.enable_color_separation,
-                "enable_contour_simplification": settings.enable_contour_simplification,
-                "enable_noise_reduction": settings.enable_noise_reduction
-            }
+            "settings_used": settings
         }
         
     except HTTPException:
@@ -1464,10 +1488,35 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 # Vectorization endpoints
+@app.get("/vectorizers")
+async def list_vectorizers():
+    """Get list of available vectorization algorithms"""
+    try:
+        vectorizers = get_available_vectorizers()
+        return {"vectorizers": vectorizers}
+    except Exception as e:
+        logger.error(f"Error listing vectorizers: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/vectorizers/{algorithm_id}")
+async def get_vectorizer_details(algorithm_id: str):
+    """Get details about a specific vectorizer"""
+    try:
+        info = get_vectorizer_info(algorithm_id)
+        if not info:
+            raise HTTPException(status_code=404, detail=f"Vectorizer '{algorithm_id}' not found")
+        return info
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting vectorizer info: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/vectorize")
 async def vectorize_image(
     file: UploadFile,
-    settings: str = Form(default="{}")
+    settings: str = Form(default="{}"),
+    algorithm: str = Form(default="polargraph")
 ):
     """Vectorize an uploaded image"""
     try:
@@ -1480,13 +1529,14 @@ async def vectorize_image(
         # Create a temporary ImageHelper instance with vectorizer
         temp_helper = ImageHelper()
         
-        # Perform vectorization
-        result = temp_helper.vectorize_image(contents, vectorization_settings)
+        # Perform vectorization with selected algorithm
+        result = temp_helper.vectorize_image(contents, vectorization_settings, algorithm)
         
         # Broadcast vectorization complete
         await manager.broadcast(json.dumps({
             "type": "vectorization_complete",
             "filename": file.filename,
+            "algorithm": algorithm,
             "total_paths": result.get("vectorization_result", {}).get("total_paths", 0),
             "colors_detected": result.get("vectorization_result", {}).get("colors_detected", 0),
             "processing_time": result.get("vectorization_result", {}).get("processing_time", 0)

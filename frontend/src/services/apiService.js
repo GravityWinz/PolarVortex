@@ -296,23 +296,53 @@ export function getProjectImageUrl(projectId, filename) {
 }
 
 // Vectorization API
-export async function vectorizeProjectImage(projectId, vectorizationSettings) {
+export async function getAvailableVectorizers() {
   try {
+    const response = await fetch(`${BASE_URL}/vectorizers`);
+    if (!response.ok) {
+      throw new Error(`Failed to get vectorizers: ${response.statusText}`);
+    }
+    const data = await response.json();
+    return data.vectorizers || [];
+  } catch (err) {
+    console.error("Error getting vectorizers:", err);
+    throw err;
+  }
+}
+
+export async function getVectorizerInfo(algorithmId) {
+  try {
+    const response = await fetch(`${BASE_URL}/vectorizers/${algorithmId}`);
+    if (!response.ok) {
+      throw new Error(`Failed to get vectorizer info: ${response.statusText}`);
+    }
+    return await response.json();
+  } catch (err) {
+    console.error("Error getting vectorizer info:", err);
+    throw err;
+  }
+}
+
+export async function vectorizeProjectImage(projectId, vectorizationSettings, algorithm = "polargraph") {
+  try {
+    // Use query params for algorithm (for URL visibility) and JSON body for settings
+    // This allows any algorithm-specific settings (like "booger") to be passed
     const params = new URLSearchParams();
-    
-    // Add all vectorization parameters
-    Object.entries(vectorizationSettings).forEach(([key, value]) => {
-      if (value !== undefined && value !== null) {
-        params.append(key, value.toString());
-      }
-    });
+    params.append("algorithm", algorithm);
     
     const response = await fetch(`${BASE_URL}/projects/${projectId}/vectorize?${params}`, {
       method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        settings: vectorizationSettings
+      }),
     });
     
     if (!response.ok) {
-      throw new Error(`Vectorization failed: ${response.statusText}`);
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || `Vectorization failed: ${response.statusText}`);
     }
     
     return await response.json();

@@ -11,31 +11,51 @@ import {
     DialogContent,
     DialogTitle,
     Divider,
+    FormControl,
     FormControlLabel,
+    FormHelperText,
     Grid,
     IconButton,
+    InputLabel,
+    MenuItem,
+    Select,
     Slider,
     Switch,
     Typography,
 } from "@mui/material";
 import React, { useEffect, useState } from "react";
-import { getProjectImageUrl, getProjectVectorizationSvgUrl, vectorizeProjectImage } from "../services/apiService";
+import { 
+    getProjectImageUrl, 
+    getProjectVectorizationSvgUrl, 
+    vectorizeProjectImage,
+    getAvailableVectorizers,
+    getVectorizerInfo
+} from "../services/apiService";
 
 const VectorizeDialog = ({ open, onClose, project }) => {
-  const [vectorizationSettings, setVectorizationSettings] = useState({
-    blur_radius: 1,
-    posterize_levels: 5,
-    simplification_threshold: 2.0,
-    min_contour_area: 10,
-    color_tolerance: 10,
-    enable_color_separation: true,
-    enable_contour_simplification: true,
-    enable_noise_reduction: true,
-  });
+  const [selectedAlgorithm, setSelectedAlgorithm] = useState("polargraph");
+  const [availableAlgorithms, setAvailableAlgorithms] = useState([]);
+  const [loadingAlgorithms, setLoadingAlgorithms] = useState(false);
+  const [algorithmInfo, setAlgorithmInfo] = useState(null);
+  const [vectorizationSettings, setVectorizationSettings] = useState({});
 
   const [isVectorizing, setIsVectorizing] = useState(false);
   const [vectorizationResult, setVectorizationResult] = useState(null);
   const [error, setError] = useState(null);
+
+  // Load available algorithms on mount
+  useEffect(() => {
+    if (open) {
+      loadAvailableAlgorithms();
+    }
+  }, [open]);
+
+  // Load algorithm settings when algorithm changes or dialog opens
+  useEffect(() => {
+    if (selectedAlgorithm && open) {
+      loadAlgorithmSettings();
+    }
+  }, [selectedAlgorithm, open]);
 
   // Reset state when dialog opens/closes
   useEffect(() => {
@@ -45,6 +65,42 @@ const VectorizeDialog = ({ open, onClose, project }) => {
       setIsVectorizing(false);
     }
   }, [open]);
+
+  const loadAvailableAlgorithms = async () => {
+    setLoadingAlgorithms(true);
+    try {
+      const algorithms = await getAvailableVectorizers();
+      setAvailableAlgorithms(algorithms);
+      if (algorithms.length > 0 && !algorithms.find(a => a.id === selectedAlgorithm)) {
+        setSelectedAlgorithm(algorithms[0].id);
+      }
+    } catch (err) {
+      setError(`Failed to load algorithms: ${err.message}`);
+    } finally {
+      setLoadingAlgorithms(false);
+    }
+  };
+
+  const loadAlgorithmSettings = async () => {
+    try {
+      const info = await getVectorizerInfo(selectedAlgorithm);
+      if (info) {
+        setAlgorithmInfo(info);
+        if (info.default_settings) {
+          setVectorizationSettings(info.default_settings);
+        }
+      }
+    } catch (err) {
+      console.warn(`Failed to load settings for ${selectedAlgorithm}:`, err);
+      setAlgorithmInfo(null);
+    }
+  };
+
+  const handleAlgorithmChange = (event) => {
+    setSelectedAlgorithm(event.target.value);
+    setVectorizationResult(null);
+    setError(null);
+  };
 
   const handleSettingChange = (setting, value) => {
     setVectorizationSettings(prev => ({
@@ -64,7 +120,11 @@ const VectorizeDialog = ({ open, onClose, project }) => {
     setVectorizationResult(null);
 
     try {
-      const result = await vectorizeProjectImage(project.id, vectorizationSettings);
+      const result = await vectorizeProjectImage(
+        project.id, 
+        vectorizationSettings,
+        selectedAlgorithm
+      );
       setVectorizationResult(result);
     } catch (err) {
       setError(err.message || "Vectorization failed");
@@ -141,145 +201,155 @@ const VectorizeDialog = ({ open, onClose, project }) => {
                 Vectorization Settings
               </Typography>
 
-              {/* Blur Radius */}
+              {/* Algorithm Selector */}
               <Box sx={{ mb: 3 }}>
-                <Typography gutterBottom>
-                  Blur Radius: {vectorizationSettings.blur_radius}
-                </Typography>
-                <Slider
-                  value={vectorizationSettings.blur_radius}
-                  onChange={(e, value) => handleSettingChange('blur_radius', value)}
-                  min={0}
-                  max={5}
-                  step={1}
-                  marks
-                  valueLabelDisplay="auto"
-                />
-                <Typography variant="caption" color="text.secondary">
-                  Noise reduction (0 = no blur)
-                </Typography>
-              </Box>
-
-              {/* Posterize Levels */}
-              <Box sx={{ mb: 3 }}>
-                <Typography gutterBottom>
-                  Color Levels: {vectorizationSettings.posterize_levels}
-                </Typography>
-                <Slider
-                  value={vectorizationSettings.posterize_levels}
-                  onChange={(e, value) => handleSettingChange('posterize_levels', value)}
-                  min={2}
-                  max={16}
-                  step={1}
-                  marks
-                  valueLabelDisplay="auto"
-                />
-                <Typography variant="caption" color="text.secondary">
-                  Number of color levels (fewer = simpler)
-                </Typography>
-              </Box>
-
-              {/* Simplification Threshold */}
-              <Box sx={{ mb: 3 }}>
-                <Typography gutterBottom>
-                  Simplification: {vectorizationSettings.simplification_threshold}
-                </Typography>
-                <Slider
-                  value={vectorizationSettings.simplification_threshold}
-                  onChange={(e, value) => handleSettingChange('simplification_threshold', value)}
-                  min={0.5}
-                  max={10}
-                  step={0.5}
-                  valueLabelDisplay="auto"
-                />
-                <Typography variant="caption" color="text.secondary">
-                  Path simplification (lower = more detailed)
-                </Typography>
-              </Box>
-
-              {/* Min Contour Area */}
-              <Box sx={{ mb: 3 }}>
-                <Typography gutterBottom>
-                  Min Area: {vectorizationSettings.min_contour_area}
-                </Typography>
-                <Slider
-                  value={vectorizationSettings.min_contour_area}
-                  onChange={(e, value) => handleSettingChange('min_contour_area', value)}
-                  min={1}
-                  max={100}
-                  step={1}
-                  valueLabelDisplay="auto"
-                />
-                <Typography variant="caption" color="text.secondary">
-                  Minimum area for shapes (filters small details)
-                </Typography>
-              </Box>
-
-              {/* Color Tolerance */}
-              <Box sx={{ mb: 3 }}>
-                <Typography gutterBottom>
-                  Color Tolerance: {vectorizationSettings.color_tolerance}
-                </Typography>
-                <Slider
-                  value={vectorizationSettings.color_tolerance}
-                  onChange={(e, value) => handleSettingChange('color_tolerance', value)}
-                  min={1}
-                  max={50}
-                  step={1}
-                  valueLabelDisplay="auto"
-                />
-                <Typography variant="caption" color="text.secondary">
-                  Color grouping sensitivity
-                </Typography>
+                <FormControl fullWidth>
+                  <InputLabel id="algorithm-select-label">Vectorization Algorithm</InputLabel>
+                  <Select
+                    labelId="algorithm-select-label"
+                    id="algorithm-select"
+                    value={selectedAlgorithm}
+                    label="Vectorization Algorithm"
+                    onChange={handleAlgorithmChange}
+                    disabled={loadingAlgorithms || isVectorizing}
+                  >
+                    {availableAlgorithms.map((alg) => (
+                      <MenuItem key={alg.id} value={alg.id}>
+                        <Box>
+                          <Typography variant="body1">{alg.name}</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {alg.description}
+                          </Typography>
+                        </Box>
+                      </MenuItem>
+                    ))}
+                  </Select>
+                  {loadingAlgorithms && (
+                    <FormHelperText>Loading algorithms...</FormHelperText>
+                  )}
+                </FormControl>
               </Box>
 
               <Divider sx={{ my: 2 }} />
 
-              {/* Toggle Options */}
-              <Box sx={{ mb: 2 }}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={vectorizationSettings.enable_color_separation}
-                      onChange={(e) => handleSettingChange('enable_color_separation', e.target.checked)}
-                    />
-                  }
-                  label="Color Separation"
-                />
-                <Typography variant="caption" color="text.secondary" display="block">
-                  Separate different colors into different paths
+              {/* Dynamic Algorithm-Specific Settings */}
+              {algorithmInfo && algorithmInfo.default_settings ? (
+                <Box>
+                  {Object.entries(algorithmInfo.default_settings).map(([key, defaultValue]) => {
+                    const currentValue = vectorizationSettings[key] !== undefined 
+                      ? vectorizationSettings[key] 
+                      : defaultValue;
+                    const settingType = typeof defaultValue;
+                    const isBoolean = settingType === 'boolean';
+                    const isNumber = settingType === 'number';
+                    const isInteger = isNumber && Number.isInteger(defaultValue);
+                    
+                    // Format setting name for display (convert snake_case to Title Case)
+                    const displayName = key
+                      .split('_')
+                      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                      .join(' ');
+                    
+                    if (isBoolean) {
+                      return (
+                        <Box key={key} sx={{ mb: 2 }}>
+                          <FormControlLabel
+                            control={
+                              <Switch
+                                checked={currentValue}
+                                onChange={(e) => handleSettingChange(key, e.target.checked)}
+                                disabled={isVectorizing}
+                              />
+                            }
+                            label={displayName}
+                          />
+                        </Box>
+                      );
+                    } else if (isNumber) {
+                      // Determine reasonable min/max/step based on value
+                      let min = 0;
+                      let max = 100;
+                      let step = isInteger ? 1 : 0.1;
+                      
+                      // Smart defaults based on common setting patterns
+                      if (key.includes('ratio') || key.includes('threshold') || key.includes('thresh')) {
+                        min = 0;
+                        max = isInteger ? 100 : 1.0;
+                        step = isInteger ? 1 : 0.01;
+                      } else if (key.includes('size') || key.includes('length') || key.includes('area')) {
+                        min = 0;
+                        max = isInteger ? 200 : 20.0;
+                        step = isInteger ? 1 : 0.5;
+                      } else if (key.includes('angle') || key.includes('deg')) {
+                        min = 0;
+                        max = 180;
+                        step = 1;
+                      } else if (key.includes('kernel')) {
+                        min = 0;
+                        max = 50;
+                        step = 1;
+                      } else if (key.includes('level') || key.includes('count')) {
+                        min = 1;
+                        max = 50;
+                        step = 1;
+                      } else if (key.includes('radius') || key.includes('blur')) {
+                        min = 0;
+                        max = 10;
+                        step = isInteger ? 1 : 0.1;
+                      } else if (key.includes('tolerance') || key.includes('tolerance')) {
+                        min = 0;
+                        max = 100;
+                        step = 1;
+                      }
+                      
+                      // Adjust max if default value suggests a different range
+                      if (defaultValue > max * 0.8) {
+                        max = Math.ceil(defaultValue * 1.5);
+                      }
+                      
+                      return (
+                        <Box key={key} sx={{ mb: 3 }}>
+                          <Typography gutterBottom>
+                            {displayName}: {currentValue}
+                          </Typography>
+                          <Slider
+                            value={currentValue}
+                            onChange={(e, value) => handleSettingChange(key, value)}
+                            min={min}
+                            max={max}
+                            step={step}
+                            valueLabelDisplay="auto"
+                            disabled={isVectorizing}
+                          />
+                        </Box>
+                      );
+                    } else {
+                      // String or other types - show as text field
+                      return (
+                        <Box key={key} sx={{ mb: 2 }}>
+                          <Typography gutterBottom>{displayName}</Typography>
+                          <input
+                            type="text"
+                            value={currentValue}
+                            onChange={(e) => handleSettingChange(key, e.target.value)}
+                            disabled={isVectorizing}
+                            style={{
+                              width: '100%',
+                              padding: '8px',
+                              border: '1px solid #ccc',
+                              borderRadius: '4px'
+                            }}
+                          />
+                        </Box>
+                      );
+                    }
+                  })}
+                </Box>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  Loading settings...
                 </Typography>
-              </Box>
-
-              <Box sx={{ mb: 2 }}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={vectorizationSettings.enable_contour_simplification}
-                      onChange={(e) => handleSettingChange('enable_contour_simplification', e.target.checked)}
-                    />
-                  }
-                  label="Contour Simplification"
-                />
-                <Typography variant="caption" color="text.secondary" display="block">
-                  Simplify contours using Douglas-Peucker algorithm
-                </Typography>
-              </Box>
-
-              <Box sx={{ mb: 2 }}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={vectorizationSettings.enable_noise_reduction}
-                      onChange={(e) => handleSettingChange('enable_noise_reduction', e.target.checked)}
-                    />
-                  }
-                  label="Noise Reduction"
-                />
-                <Typography variant="caption" color="text.secondary" display="block">
-                  Apply blur for noise reduction
-                </Typography>
-              </Box>
+              )}
             </Box>
           </Grid>
         </Grid>
@@ -301,6 +371,9 @@ const VectorizeDialog = ({ open, onClose, project }) => {
             <Grid container spacing={3}>
               <Grid item xs={12} sm={6}>
                 <Typography variant="subtitle2" gutterBottom>Results:</Typography>
+                <Typography variant="body2">
+                  • Algorithm: {vectorizationResult.algorithm || selectedAlgorithm}
+                </Typography>
                 <Typography variant="body2">
                   • Total Paths: {vectorizationResult.vectorization_result.total_paths}
                 </Typography>
@@ -391,7 +464,7 @@ const VectorizeDialog = ({ open, onClose, project }) => {
         <Button
           onClick={handleVectorize}
           variant="contained"
-          disabled={isVectorizing || !project.source_image}
+          disabled={isVectorizing || !project.source_image || loadingAlgorithms}
           startIcon={isVectorizing ? <CircularProgress size={20} /> : null}
         >
           {isVectorizing ? 'Vectorizing...' : 'Apply Vectorization'}
