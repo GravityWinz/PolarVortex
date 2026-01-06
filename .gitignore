@@ -430,3 +430,5 @@ Thumbs.db
 
 /backend/local_storage/
 /backend/local_storage.save/
+
+.env.production
