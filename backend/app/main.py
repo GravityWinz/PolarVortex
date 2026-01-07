@@ -996,12 +996,16 @@ def _monitor_gcode_print(job_id: str, total_commands: int):
                 break
             
             # Update progress based on lines sent
-            # Use 'is not None' check to properly handle empty lists (which are falsy but valid)
-            # Store local reference to avoid race condition where mainqueue becomes None between check and use
-            mainqueue = core.mainqueue
-            if mainqueue is not None and core.queueindex >= 0:
-                lines_sent = core.queueindex
-                lines_total = len(mainqueue)  # Use local reference to avoid race condition
+            # Use lock to atomically read both mainqueue and queueindex to avoid race condition
+            # where cancelprint() sets mainqueue = None between the check and use
+            with core._queue_lock:
+                mainqueue = core.mainqueue
+                queueindex = core.queueindex
+            
+            # Check values after releasing lock (local copies are safe)
+            if mainqueue is not None and queueindex >= 0:
+                lines_sent = queueindex
+                lines_total = len(mainqueue)
                 
                 with plotter_service._gcode_jobs_lock:
                     if job_id in plotter_service.gcode_jobs:
