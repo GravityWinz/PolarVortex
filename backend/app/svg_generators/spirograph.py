@@ -1,0 +1,384 @@
+from typing import Dict, Any, Optional
+import logging
+from datetime import datetime
+from pathlib import Path
+import base64
+import io
+import math
+
+from . import BaseSvgGenerator, SvgGenerationResult
+from PIL import Image, ImageDraw
+
+logger = logging.getLogger(__name__)
+
+class SpirographGenerator(BaseSvgGenerator):
+    """
+    Generates spirograph pattern SVGs using hypotrochoid/epitrochoid mathematics.
+    
+    Based on Wikipedia spirograph equations:
+    x(t) = R * [(1 - k) * cos(t) + l * k * cos((1 - k)/k * t)]
+    y(t) = R * [(1 - k) * sin(t) - l * k * sin((1 - k)/k * t)]
+    
+    Where:
+    - R = radius of fixed outer circle
+    - r = radius of rolling inner circle  
+    - k = r/R (ratio)
+    - l = ρ/r (pen distance ratio)
+    - ρ = distance from center of inner circle to pen point
+    """
+    
+    def __init__(self):
+        pass
+    
+    @property
+    def name(self) -> str:
+        return "Spirograph"
+    
+    @property
+    def description(self) -> str:
+        return "Generate spirograph patterns using hypotrochoid/epitrochoid mathematics"
+    
+    @property
+    def generator_id(self) -> str:
+        return "spirograph"
+    
+    def generate_svg(
+        self,
+        settings: Optional[Dict[str, Any]] = None,
+        output_dir: Optional[str] = None,
+        base_filename: Optional[str] = None,
+    ) -> SvgGenerationResult:
+        """
+        Generate a spirograph pattern SVG.
+        
+        Parameters:
+        - outer_radius: Radius of fixed outer circle (default: 200)
+        - inner_radius: Radius of rolling inner circle (default: 60)
+        - pen_distance: Distance from center of inner circle to pen point (default: 50)
+        - num_cycles: Number of complete cycles to draw (default: 10)
+        - num_points: Number of points to calculate (default: 1000)
+        - width: SVG width in pixels (default: 800)
+        - height: SVG height in pixels (default: 800)
+        - stroke_width: Stroke width in pixels (default: 1)
+        - stroke_color: Stroke color as hex string (default: "#000000")
+        - background_color: Background color as hex string (default: "#ffffff")
+        """
+        start_time = datetime.now()
+        
+        # Get settings with defaults
+        if not settings:
+            settings = self.get_default_settings()
+        else:
+            settings = self.validate_settings(settings)
+        
+        outer_radius = settings.get("outer_radius", 200)
+        inner_radius = settings.get("inner_radius", 60)
+        pen_distance = settings.get("pen_distance", 50)
+        num_cycles = settings.get("num_cycles", 10)
+        num_points = settings.get("num_points", 1000)
+        width = settings.get("width", 800)
+        height = settings.get("height", 800)
+        stroke_width = settings.get("stroke_width", 1)
+        stroke_color = settings.get("stroke_color", "#000000")
+        background_color = settings.get("background_color", "#ffffff")
+        
+        try:
+            # Generate spirograph SVG
+            svg_content = self._generate_spirograph(
+                outer_radius, inner_radius, pen_distance, num_cycles, num_points,
+                width, height, stroke_width, stroke_color, background_color
+            )
+            
+            processing_time = (datetime.now() - start_time).total_seconds()
+            
+            # Save to file if output directory provided
+            svg_path = None
+            if output_dir:
+                svg_path = self._save_svg(svg_content, output_dir, base_filename)
+            
+            # Create result
+            result = SvgGenerationResult(
+                svg_path=svg_path,
+                svg_content=svg_content,
+                width=width,
+                height=height,
+                processing_time=processing_time,
+                settings_used=settings,
+            )
+            
+            # Generate preview
+            try:
+                result.preview = self.get_generation_preview(result)
+            except NotImplementedError:
+                pass
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Spirograph generation error: {e}")
+            raise
+    
+    def _generate_spirograph(
+        self,
+        outer_radius: float,
+        inner_radius: float,
+        pen_distance: float,
+        num_cycles: int,
+        num_points: int,
+        width: int,
+        height: int,
+        stroke_width: float,
+        stroke_color: str,
+        bg_color: str
+    ) -> str:
+        """Generate spirograph pattern using parametric equations"""
+        
+        # Calculate parameters
+        # k = r/R (ratio of inner to outer radius)
+        k = inner_radius / outer_radius if outer_radius > 0 else 0.3
+        
+        # l = ρ/r (pen distance ratio)
+        l = pen_distance / inner_radius if inner_radius > 0 else 0.833
+        
+        # Calculate the number of rotations needed to complete the pattern
+        # The pattern repeats when the inner circle has rotated enough times
+        # LCM of the number of teeth determines when pattern repeats
+        # For simplicity, we use num_cycles parameter
+        
+        # Center the pattern in the SVG
+        center_x = width / 2
+        center_y = height / 2
+        
+        # Calculate points using parametric equations
+        points = []
+        for i in range(num_points):
+            # t ranges from 0 to 2π * num_cycles
+            t = i * (2 * math.pi * num_cycles) / num_points
+            
+            # Spirograph parametric equations (hypotrochoid - inner circle rolls inside)
+            x = outer_radius * ((1 - k) * math.cos(t) + l * k * math.cos((1 - k) / k * t))
+            y = outer_radius * ((1 - k) * math.sin(t) - l * k * math.sin((1 - k) / k * t))
+            
+            # Offset to center in SVG
+            points.append((center_x + x, center_y + y))
+        
+        # Build SVG
+        lines = [
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            f'<svg width="{width}" height="{height}" xmlns="http://www.w3.org/2000/svg">',
+            f'  <rect width="{width}" height="{height}" fill="{bg_color}"/>',
+        ]
+        
+        # Create path from points
+        if len(points) > 0:
+            path_data = f'M {points[0][0]:.2f} {points[0][1]:.2f}'
+            for point in points[1:]:
+                path_data += f' L {point[0]:.2f} {point[1]:.2f}'
+            
+            lines.append(
+                f'  <path d="{path_data}" fill="none" stroke="{stroke_color}" stroke-width="{stroke_width}"/>'
+            )
+        
+        lines.append('</svg>')
+        return '\n'.join(lines)
+    
+    def _save_svg(self, svg_content: str, output_dir: str, base_filename: Optional[str] = None) -> Optional[str]:
+        """Save SVG content to file"""
+        try:
+            output_path = Path(output_dir)
+            output_path.mkdir(parents=True, exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            name_root = (base_filename or "spirograph").strip() or "spirograph"
+            svg_filename = f"{name_root}_{timestamp}.svg"
+            svg_path = output_path / svg_filename
+            
+            with open(svg_path, 'w', encoding='utf-8') as f:
+                f.write(svg_content)
+            
+            logger.info(f"SVG saved: {svg_path}")
+            return str(svg_path)
+            
+        except Exception as e:
+            logger.error(f"SVG save error: {e}")
+            return None
+    
+    def get_generation_preview(self, result: SvgGenerationResult) -> str:
+        """Generate base64 preview of generated SVG"""
+        try:
+            from PIL import Image, ImageDraw
+            
+            # Create a white background
+            preview_img = Image.new('RGB', (result.width, result.height), 'white')
+            draw = ImageDraw.Draw(preview_img)
+            
+            # Parse SVG to draw preview (simplified - just draw a border and some indication)
+            # For a real implementation, you'd parse the SVG path and render it
+            draw.rectangle([(0, 0), (result.width - 1, result.height - 1)], outline='black', width=2)
+            
+            # Draw a simple spirograph preview indicator
+            center_x = result.width / 2
+            center_y = result.height / 2
+            settings = result.settings_used or {}
+            outer_radius = settings.get("outer_radius", 200)
+            
+            # Draw outer circle outline
+            radius = min(outer_radius, min(result.width, result.height) / 4)
+            draw.ellipse(
+                [(center_x - radius, center_y - radius), (center_x + radius, center_y + radius)],
+                outline='black', width=2
+            )
+            
+            # Draw a simplified spirograph curve preview
+            import math
+            inner_radius = settings.get("inner_radius", 60)
+            pen_distance = settings.get("pen_distance", 50)
+            k = inner_radius / outer_radius if outer_radius > 0 else 0.3
+            l = pen_distance / inner_radius if inner_radius > 0 else 0.833
+            
+            last_point = None
+            for i in range(50):  # Simplified preview with fewer points
+                t = i * 0.2
+                x = outer_radius * ((1 - k) * math.cos(t) + l * k * math.cos((1 - k) / k * t))
+                y = outer_radius * ((1 - k) * math.sin(t) - l * k * math.sin((1 - k) / k * t))
+                point = (center_x + x, center_y + y)
+                if last_point:
+                    draw.line([last_point, point], fill='black', width=1)
+                last_point = point
+            
+            # Convert to base64
+            buffer = io.BytesIO()
+            preview_img.save(buffer, format='PNG')
+            img_base64 = base64.b64encode(buffer.getvalue()).decode()
+            
+            return f"data:image/png;base64,{img_base64}"
+            
+        except Exception as e:
+            logger.error(f"Preview generation error: {e}")
+            return ""
+    
+    def get_default_settings(self) -> Dict[str, Any]:
+        """Return default settings for this generator"""
+        return {
+            "outer_radius": 200,
+            "inner_radius": 60,
+            "pen_distance": 50,
+            "num_cycles": 10,
+            "num_points": 1000,
+            "width": 800,
+            "height": 800,
+            "stroke_width": 1,
+            "stroke_color": "#000000",
+            "background_color": "#ffffff"
+        }
+    
+    def validate_settings(self, settings: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate and normalize settings"""
+        validated = self.get_default_settings()
+        validated.update(settings)
+        
+        # Clamp values to valid ranges
+        validated["outer_radius"] = max(10, min(500, float(validated.get("outer_radius", 200))))
+        validated["inner_radius"] = max(5, min(validated["outer_radius"] * 0.9, float(validated.get("inner_radius", 60))))
+        validated["pen_distance"] = max(0, min(validated["inner_radius"] * 2, float(validated.get("pen_distance", 50))))
+        validated["num_cycles"] = max(1, min(100, int(validated.get("num_cycles", 10))))
+        validated["num_points"] = max(100, min(10000, int(validated.get("num_points", 1000))))
+        validated["width"] = max(100, min(5000, int(validated.get("width", 800))))
+        validated["height"] = max(100, min(5000, int(validated.get("height", 800))))
+        validated["stroke_width"] = max(0.1, min(10.0, float(validated.get("stroke_width", 1))))
+        
+        # Validate colors (simple hex check)
+        stroke_color = validated.get("stroke_color", "#000000")
+        if not stroke_color.startswith("#") or len(stroke_color) != 7:
+            validated["stroke_color"] = "#000000"
+        
+        bg_color = validated.get("background_color", "#ffffff")
+        if not bg_color.startswith("#") or len(bg_color) != 7:
+            validated["background_color"] = "#ffffff"
+        
+        return validated
+    
+    def get_parameter_documentation(self) -> Dict[str, Dict[str, Any]]:
+        """Return parameter documentation for this generator"""
+        return {
+            "outer_radius": {
+                "description": "Radius of the fixed outer circle",
+                "purpose": "Sets the size of the outer fixed circle that the inner circle rolls inside",
+                "range": "10-500",
+                "default": 200,
+                "effects": "Larger values create larger patterns. Smaller values create more compact patterns. Should be larger than inner_radius.",
+                "when_to_adjust": "Adjust to control the overall size of the spirograph pattern"
+            },
+            "inner_radius": {
+                "description": "Radius of the rolling inner circle",
+                "purpose": "Sets the size of the inner circle that rolls inside the outer circle",
+                "range": "5 to 90% of outer_radius",
+                "default": 60,
+                "effects": "Larger values relative to outer_radius create simpler patterns with fewer loops. Smaller values create more complex patterns with many loops.",
+                "when_to_adjust": "Adjust to control pattern complexity - smaller ratios create more intricate patterns"
+            },
+            "pen_distance": {
+                "description": "Distance from center of inner circle to pen point",
+                "purpose": "Controls how far the pen is from the center of the rolling circle",
+                "range": "0 to 2× inner_radius",
+                "default": 50,
+                "effects": "When pen_distance = 0, creates a circle. When pen_distance = inner_radius, creates a cardioid. Larger values create more extended patterns.",
+                "when_to_adjust": "Adjust to create different curve shapes - closer to 0 for simpler curves, closer to inner_radius for more interesting shapes"
+            },
+            "num_cycles": {
+                "description": "Number of complete cycles to draw",
+                "purpose": "Controls how many times the inner circle completes a rotation",
+                "range": "1-100",
+                "default": 10,
+                "effects": "More cycles create more complete patterns that may close on themselves. Fewer cycles create partial patterns.",
+                "when_to_adjust": "Increase to see the full pattern, decrease for partial patterns"
+            },
+            "num_points": {
+                "description": "Number of points to calculate for the curve",
+                "purpose": "Controls the resolution/smoothness of the curve",
+                "range": "100-10000",
+                "default": 1000,
+                "effects": "More points create smoother curves but take longer to compute. Fewer points create faster but potentially jagged curves.",
+                "when_to_adjust": "Increase for smoother curves, decrease for faster generation"
+            },
+            "width": {
+                "description": "SVG width in pixels",
+                "purpose": "Sets the width of the generated SVG",
+                "range": "100-5000",
+                "default": 800,
+                "effects": "Larger values create wider patterns. Smaller values create narrower patterns.",
+                "when_to_adjust": "Adjust based on desired output size"
+            },
+            "height": {
+                "description": "SVG height in pixels",
+                "purpose": "Sets the height of the generated SVG",
+                "range": "100-5000",
+                "default": 800,
+                "effects": "Larger values create taller patterns. Smaller values create shorter patterns.",
+                "when_to_adjust": "Adjust based on desired output size"
+            },
+            "stroke_width": {
+                "description": "Stroke width in pixels",
+                "purpose": "Sets the line thickness for the spirograph curve",
+                "range": "0.1-10.0",
+                "default": 1,
+                "effects": "Thicker strokes (3-10) create bolder patterns. Thinner strokes (0.1-1) create finer patterns.",
+                "when_to_adjust": "Adjust based on desired line weight"
+            },
+            "stroke_color": {
+                "description": "Stroke color as hex string",
+                "purpose": "Sets the color of the spirograph curve",
+                "range": "Hex color string (e.g., #000000)",
+                "default": "#000000",
+                "effects": "Different colors create different visual styles. Black (#000000) is standard, but any hex color works.",
+                "when_to_adjust": "Change to match desired color scheme"
+            },
+            "background_color": {
+                "description": "Background color as hex string",
+                "purpose": "Sets the background color of the SVG",
+                "range": "Hex color string (e.g., #ffffff)",
+                "default": "#ffffff",
+                "effects": "White (#ffffff) is standard, but any hex color works. Transparent backgrounds can be achieved by setting this to match your display background.",
+                "when_to_adjust": "Change to match desired background"
+            }
+        }
