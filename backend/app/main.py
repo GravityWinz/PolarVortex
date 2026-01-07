@@ -1444,6 +1444,7 @@ async def export_project_vectorization_svg(project_id: str):
 
 @app.get("/projects/{project_id}/vectorize/commands")
 async def get_project_vectorization_commands(project_id: str, 
+                                           algorithm: str = "polargraph",
                                            width: int = 1000,
                                            height: int = 1000,
                                            mm_per_rev: float = 95.0,
@@ -1459,6 +1460,11 @@ async def get_project_vectorization_commands(project_id: str,
         if not project.source_image:
             raise HTTPException(status_code=400, detail="Project has no source image to vectorize")
         
+        # Get vectorizer using plugin system
+        vectorizer = get_vectorizer(algorithm)
+        if not vectorizer:
+            raise HTTPException(status_code=400, detail=f"Unknown vectorization algorithm: {algorithm}")
+        
         # Get project directory
         project_dir = image_helper.get_project_directory(project_id)
         source_image_path = project_dir / project.source_image
@@ -1471,11 +1477,10 @@ async def get_project_vectorization_commands(project_id: str,
         with open(source_image_path, 'rb') as f:
             image_data = f.read()
         
-        # Use default vectorization settings
-        settings = VectorizationSettings()
-        
-        # Initialize vectorizer
-        vectorizer = PolargraphVectorizer()
+        # Use default vectorization settings from the vectorizer
+        settings = vectorizer.get_default_settings()
+        # Validate settings (merges with defaults and clamps values)
+        settings = vectorizer.validate_settings(settings)
         
         # Vectorize the image in a thread pool to avoid blocking the event loop
         def run_vectorization():
@@ -1495,7 +1500,13 @@ async def get_project_vectorization_commands(project_id: str,
         def run_export_commands():
             return vectorizer.export_to_plotting_commands(result, machine_settings)
         
-        plotting_commands = await loop.run_in_executor(vectorization_executor, run_export_commands)
+        try:
+            plotting_commands = await loop.run_in_executor(vectorization_executor, run_export_commands)
+        except NotImplementedError:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Plotting commands export not supported for algorithm: {algorithm}"
+            )
         
         return {
             "success": True,
