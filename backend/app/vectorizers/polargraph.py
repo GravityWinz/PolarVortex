@@ -139,6 +139,25 @@ class PolargraphVectorizer(BaseVectorizer):
             "enable_noise_reduction": default.enable_noise_reduction
         }
     
+    def validate_settings(self, settings: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate and normalize settings"""
+        validated = self.get_default_settings()
+        validated.update(settings)
+        
+        # Clamp values to valid ranges
+        validated["blur_radius"] = max(0, min(10, int(validated.get("blur_radius", 1))))
+        validated["posterize_levels"] = max(2, min(256, int(validated.get("posterize_levels", 5))))
+        validated["simplification_threshold"] = max(0.1, min(10.0, float(validated.get("simplification_threshold", 2.0))))
+        validated["simplification_iterations"] = max(1, min(10, int(validated.get("simplification_iterations", 3))))
+        validated["min_contour_points"] = max(3, min(100, int(validated.get("min_contour_points", 3))))
+        validated["min_contour_area"] = max(1, int(validated.get("min_contour_area", 10)))
+        validated["color_tolerance"] = max(0, min(255, int(validated.get("color_tolerance", 10))))
+        validated["enable_color_separation"] = bool(validated.get("enable_color_separation", True))
+        validated["enable_contour_simplification"] = bool(validated.get("enable_contour_simplification", True))
+        validated["enable_noise_reduction"] = bool(validated.get("enable_noise_reduction", True))
+        
+        return validated
+    
     def get_parameter_documentation(self) -> Dict[str, Dict[str, Any]]:
         """Return parameter documentation for this vectorizer"""
         return {
