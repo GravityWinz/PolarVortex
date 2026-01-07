@@ -34,6 +34,7 @@ class PlotterService:
             "baud_rate": None,
         }
         self.command_log: List[Dict[str, Any]] = []
+        self._command_log_lock = threading.Lock()  # Lock for thread-safe command_log access
         self.gcode_jobs: Dict[str, Dict[str, Any]] = {}
         self.gcode_cancel_all = threading.Event()
         self.gcode_pause_all = threading.Event()
@@ -105,33 +106,36 @@ class PlotterService:
                 # Set up callback to capture command/response pairs for command log
                 # on_send creates a new log entry with the command
                 # on_recv updates the most recent entry without a response
+                # Both use locks for thread-safe access
                 def on_send(command: str, original: str):
                     log_entry = {
                         "timestamp": datetime.now().isoformat(),
                         "command": original,
                         "response": "",  # Will be filled by recv callback
                     }
-                    self.command_log.append(log_entry)
-                    if len(self.command_log) > 1000:
-                        self.command_log.pop(0)
+                    with self._command_log_lock:
+                        self.command_log.append(log_entry)
+                        if len(self.command_log) > 1000:
+                            self.command_log.pop(0)
                 
                 def on_recv(line: str):
                     # Find the oldest entry without a response and update it
                     # This pairs the response with the oldest unpaired command (FIFO order)
-                    for entry in self.command_log:
-                        if not entry.get("response"):
-                            entry["response"] = line.strip()
-                            break
-                    # If no unpaired command found, create a new entry (shouldn't happen normally)
-                    else:
-                        log_entry = {
-                            "timestamp": datetime.now().isoformat(),
-                            "command": "",  # Orphaned response
-                            "response": line.strip(),
-                        }
-                        self.command_log.append(log_entry)
-                        if len(self.command_log) > 1000:
-                            self.command_log.pop(0)
+                    with self._command_log_lock:
+                        for entry in self.command_log:
+                            if not entry.get("response"):
+                                entry["response"] = line.strip()
+                                break
+                        # If no unpaired command found, create a new entry (shouldn't happen normally)
+                        else:
+                            log_entry = {
+                                "timestamp": datetime.now().isoformat(),
+                                "command": "",  # Orphaned response
+                                "response": line.strip(),
+                            }
+                            self.command_log.append(log_entry)
+                            if len(self.command_log) > 1000:
+                                self.command_log.pop(0)
                 
                 self.plotter_core.add_callback('send', on_send)
                 self.plotter_core.add_callback('recv', on_recv)
@@ -348,9 +352,10 @@ class PlotterService:
                 "command": gcode,
                 "response": response_text,
             }
-            self.command_log.append(log_entry)
-            if len(self.command_log) > 1000:
-                self.command_log.pop(0)
+            with self._command_log_lock:
+                self.command_log.append(log_entry)
+                if len(self.command_log) > 1000:
+                    self.command_log.pop(0)
 
             await self._broadcast_json(
                 {
@@ -421,11 +426,15 @@ class PlotterService:
 
     def get_command_log(self) -> Dict[str, Any]:
         """Return command/response log."""
-        return {"log": self.command_log, "count": len(self.command_log)}
+        with self._command_log_lock:
+            # Create a copy to avoid holding the lock while returning
+            log_copy = self.command_log.copy()
+            return {"log": log_copy, "count": len(log_copy)}
 
     def clear_command_log(self) -> Dict[str, Any]:
         """Clear command/response log."""
-        self.command_log = []
+        with self._command_log_lock:
+            self.command_log = []
         return {"success": True, "message": "Log cleared"}
 
     def cancel_all_gcode_jobs(self) -> None:

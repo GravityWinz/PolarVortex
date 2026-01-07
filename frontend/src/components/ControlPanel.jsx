@@ -438,6 +438,17 @@ export default function ControlPanel({ currentProject }) {
         
         // Start polling for progress
         startProgressPolling(result.job_id);
+      } else {
+        // No job_id returned - reset state to avoid hanging
+        setGcodeRunning(false);
+        setGcodeProgress({
+          jobId: null,
+          linesSent: 0,
+          linesTotal: 0,
+          progress: 0,
+          status: null,
+        });
+        alert("G-code job started but no job ID was returned. Unable to track progress.");
       }
     } catch (err) {
       alert(`G-code run error: ${err.message}`);
