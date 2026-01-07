@@ -23,6 +23,7 @@ from .project_models import ProjectCreate, ProjectResponse, ProjectListResponse
 from .project_service import project_service
 from .vectorizer import PolargraphVectorizer, VectorizationSettings
 from .vectorizers import get_vectorizer, get_available_vectorizers, get_vectorizer_info
+from .svg_generators import get_svg_generator, get_available_svg_generators, get_svg_generator_info
 from .vpype_converter import convert_svg_to_gcode_file
 from .config_models import (
     PlotterCreate, PlotterUpdate, PlotterResponse, PlotterListResponse,
@@ -1700,6 +1701,168 @@ async def get_vectorization_presets():
         
     except Exception as e:
         logger.error(f"Presets error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# SVG Generation endpoints
+@app.get("/svg-generators")
+async def list_svg_generators():
+    """Get list of available SVG generation algorithms"""
+    try:
+        generators = get_available_svg_generators()
+        return {"generators": generators}
+    except Exception as e:
+        logger.error(f"Error listing SVG generators: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/svg-generators/{generator_id}")
+async def get_svg_generator_details(generator_id: str):
+    """Get details about a specific SVG generator"""
+    try:
+        info = get_svg_generator_info(generator_id)
+        if not info:
+            raise HTTPException(status_code=404, detail=f"SVG generator '{generator_id}' not found")
+        return info
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting SVG generator info: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/projects/{project_id}/generate-svg")
+async def generate_project_svg(
+    project_id: str,
+    algorithm: str = "geometric_pattern",
+    settings: Dict[str, Any] = Body(default={}),
+):
+    """Generate SVG for a project using the specified generator algorithm
+    
+    Settings can be provided as JSON body in 'settings' parameter.
+    """
+    try:
+        # Get the selected generator
+        generator = get_svg_generator(algorithm)
+        if not generator:
+            raise HTTPException(status_code=400, detail=f"Unknown algorithm: {algorithm}")
+        
+        # Verify project exists
+        project = project_service.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        # Validate settings for the selected algorithm
+        # This will merge with defaults and validate/clamp values
+        validated_settings = generator.validate_settings(settings)
+        
+        # Generate SVG in a thread pool to avoid blocking the event loop
+        # Save to temporary directory, not project directory
+        temp_dir = Path("local_storage/tmp")
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        
+        def run_generation():
+            """Run SVG generation in a separate thread"""
+            return generator.generate_svg(
+                validated_settings,
+                str(temp_dir),  # Save to temp directory
+                base_filename=f"temp_{algorithm}",
+            )
+        
+        # Run generation in thread pool
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(vectorization_executor, run_generation)
+        
+        # Don't broadcast - this is just a temporary generation
+        # The file is saved to temp directory and will be moved to project on save
+        
+        return {
+            "success": True,
+            "algorithm": algorithm,
+            "project_id": project_id,
+            "svg_content": result.svg_content,  # Include SVG content for saving
+            "width": result.width,
+            "height": result.height,
+            "processing_time": result.processing_time,
+            "preview": result.preview,
+            "settings_used": validated_settings
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"SVG generation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/projects/{project_id}/save-svg")
+async def save_project_svg(
+    project_id: str,
+    request: Dict[str, Any] = Body(...),
+):
+    """Save SVG content to a project with a custom filename"""
+    try:
+        svg_content = request.get("svg_content", "")
+        filename = request.get("filename", "")
+        
+        if not svg_content:
+            raise HTTPException(status_code=400, detail="SVG content is required")
+        if not filename:
+            raise HTTPException(status_code=400, detail="Filename is required")
+        
+        # Verify project exists
+        project = project_service.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        # Get project directory
+        project_dir = image_helper.get_project_directory(project_id)
+        
+        # Validate filename - ensure it ends with .svg and doesn't contain path traversal
+        if not filename.endswith('.svg'):
+            filename = f"{filename}.svg"
+        
+        # Sanitize filename - remove any path separators
+        filename = Path(filename).name
+        
+        # Ensure filename is safe (no path traversal)
+        if '..' in filename or '/' in filename or '\\' in filename:
+            raise HTTPException(status_code=400, detail="Invalid filename")
+        
+        # Create full path
+        svg_path = project_dir / filename
+        
+        # Ensure unique filename if file already exists
+        original_filename = filename
+        counter = 1
+        while svg_path.exists():
+            name_part = Path(original_filename).stem
+            filename = f"{name_part}_{counter}.svg"
+            svg_path = project_dir / filename
+            counter += 1
+        
+        # Write SVG content to file
+        with open(svg_path, 'w', encoding='utf-8') as f:
+            f.write(svg_content)
+        
+        logger.info(f"SVG saved to project: {svg_path}")
+        
+        # Broadcast save completion
+        await manager.broadcast(json.dumps({
+            "type": "svg_saved",
+            "project_id": project_id,
+            "project_name": project.name,
+            "svg_filename": filename,
+        }))
+        
+        return {
+            "success": True,
+            "project_id": project_id,
+            "svg_filename": filename,
+            "svg_path": str(svg_path),
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"SVG save error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
