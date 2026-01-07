@@ -36,6 +36,7 @@ class PlotterService:
         self.command_log: List[Dict[str, Any]] = []
         self._command_log_lock = threading.Lock()  # Lock for thread-safe command_log access
         self.gcode_jobs: Dict[str, Dict[str, Any]] = {}
+        self._gcode_jobs_lock = threading.Lock()  # Lock for thread-safe gcode_jobs access
         self.gcode_cancel_all = threading.Event()
         self.gcode_pause_all = threading.Event()
         self._broadcast: Optional[Callable[[str], Awaitable[None]]] = None
@@ -445,12 +446,13 @@ class PlotterService:
         if self.plotter_core and self.plotter_core.printing:
             self.plotter_core.cancelprint()
         
-        for job_id, job in self.gcode_jobs.items():
-            if job.get("status") in {"queued", "running", "paused"}:
-                job["cancel_requested"] = True
-                job["status"] = "canceled"
-                if not job.get("finished_at"):
-                    job["finished_at"] = datetime.now().isoformat()
+        with self._gcode_jobs_lock:
+            for job_id, job in self.gcode_jobs.items():
+                if job.get("status") in {"queued", "running", "paused"}:
+                    job["cancel_requested"] = True
+                    job["status"] = "canceled"
+                    if not job.get("finished_at"):
+                        job["finished_at"] = datetime.now().isoformat()
         self.gcode_pause_all.clear()
 
     async def stop_plotter(self) -> Dict[str, Any]:
@@ -481,11 +483,14 @@ class PlotterService:
             self.current_status["drawing"] = False
             self.current_status["current_command"] = None
 
+            with self._gcode_jobs_lock:
+                canceled_jobs = [job_id for job_id, job in self.gcode_jobs.items() if job.get("cancel_requested")]
+            
             return {
                 "success": True,
                 "message": "Stop requested",
                 "stop_sent": stop_sent,
-                "canceled_jobs": [job_id for job_id, job in self.gcode_jobs.items() if job.get("cancel_requested")],
+                "canceled_jobs": canceled_jobs,
             }
         except Exception as exc:
             logger.error("Stop error: %s", exc)
@@ -503,20 +508,22 @@ class PlotterService:
                     if self.plotter_core.paused:
                         self.plotter_core.resume()
                     self.gcode_pause_all.clear()
-                    for job in self.gcode_jobs.values():
-                        if job.get("status") == "paused":
-                            job["status"] = "running"
-                            job["paused"] = False
+                    with self._gcode_jobs_lock:
+                        for job in self.gcode_jobs.values():
+                            if job.get("status") == "paused":
+                                job["status"] = "running"
+                                job["paused"] = False
                     return {"success": True, "message": "Resume requested", "paused": False}
                 else:
                     # Pause
                     if self.plotter_core.printing:
                         self.plotter_core.pause()
                     self.gcode_pause_all.set()
-                    for job in self.gcode_jobs.values():
-                        if job.get("status") in {"queued", "running"}:
-                            job["paused"] = True
-                            job["status"] = "paused"
+                    with self._gcode_jobs_lock:
+                        for job in self.gcode_jobs.values():
+                            if job.get("status") in {"queued", "running"}:
+                                job["paused"] = True
+                                job["status"] = "paused"
                     
                     # Send pause command via priority queue
                     pause_sent = False
@@ -531,17 +538,19 @@ class PlotterService:
             # Fallback to old method
             if was_paused:
                 self.gcode_pause_all.clear()
-                for job in self.gcode_jobs.values():
-                    if job.get("status") == "paused":
-                        job["status"] = "running"
-                        job["paused"] = False
+                with self._gcode_jobs_lock:
+                    for job in self.gcode_jobs.values():
+                        if job.get("status") == "paused":
+                            job["status"] = "running"
+                            job["paused"] = False
                 return {"success": True, "message": "Resume requested", "paused": False}
 
             self.gcode_pause_all.set()
-            for job in self.gcode_jobs.values():
-                if job.get("status") in {"queued", "running"}:
-                    job["paused"] = True
-                    job["status"] = "paused"
+            with self._gcode_jobs_lock:
+                for job in self.gcode_jobs.values():
+                    if job.get("status") in {"queued", "running"}:
+                        job["paused"] = True
+                        job["status"] = "paused"
 
             pause_sent = False
             if self.arduino and getattr(self.arduino, "is_open", False):
@@ -569,7 +578,9 @@ class PlotterService:
         if self.plotter_core and self.plotter_core.online:
             success = self.plotter_core.startprint(commands)
             if success:
-                self.gcode_jobs[job_id]["status"] = "running"
+                with self._gcode_jobs_lock:
+                    if job_id in self.gcode_jobs:
+                        self.gcode_jobs[job_id]["status"] = "running"
                 self.current_status["drawing"] = True
             return success
         return False
