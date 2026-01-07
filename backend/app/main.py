@@ -995,7 +995,8 @@ def _monitor_gcode_print(job_id: str, total_commands: int):
                 break
             
             # Update progress based on lines sent
-            if core.mainqueue and core.queueindex >= 0:
+            # Use 'is not None' check to properly handle empty lists (which are falsy but valid)
+            if core.mainqueue is not None and core.queueindex >= 0:
                 lines_sent = core.queueindex
                 lines_total = len(core.mainqueue)
                 
