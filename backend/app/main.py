@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from datetime import datetime
 import re
+from concurrent.futures import ThreadPoolExecutor
 from .image_processor import ImageHelper
 from .config import Config, Settings
 from .project_models import ProjectCreate, ProjectResponse, ProjectListResponse
@@ -53,6 +54,10 @@ MAX_GCODE_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
 # Initialize ImageHelper
 image_helper = ImageHelper()
 
+# Thread pool executor for CPU-intensive operations (vectorization, image processing)
+# This prevents blocking the async event loop
+vectorization_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="vectorize")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -64,6 +69,9 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down PolarVortex API...")
     if plotter_service.arduino and getattr(plotter_service.arduino, "is_open", False):
         plotter_service.arduino.close()
+    # Shutdown thread pool executor
+    vectorization_executor.shutdown(wait=True)
+    logger.info("Thread pool executor shut down")
 
 app = FastAPI(
     title="PolarVortex API",
@@ -1241,16 +1249,23 @@ async def vectorize_project_image(
         # This will merge with defaults and validate/clamp values
         validated_settings = vectorizer.validate_settings(merged_settings)
         
-        # Vectorize the image
+        # Vectorize the image in a thread pool to avoid blocking the event loop
         base_name = Path(project.source_image).stem
-        result = vectorizer.vectorize_image(
-            image_data,
-            validated_settings,
-            str(project_dir),
-            base_filename=base_name,
-        )
         
-        # Export to plotting commands (if supported)
+        def run_vectorization():
+            """Run vectorization in a separate thread"""
+            return vectorizer.vectorize_image(
+                image_data,
+                validated_settings,
+                str(project_dir),
+                base_filename=base_name,
+            )
+        
+        # Run vectorization in thread pool
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(vectorization_executor, run_vectorization)
+        
+        # Export to plotting commands (if supported) - also CPU-intensive
         machine_settings = {
             "width": 1000,
             "height": 1000,
@@ -1259,14 +1274,18 @@ async def vectorize_project_image(
         }
         plotting_commands = []
         try:
-            plotting_commands = vectorizer.export_to_plotting_commands(result, machine_settings)
+            def run_export_commands():
+                return vectorizer.export_to_plotting_commands(result, machine_settings)
+            plotting_commands = await loop.run_in_executor(vectorization_executor, run_export_commands)
         except NotImplementedError:
             logger.warning(f"Plotting commands not supported for {algorithm}")
         
-        # Get preview (if supported)
+        # Get preview (if supported) - also CPU-intensive
         preview = ""
         try:
-            preview = vectorizer.get_vectorization_preview(result)
+            def run_preview():
+                return vectorizer.get_vectorization_preview(result)
+            preview = await loop.run_in_executor(vectorization_executor, run_preview)
         except NotImplementedError:
             logger.warning(f"Preview not supported for {algorithm}")
         
@@ -1393,17 +1412,25 @@ async def get_project_vectorization_commands(project_id: str,
         # Initialize vectorizer
         vectorizer = PolargraphVectorizer()
         
-        # Vectorize the image
-        result = vectorizer.vectorize_image(image_data, settings)
+        # Vectorize the image in a thread pool to avoid blocking the event loop
+        def run_vectorization():
+            return vectorizer.vectorize_image(image_data, settings)
         
-        # Generate plotting commands
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(vectorization_executor, run_vectorization)
+        
+        # Generate plotting commands (also CPU-intensive)
         machine_settings = {
             "width": width,
             "height": height,
             "mm_per_rev": mm_per_rev,
             "steps_per_rev": steps_per_rev
         }
-        plotting_commands = vectorizer.export_to_plotting_commands(result, machine_settings)
+        
+        def run_export_commands():
+            return vectorizer.export_to_plotting_commands(result, machine_settings)
+        
+        plotting_commands = await loop.run_in_executor(vectorization_executor, run_export_commands)
         
         return {
             "success": True,
@@ -1532,8 +1559,12 @@ async def vectorize_image(
         # Create a temporary ImageHelper instance with vectorizer
         temp_helper = ImageHelper()
         
-        # Perform vectorization with selected algorithm
-        result = temp_helper.vectorize_image(contents, vectorization_settings, algorithm)
+        # Perform vectorization with selected algorithm in a thread pool to avoid blocking
+        def run_vectorization():
+            return temp_helper.vectorize_image(contents, vectorization_settings, algorithm)
+        
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(vectorization_executor, run_vectorization)
         
         # Broadcast vectorization complete
         await manager.broadcast(json.dumps({
@@ -1566,8 +1597,12 @@ async def quick_vectorize_image(
         # Create a temporary ImageHelper instance with vectorizer
         temp_helper = ImageHelper()
         
-        # Perform quick vectorization
-        result = temp_helper.quick_vectorize(contents, blur, posterize, simplify)
+        # Perform quick vectorization in a thread pool to avoid blocking
+        def run_quick_vectorize():
+            return temp_helper.quick_vectorize(contents, blur, posterize, simplify)
+        
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(vectorization_executor, run_quick_vectorize)
         
         return result
         
