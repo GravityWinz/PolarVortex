@@ -947,9 +947,12 @@ def _monitor_gcode_print(job_id: str, total_commands: int):
                     jobs[job_id]["paused"] = False
             
             # Check if print finished
-            if not core.printing and jobs[job_id].get("status") == "running":
+            # Check completion regardless of pause state - a print can finish while paused
+            job_status = jobs[job_id].get("status")
+            if not core.printing and job_status in ("running", "paused"):
                 jobs[job_id]["status"] = "completed"
                 jobs[job_id]["finished_at"] = datetime.now().isoformat()
+                jobs[job_id]["paused"] = False  # Clear pause flag when completed
                 # Set progress to 100% when completed
                 if jobs[job_id].get("lines_total", 0) > 0:
                     jobs[job_id]["lines_sent"] = jobs[job_id]["lines_total"]
@@ -1310,7 +1313,7 @@ async def vectorize_project_image(
             "svg_path": result.svg_path,
             "plotting_commands": plotting_commands,
             "preview": preview,
-            "settings_used": settings
+            "settings_used": validated_settings
         }
         
     except HTTPException:

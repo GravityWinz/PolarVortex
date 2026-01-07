@@ -102,24 +102,39 @@ class PlotterService:
                 # Use PlotterCore for real connections
                 self.plotter_core = PlotterCore(port=request.port, baud=request.baud_rate)
                 
-                # Set up callback to capture responses for command log
-                def on_recv(line: str):
+                # Set up callback to capture command/response pairs for command log
+                # on_send creates a new log entry with the command
+                # on_recv updates the most recent entry without a response
+                def on_send(command: str, original: str):
                     log_entry = {
                         "timestamp": datetime.now().isoformat(),
-                        "command": "",  # Will be filled by send callback
-                        "response": line.strip(),
+                        "command": original,
+                        "response": "",  # Will be filled by recv callback
                     }
                     self.command_log.append(log_entry)
                     if len(self.command_log) > 1000:
                         self.command_log.pop(0)
                 
-                def on_send(command: str, original: str):
-                    # Update last log entry with command
-                    if self.command_log:
-                        self.command_log[-1]["command"] = original
+                def on_recv(line: str):
+                    # Find the oldest entry without a response and update it
+                    # This pairs the response with the oldest unpaired command (FIFO order)
+                    for entry in self.command_log:
+                        if not entry.get("response"):
+                            entry["response"] = line.strip()
+                            break
+                    # If no unpaired command found, create a new entry (shouldn't happen normally)
+                    else:
+                        log_entry = {
+                            "timestamp": datetime.now().isoformat(),
+                            "command": "",  # Orphaned response
+                            "response": line.strip(),
+                        }
+                        self.command_log.append(log_entry)
+                        if len(self.command_log) > 1000:
+                            self.command_log.pop(0)
                 
-                self.plotter_core.add_callback('recv', on_recv)
                 self.plotter_core.add_callback('send', on_send)
+                self.plotter_core.add_callback('recv', on_recv)
                 
                 # Wait for plotter to come online
                 timeout = 10.0
