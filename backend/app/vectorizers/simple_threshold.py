@@ -42,7 +42,17 @@ class SimpleThresholdVectorizer(BaseVectorizer):
         output_dir: Optional[str] = None,
         base_filename: Optional[str] = None,
     ) -> VectorizationResult:
-        """Vectorize using simple threshold algorithm"""
+        """
+        Vectorize using simple threshold algorithm.
+        
+        See backend/app/vectorizers/PARAMETERS.md for detailed parameter documentation.
+        
+        Parameters:
+        - threshold_value: Grayscale threshold for binary conversion (0-255, default: 127)
+        - invert: Invert threshold result (default: False)
+        - min_area: Minimum contour area in pixels² to include (default: 10)
+        - blur_size: Gaussian blur kernel size before thresholding (must be odd, default: 3)
+        """
         start_time = datetime.now()
         
         # Get settings with defaults
@@ -63,11 +73,13 @@ class SimpleThresholdVectorizer(BaseVectorizer):
             # Convert to numpy array
             img_array = np.array(image)
             
-            # Apply blur if specified
+            # Apply blur if specified: blur_size must be odd (1, 3, 5, 7, etc.)
+            # Higher values = more smoothing, reduces noise but may blur details
             if blur_size > 0:
                 img_array = cv2.GaussianBlur(img_array, (blur_size, blur_size), 0)
             
-            # Apply threshold
+            # Apply threshold: threshold_value determines cutoff point (0-255)
+            # invert=True swaps black/white result
             if invert:
                 _, thresh = cv2.threshold(img_array, threshold_value, 255, cv2.THRESH_BINARY_INV)
             else:
@@ -81,6 +93,7 @@ class SimpleThresholdVectorizer(BaseVectorizer):
             )
             
             # Convert contours to paths
+            # min_area: Filter out small contours/artifacts
             paths = []
             for contour in contours:
                 area = cv2.contourArea(contour)
@@ -269,7 +282,11 @@ class SimpleThresholdVectorizer(BaseVectorizer):
             return ""
     
     def get_default_settings(self) -> Dict[str, Any]:
-        """Return default settings for this vectorizer"""
+        """
+        Return default settings for this vectorizer.
+        
+        See backend/app/vectorizers/PARAMETERS.md for detailed parameter documentation.
+        """
         return {
             "threshold_value": 127,
             "invert": False,
@@ -289,3 +306,40 @@ class SimpleThresholdVectorizer(BaseVectorizer):
         validated["invert"] = bool(validated.get("invert", False))
         
         return validated
+    
+    def get_parameter_documentation(self) -> Dict[str, Dict[str, Any]]:
+        """Return parameter documentation for this vectorizer"""
+        return {
+            "threshold_value": {
+                "description": "Grayscale threshold for binary conversion",
+                "purpose": "Grayscale threshold value for binary conversion (0-255 scale)",
+                "range": "0-255",
+                "default": 127,
+                "effects": "Low values (0-100) make more pixels become white (foreground), fewer become black. Medium values (100-150) provide balanced threshold. High values (150-255) make more pixels become black (background), fewer become white.",
+                "when_to_adjust": "Increase if too much is being detected as foreground. Decrease if not enough is being detected."
+            },
+            "invert": {
+                "description": "Invert the threshold result",
+                "purpose": "Invert the threshold result (swap black and white)",
+                "range": "boolean",
+                "default": False,
+                "effects": "False: Pixels above threshold → white, below → black. True: Pixels above threshold → black, below → white.",
+                "when_to_adjust": "Enable for dark images on light backgrounds, or when you want inverted output"
+            },
+            "min_area": {
+                "description": "Minimum contour area in pixels² to include",
+                "purpose": "Minimum area required for a contour to be included",
+                "range": "1-10000+ (typically 5-100)",
+                "default": 10,
+                "effects": "Low values (1-5) include very small details and noise. Medium values (10-50) filter out small noise while preserving details. High values (100+) only include large features.",
+                "when_to_adjust": "Increase to remove small artifacts, decrease to preserve fine details"
+            },
+            "blur_size": {
+                "description": "Gaussian blur kernel size before thresholding",
+                "purpose": "Size of the Gaussian blur kernel applied before thresholding",
+                "range": "0-15 (must be odd: 1, 3, 5, 7, 9, 11, 13, 15)",
+                "default": 3,
+                "effects": "0: No blur, preserves all details and noise. Small (1-3): Light smoothing, reduces minor noise. Medium (5-7): Moderate smoothing. Large (9-15): Heavy smoothing, removes fine details.",
+                "when_to_adjust": "Increase for noisy images. Decrease or set to 0 to preserve fine details."
+            }
+        }

@@ -84,6 +84,22 @@ class BaseVectorizer(ABC):
     def validate_settings(self, settings: Dict[str, Any]) -> Dict[str, Any]:
         """Validate and normalize settings"""
         return settings
+    
+    def get_parameter_documentation(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Return documentation for each parameter.
+        
+        Returns a dictionary mapping parameter names to documentation dicts with:
+        - description: Brief description of the parameter
+        - purpose: What the parameter controls
+        - range: Valid range (tuple of min, max) or description
+        - default: Default value
+        - effects: Description of how different values affect the output
+        - when_to_adjust: Guidance on when to change this parameter
+        
+        Override this method in subclasses to provide parameter documentation.
+        """
+        return {}
 
 # Registry for vectorizers
 _vectorizer_registry: Dict[str, BaseVectorizer] = {}
@@ -122,7 +138,8 @@ def get_vectorizer_info(algorithm_id: str) -> Optional[Dict[str, Any]]:
         "id": vectorizer.algorithm_id,
         "name": vectorizer.name,
         "description": vectorizer.description,
-        "default_settings": vectorizer.get_default_settings()
+        "default_settings": vectorizer.get_default_settings(),
+        "parameter_documentation": vectorizer.get_parameter_documentation()
     }
 
 # Auto-register built-in vectorizers

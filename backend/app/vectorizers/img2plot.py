@@ -85,7 +85,22 @@ class Img2PlotVectorizer(BaseVectorizer):
         output_dir: Optional[str] = None,
         base_filename: Optional[str] = None,
     ) -> VectorizationResult:
-        """Vectorize using img2plot edge detection algorithm"""
+        """
+        Vectorize using img2plot edge detection algorithm.
+        
+        See backend/app/vectorizers/PARAMETERS.md for detailed parameter documentation.
+        
+        Parameters:
+        - termination_ratio: Stop processing when edge strength falls below this ratio (default: 1/3.5)
+        - line_continue_thresh: Minimum edge strength to continue following a line (default: 0.01)
+        - min_line_length: Minimum line length in pixels to include (default: 21)
+        - max_curve_angle_deg: Maximum angle change allowed when following curves (default: 20.0)
+        - lpf_atk: Low-pass filter coefficient for angle smoothing (default: 0.05)
+        - use_clahe: Enable CLAHE contrast enhancement (default: True)
+        - clahe_kernel_size: CLAHE neighborhood size (default: 32)
+        - use_gaussian_blur: Enable Gaussian blur preprocessing (default: True)
+        - gaussian_kernel_size: Gaussian blur sigma value (default: 1.0)
+        """
         start_time = datetime.now()
         
         # Get settings with defaults
@@ -117,14 +132,16 @@ class Img2PlotVectorizer(BaseVectorizer):
             if norm_img_gray.max() > 0:
                 norm_img_gray = norm_img_gray / norm_img_gray.max()
             
-            # CLAHE (brings out details)
+            # CLAHE (Contrast Limited Adaptive Histogram Equalization) - brings out details
+            # clahe_kernel_size: Local neighborhood size for contrast enhancement
             if use_clahe:
                 norm_img_gray = skimage.exposure.equalize_adapthist(
                     norm_img_gray, 
                     kernel_size=clahe_kernel_size
                 )
             
-            # Gaussian blur (gets rid of details)
+            # Gaussian blur - smooths image and reduces noise
+            # gaussian_kernel_size: Standard deviation of blur (higher = more smoothing)
             if use_gaussian_blur:
                 norm_img_gray = ndimage.gaussian_filter(norm_img_gray, gaussian_kernel_size)
             
@@ -155,6 +172,7 @@ class Img2PlotVectorizer(BaseVectorizer):
             cmax = init_max_p
             i = 0
             
+            # termination_ratio: Stop when max edge strength falls below this fraction of initial max
             while cmax > init_max_p * termination_ratio:
                 i = i + 1
                 if i % 250 == 0:
@@ -199,6 +217,7 @@ class Img2PlotVectorizer(BaseVectorizer):
                 
                 lstartx, lstarty, lendx, lendy, total_length = line_result
                 
+                # min_line_length: Filter out lines shorter than this threshold
                 if total_length < min_line_length:
                     # Line too short, replace peak
                     acc = 0.0
@@ -291,7 +310,14 @@ class Img2PlotVectorizer(BaseVectorizer):
         max_curve_angle_deg: float,
         lpf_atk: float
     ) -> Optional[Tuple[int, int, int, int, int]]:
-        """Get line from gradient direction"""
+        """
+        Get line from gradient direction by following edges.
+        
+        Parameters:
+        - line_continue_thresh: Minimum edge strength (relative to peak) to continue
+        - max_curve_angle_deg: Maximum angle change allowed before stopping
+        - lpf_atk: Low-pass filter coefficient for smoothing angle updates
+        """
         px, py = px_py
         gradx, grady = grad
         
@@ -311,6 +337,7 @@ class Img2PlotVectorizer(BaseVectorizer):
         
         # Grow the "start" side
         while (0 < starty < img.shape[0] - 1 and 0 < startx < img.shape[1] - 1 and
+               # line_continue_thresh: Continue if edge strength is above this fraction of peak
                bilinear_interpolate(img, startx, starty) > line_continue_thresh * peak_intensity):
             
             len_left += 1
@@ -480,7 +507,11 @@ class Img2PlotVectorizer(BaseVectorizer):
             return ""
     
     def get_default_settings(self) -> Dict[str, Any]:
-        """Return default settings for this vectorizer"""
+        """
+        Return default settings for this vectorizer.
+        
+        See backend/app/vectorizers/PARAMETERS.md for detailed parameter documentation.
+        """
         return {
             "termination_ratio": 1.0 / 3.5,
             "line_continue_thresh": 0.01,
@@ -510,3 +541,80 @@ class Img2PlotVectorizer(BaseVectorizer):
         validated["gaussian_kernel_size"] = max(0.0, min(10.0, float(validated.get("gaussian_kernel_size", 1))))
         
         return validated
+    
+    def get_parameter_documentation(self) -> Dict[str, Dict[str, Any]]:
+        """Return parameter documentation for this vectorizer"""
+        return {
+            "termination_ratio": {
+                "description": "Stop processing when edge strength falls below this ratio",
+                "purpose": "Determines when to stop processing edges - stops when the maximum edge strength falls below this ratio of the initial maximum",
+                "range": "0.01-1.0 (typically 0.1-0.5)",
+                "default": 1.0 / 3.5,
+                "effects": "Low values (0.1-0.2) process more edges, including weaker ones - more complete but slower. Medium values (0.25-0.35) balance processing. High values (0.5+) only process the strongest edges - faster but may miss details.",
+                "when_to_adjust": "Decrease to capture more subtle edges and details. Increase to focus only on strong edges and speed up processing."
+            },
+            "line_continue_thresh": {
+                "description": "Minimum edge strength to continue following a line",
+                "purpose": "Minimum edge strength (as fraction of peak intensity) required to continue following a line",
+                "range": "0.0-1.0 (typically 0.005-0.05)",
+                "default": 0.01,
+                "effects": "Low values (0.005-0.01) allow lines to continue even through weak edges - longer, more continuous lines. Medium values (0.01-0.02) balance line following. High values (0.05+) stop lines at weaker edges - shorter, more fragmented lines.",
+                "when_to_adjust": "Decrease for longer, more continuous lines. Increase if lines are extending into noise or unwanted areas."
+            },
+            "min_line_length": {
+                "description": "Minimum line length in pixels to include",
+                "purpose": "Minimum length for a detected line to be included in the output",
+                "range": "1-100+ (typically 10-50)",
+                "default": 21,
+                "effects": "Low values (5-15) include very short lines and fragments. Medium values (20-30) filter out short noise while preserving important lines. High values (50+) only include long lines, removing short segments.",
+                "when_to_adjust": "Increase to remove short artifacts and noise, decrease to preserve fine details"
+            },
+            "max_curve_angle_deg": {
+                "description": "Maximum angle change allowed when following curves",
+                "purpose": "Maximum angle change (in degrees) allowed when following a curved line before the line is terminated",
+                "range": "0.0-180.0 (typically 10.0-45.0)",
+                "default": 20.0,
+                "effects": "Low values (5-15°) stop lines at sharp turns - good for straight lines, may break on curves. Medium values (20-30°) allow moderate curves. High values (45°+) allow sharp turns but may follow unwanted paths.",
+                "when_to_adjust": "Increase for images with curved lines. Decrease for images with mostly straight lines or to prevent following unwanted paths."
+            },
+            "lpf_atk": {
+                "description": "Low-pass filter coefficient for angle smoothing",
+                "purpose": "Low-pass filter attack coefficient for smoothing angle changes when following lines",
+                "range": "0.0-1.0 (typically 0.01-0.2)",
+                "default": 0.05,
+                "effects": "Low values (0.01-0.05) provide strong smoothing, gradual angle changes - smoother lines. Medium values (0.05-0.1) balance smoothing. High values (0.2+) provide weak smoothing, rapid angle changes - more responsive but potentially jittery.",
+                "when_to_adjust": "Decrease for smoother, more stable line following. Increase for more responsive angle tracking on sharp curves."
+            },
+            "use_clahe": {
+                "description": "Enable CLAHE contrast enhancement",
+                "purpose": "Enable/disable Contrast Limited Adaptive Histogram Equalization (CLAHE)",
+                "range": "boolean",
+                "default": True,
+                "effects": "Enabled: Enhances local contrast, brings out details in both dark and bright areas. Disabled: Uses original grayscale image without enhancement.",
+                "when_to_adjust": "Disable if CLAHE is creating unwanted artifacts or over-enhancing the image"
+            },
+            "clahe_kernel_size": {
+                "description": "CLAHE local neighborhood size",
+                "purpose": "Size of the local neighborhood used for CLAHE contrast enhancement",
+                "range": "1-128+ (typically 8-64)",
+                "default": 32,
+                "effects": "Small values (8-16) provide very local enhancement, may create artifacts. Medium values (32-64) balance local enhancement. Large values (128+) provide more global enhancement, less local detail.",
+                "when_to_adjust": "Decrease for more localized contrast enhancement. Increase for smoother, more global enhancement."
+            },
+            "use_gaussian_blur": {
+                "description": "Enable Gaussian blur preprocessing",
+                "purpose": "Enable/disable Gaussian blur preprocessing",
+                "range": "boolean",
+                "default": True,
+                "effects": "Enabled: Smooths the image before edge detection, reduces noise. Disabled: Uses original image without smoothing.",
+                "when_to_adjust": "Disable if you want to preserve all fine details and edges"
+            },
+            "gaussian_kernel_size": {
+                "description": "Gaussian blur standard deviation",
+                "purpose": "Standard deviation of the Gaussian blur kernel",
+                "range": "0.0-10.0 (typically 0.5-3.0)",
+                "default": 1.0,
+                "effects": "Low values (0.5-1.0) provide light smoothing, preserve most details. Medium values (1.0-2.0) balance smoothing. High values (3.0+) provide heavy smoothing, remove fine details.",
+                "when_to_adjust": "Increase for noisy images. Decrease to preserve fine details."
+            }
+        }

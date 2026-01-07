@@ -102,3 +102,14 @@ Each path in `result.paths` should be a `VectorPath` object (from `vectorizer.py
 
 - **`polargraph.py`**: Full-featured vectorizer with color separation, contour simplification, and noise reduction
 - **`simple_threshold.py`**: Simple threshold-based vectorizer demonstrating the basic pattern - good starting point for new algorithms
+- **`img2plot.py`**: Edge detection based vectorizer using Sobel operators for continuous line following
+
+## Parameter Documentation
+
+For detailed documentation of all vectorization parameters, see **[PARAMETERS.md](PARAMETERS.md)**.
+
+This document provides comprehensive information about:
+- All parameters for each algorithm
+- Parameter ranges and effects
+- When and how to adjust parameters
+- Best practices and common parameter combinations

@@ -1,6 +1,9 @@
 import { Close as CloseIcon } from "@mui/icons-material";
 import {
     Alert,
+    Accordion,
+    AccordionDetails,
+    AccordionSummary,
     Box,
     Button,
     Card,
@@ -21,8 +24,10 @@ import {
     Select,
     Slider,
     Switch,
+    Tooltip,
     Typography,
 } from "@mui/material";
+import { Help as HelpIcon, ExpandMore as ExpandMoreIcon } from "@mui/icons-material";
 import React, { useEffect, useState } from "react";
 import { 
     getProjectImageUrl, 
@@ -232,6 +237,46 @@ const VectorizeDialog = ({ open, onClose, project }) => {
 
               <Divider sx={{ my: 2 }} />
 
+              {/* Parameter Documentation Accordion */}
+              {algorithmInfo && algorithmInfo.parameter_documentation && 
+               Object.keys(algorithmInfo.parameter_documentation).length > 0 && (
+                <Accordion sx={{ mb: 2 }}>
+                  <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <HelpIcon color="primary" />
+                      <Typography variant="subtitle2">
+                        Parameter Documentation
+                      </Typography>
+                    </Box>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    <Box>
+                      {Object.entries(algorithmInfo.parameter_documentation).map(([paramKey, doc]) => (
+                        <Box key={paramKey} sx={{ mb: 3, pb: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
+                          <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>
+                            {paramKey.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
+                          </Typography>
+                          <Typography variant="body2" sx={{ mb: 1 }}>
+                            <strong>Purpose:</strong> {doc.purpose}
+                          </Typography>
+                          <Typography variant="body2" sx={{ mb: 1 }}>
+                            <strong>Range:</strong> {doc.range} | <strong>Default:</strong> {doc.default}
+                          </Typography>
+                          <Typography variant="body2" sx={{ mb: 1 }}>
+                            <strong>Effects:</strong> {doc.effects}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            <strong>When to adjust:</strong> {doc.when_to_adjust}
+                          </Typography>
+                        </Box>
+                      ))}
+                    </Box>
+                  </AccordionDetails>
+                </Accordion>
+              )}
+
+              <Divider sx={{ my: 2 }} />
+
               {/* Dynamic Algorithm-Specific Settings */}
               {algorithmInfo && algorithmInfo.default_settings ? (
                 <Box>
@@ -250,19 +295,50 @@ const VectorizeDialog = ({ open, onClose, project }) => {
                       .map(word => word.charAt(0).toUpperCase() + word.slice(1))
                       .join(' ');
                     
+                    // Get parameter documentation if available
+                    const paramDoc = algorithmInfo.parameter_documentation?.[key];
+                    const tooltipTitle = paramDoc 
+                      ? `${paramDoc.description}\n\nPurpose: ${paramDoc.purpose}\nRange: ${paramDoc.range}`
+                      : displayName;
+                    
                     if (isBoolean) {
                       return (
                         <Box key={key} sx={{ mb: 2 }}>
-                          <FormControlLabel
-                            control={
-                              <Switch
-                                checked={currentValue}
-                                onChange={(e) => handleSettingChange(key, e.target.checked)}
-                                disabled={isVectorizing}
-                              />
-                            }
-                            label={displayName}
-                          />
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                            <FormControlLabel
+                              control={
+                                <Switch
+                                  checked={currentValue}
+                                  onChange={(e) => handleSettingChange(key, e.target.checked)}
+                                  disabled={isVectorizing}
+                                />
+                              }
+                              label={displayName}
+                            />
+                            {paramDoc && (
+                              <Tooltip 
+                                title={
+                                  <Box>
+                                    <Typography variant="caption" display="block" sx={{ fontWeight: 'bold', mb: 0.5 }}>
+                                      {paramDoc.description}
+                                    </Typography>
+                                    <Typography variant="caption" display="block">
+                                      {paramDoc.purpose}
+                                    </Typography>
+                                    <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
+                                      Range: {paramDoc.range} | Default: {paramDoc.default}
+                                    </Typography>
+                                  </Box>
+                                }
+                                arrow
+                                placement="right"
+                              >
+                                <IconButton size="small" sx={{ p: 0.5 }}>
+                                  <HelpIcon fontSize="small" color="action" />
+                                </IconButton>
+                              </Tooltip>
+                            )}
+                          </Box>
                         </Box>
                       );
                     } else if (isNumber) {
@@ -309,9 +385,37 @@ const VectorizeDialog = ({ open, onClose, project }) => {
                       
                       return (
                         <Box key={key} sx={{ mb: 3 }}>
-                          <Typography gutterBottom>
-                            {displayName}: {currentValue}
-                          </Typography>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                            <Typography gutterBottom sx={{ mb: 0 }}>
+                              {displayName}: {currentValue}
+                            </Typography>
+                            {paramDoc && (
+                              <Tooltip 
+                                title={
+                                  <Box>
+                                    <Typography variant="caption" display="block" sx={{ fontWeight: 'bold', mb: 0.5 }}>
+                                      {paramDoc.description}
+                                    </Typography>
+                                    <Typography variant="caption" display="block">
+                                      {paramDoc.purpose}
+                                    </Typography>
+                                    <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
+                                      Range: {paramDoc.range} | Default: {paramDoc.default}
+                                    </Typography>
+                                    <Typography variant="caption" display="block" sx={{ mt: 1, fontStyle: 'italic' }}>
+                                      {paramDoc.effects}
+                                    </Typography>
+                                  </Box>
+                                }
+                                arrow
+                                placement="right"
+                              >
+                                <IconButton size="small" sx={{ p: 0.5 }}>
+                                  <HelpIcon fontSize="small" color="action" />
+                                </IconButton>
+                              </Tooltip>
+                            )}
+                          </Box>
                           <Slider
                             value={currentValue}
                             onChange={(e, value) => handleSettingChange(key, value)}
@@ -327,7 +431,29 @@ const VectorizeDialog = ({ open, onClose, project }) => {
                       // String or other types - show as text field
                       return (
                         <Box key={key} sx={{ mb: 2 }}>
-                          <Typography gutterBottom>{displayName}</Typography>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                            <Typography gutterBottom sx={{ mb: 0 }}>{displayName}</Typography>
+                            {paramDoc && (
+                              <Tooltip 
+                                title={
+                                  <Box>
+                                    <Typography variant="caption" display="block" sx={{ fontWeight: 'bold', mb: 0.5 }}>
+                                      {paramDoc.description}
+                                    </Typography>
+                                    <Typography variant="caption" display="block">
+                                      {paramDoc.purpose}
+                                    </Typography>
+                                  </Box>
+                                }
+                                arrow
+                                placement="right"
+                              >
+                                <IconButton size="small" sx={{ p: 0.5 }}>
+                                  <HelpIcon fontSize="small" color="action" />
+                                </IconButton>
+                              </Tooltip>
+                            )}
+                          </Box>
                           <input
                             type="text"
                             value={currentValue}
