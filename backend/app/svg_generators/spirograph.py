@@ -204,54 +204,52 @@ class SpirographGenerator(BaseSvgGenerator):
             return None
     
     def get_generation_preview(self, result: SvgGenerationResult) -> str:
-        """Generate base64 preview of generated SVG"""
+        """Generate base64 preview of generated SVG by rendering the actual SVG content"""
         try:
-            from PIL import Image, ImageDraw
+            if not result.svg_content:
+                logger.warning("No SVG content available for preview")
+                return ""
             
-            # Create a white background
-            preview_img = Image.new('RGB', (result.width, result.height), 'white')
-            draw = ImageDraw.Draw(preview_img)
-            
-            # Parse SVG to draw preview (simplified - just draw a border and some indication)
-            # For a real implementation, you'd parse the SVG path and render it
-            draw.rectangle([(0, 0), (result.width - 1, result.height - 1)], outline='black', width=2)
-            
-            # Draw a simple spirograph preview indicator
-            center_x = result.width / 2
-            center_y = result.height / 2
-            settings = result.settings_used or {}
-            outer_radius = settings.get("outer_radius", 200)
-            
-            # Draw outer circle outline
-            radius = min(outer_radius, min(result.width, result.height) / 4)
-            draw.ellipse(
-                [(center_x - radius, center_y - radius), (center_x + radius, center_y + radius)],
-                outline='black', width=2
-            )
-            
-            # Draw a simplified spirograph curve preview
-            import math
-            inner_radius = settings.get("inner_radius", 60)
-            pen_distance = settings.get("pen_distance", 50)
-            k = inner_radius / outer_radius if outer_radius > 0 else 0.3
-            l = pen_distance / inner_radius if inner_radius > 0 else 0.833
-            
-            last_point = None
-            for i in range(50):  # Simplified preview with fewer points
-                t = i * 0.2
-                x = outer_radius * ((1 - k) * math.cos(t) + l * k * math.cos((1 - k) / k * t))
-                y = outer_radius * ((1 - k) * math.sin(t) - l * k * math.sin((1 - k) / k * t))
-                point = (center_x + x, center_y + y)
-                if last_point:
-                    draw.line([last_point, point], fill='black', width=1)
-                last_point = point
-            
-            # Convert to base64
-            buffer = io.BytesIO()
-            preview_img.save(buffer, format='PNG')
-            img_base64 = base64.b64encode(buffer.getvalue()).decode()
-            
-            return f"data:image/png;base64,{img_base64}"
+            # Use cairosvg to convert SVG to PNG
+            try:
+                import cairosvg
+                from PIL import Image
+                
+                # Convert SVG string to PNG bytes
+                png_bytes = cairosvg.svg2png(
+                    bytestring=result.svg_content.encode('utf-8'),
+                    output_width=min(result.width, 800),  # Limit preview size for performance
+                    output_height=min(result.height, 800),
+                )
+                
+                # Convert PNG bytes to base64
+                img_base64 = base64.b64encode(png_bytes).decode()
+                return f"data:image/png;base64,{img_base64}"
+                
+            except ImportError:
+                # Fallback: if cairosvg is not available, use a simple placeholder
+                logger.warning("cairosvg not available, using fallback preview")
+                from PIL import Image, ImageDraw
+                
+                preview_img = Image.new('RGB', (result.width, result.height), 'white')
+                draw = ImageDraw.Draw(preview_img)
+                draw.rectangle([(0, 0), (result.width - 1, result.height - 1)], outline='black', width=2)
+                
+                # Draw text indicating SVG preview
+                try:
+                    from PIL import ImageFont
+                    # Try to use default font
+                    font = ImageFont.load_default()
+                except:
+                    font = None
+                
+                text = "SVG Preview\n(cairosvg required)"
+                draw.text((10, 10), text, fill='black', font=font)
+                
+                buffer = io.BytesIO()
+                preview_img.save(buffer, format='PNG')
+                img_base64 = base64.b64encode(buffer.getvalue()).decode()
+                return f"data:image/png;base64,{img_base64}"
             
         except Exception as e:
             logger.error(f"Preview generation error: {e}")

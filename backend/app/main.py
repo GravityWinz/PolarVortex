@@ -1737,13 +1737,16 @@ async def get_svg_generator_details(generator_id: str):
 async def generate_project_svg(
     project_id: str,
     algorithm: str = "geometric_pattern",
-    settings: Dict[str, Any] = Body(default={}),
+    request: Dict[str, Any] = Body(default={}),
 ):
     """Generate SVG for a project using the specified generator algorithm
     
     Settings can be provided as JSON body in 'settings' parameter.
     """
     try:
+        # Extract settings from request body (frontend sends {settings: {...}})
+        settings = request.get("settings", {}) if isinstance(request, dict) else {}
+        
         # Get the selected generator
         generator = get_svg_generator(algorithm)
         if not generator:

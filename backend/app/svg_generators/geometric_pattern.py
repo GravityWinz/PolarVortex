@@ -217,60 +217,52 @@ class GeometricPatternGenerator(BaseSvgGenerator):
             return None
     
     def get_generation_preview(self, result: SvgGenerationResult) -> str:
-        """Generate base64 preview of generated SVG"""
+        """Generate base64 preview of generated SVG by rendering the actual SVG content"""
         try:
-            # For preview, we'll render the SVG to a PNG image
-            # This is a simple approach - in production you might use cairosvg or similar
-            from PIL import Image, ImageDraw
+            if not result.svg_content:
+                logger.warning("No SVG content available for preview")
+                return ""
             
-            # Create a white background
-            preview_img = Image.new('RGB', (result.width, result.height), 'white')
-            draw = ImageDraw.Draw(preview_img)
-            
-            # For a simple preview, we'll just draw a border and some placeholder content
-            # In a real implementation, you'd parse the SVG and render it
-            draw.rectangle([(0, 0), (result.width - 1, result.height - 1)], outline='black', width=2)
-            
-            # Draw a simple pattern indicator
-            settings = result.settings_used or {}
-            pattern_type = settings.get("pattern_type", "grid")
-            center_x = result.width / 2
-            center_y = result.height / 2
-            
-            if pattern_type == "grid":
-                # Draw a simple grid preview
-                for i in range(3):
-                    x = (result.width / 4) * (i + 1)
-                    y = (result.height / 4) * (i + 1)
-                    draw.line([(x, 0), (x, result.height)], fill='black', width=1)
-                    draw.line([(0, y), (result.width, y)], fill='black', width=1)
-            elif pattern_type == "mandala":
-                # Draw a simple circle preview
-                radius = min(result.width, result.height) / 4
-                draw.ellipse(
-                    [(center_x - radius, center_y - radius), (center_x + radius, center_y + radius)],
-                    outline='black', width=2
+            # Use cairosvg to convert SVG to PNG
+            try:
+                import cairosvg
+                from PIL import Image
+                
+                # Convert SVG string to PNG bytes
+                png_bytes = cairosvg.svg2png(
+                    bytestring=result.svg_content.encode('utf-8'),
+                    output_width=min(result.width, 800),  # Limit preview size for performance
+                    output_height=min(result.height, 800),
                 )
-            elif pattern_type == "spiral":
-                # Draw a simple spiral preview
-                import math
-                for i in range(50):
-                    t = i * 0.1
-                    r = t * 5
-                    x = center_x + r * math.cos(t)
-                    y = center_y + r * math.sin(t)
-                    if i == 0:
-                        last_point = (x, y)
-                    else:
-                        draw.line([last_point, (x, y)], fill='black', width=1)
-                        last_point = (x, y)
-            
-            # Convert to base64
-            buffer = io.BytesIO()
-            preview_img.save(buffer, format='PNG')
-            img_base64 = base64.b64encode(buffer.getvalue()).decode()
-            
-            return f"data:image/png;base64,{img_base64}"
+                
+                # Convert PNG bytes to base64
+                img_base64 = base64.b64encode(png_bytes).decode()
+                return f"data:image/png;base64,{img_base64}"
+                
+            except ImportError:
+                # Fallback: if cairosvg is not available, use a simple placeholder
+                logger.warning("cairosvg not available, using fallback preview")
+                from PIL import Image, ImageDraw
+                
+                preview_img = Image.new('RGB', (result.width, result.height), 'white')
+                draw = ImageDraw.Draw(preview_img)
+                draw.rectangle([(0, 0), (result.width - 1, result.height - 1)], outline='black', width=2)
+                
+                # Draw text indicating SVG preview
+                try:
+                    from PIL import ImageFont
+                    # Try to use default font
+                    font = ImageFont.load_default()
+                except:
+                    font = None
+                
+                text = "SVG Preview\n(cairosvg required)"
+                draw.text((10, 10), text, fill='black', font=font)
+                
+                buffer = io.BytesIO()
+                preview_img.save(buffer, format='PNG')
+                img_base64 = base64.b64encode(buffer.getvalue()).decode()
+                return f"data:image/png;base64,{img_base64}"
             
         except Exception as e:
             logger.error(f"Preview generation error: {e}")

@@ -327,6 +327,9 @@ class PlotterCore:
             
             self._send(command, wait_for_ok=True)
             
+            # Mark task as done after processing
+            self.priqueue.task_done()
+            
             # Wait for clear after sending
             while self.device and self.printing and not self.clear:
                 time.sleep(0.001)

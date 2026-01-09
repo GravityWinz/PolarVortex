@@ -535,29 +535,25 @@ const GenerateSvgDialog = ({ open, onClose, project }) => {
           onClick={handleClose} 
           disabled={isGenerating || isSaving}
         >
-          Close
+          Cancel
         </Button>
-        {!generationResult && (
-          <Button
-            onClick={handleGenerate}
-            variant="contained"
-            disabled={isGenerating || !selectedAlgorithm}
-            startIcon={isGenerating ? <CircularProgress size={20} /> : null}
-          >
-            {isGenerating ? "Generating..." : "Generate"}
-          </Button>
-        )}
-        {generationResult && (
-          <Button
-            onClick={handleSave}
-            variant="contained"
-            color="primary"
-            disabled={isSaving}
-            startIcon={isSaving ? <CircularProgress size={20} /> : <SaveIcon />}
-          >
-            {isSaving ? "Saving..." : "Save SVG"}
-          </Button>
-        )}
+        <Button
+          onClick={handleSave}
+          variant="contained"
+          color="primary"
+          disabled={!generationResult || isSaving}
+          startIcon={isSaving ? <CircularProgress size={20} /> : <SaveIcon />}
+        >
+          {isSaving ? "Saving..." : "Save"}
+        </Button>
+        <Button
+          onClick={handleGenerate}
+          variant="contained"
+          disabled={isGenerating || !selectedAlgorithm}
+          startIcon={isGenerating ? <CircularProgress size={20} /> : null}
+        >
+          {isGenerating ? "Generating..." : "Generate"}
+        </Button>
       </DialogActions>
     </Dialog>
   );
