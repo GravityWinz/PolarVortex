@@ -1,0 +1,231 @@
+name: AI Issue Handler
+
+on:
+  issues:
+    types: [assigned]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue number to process"
+        required: true
+        type: string
+
+jobs:
+  handle-issue:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Get issue information
+        id: issue_info
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issueNumber = context.payload.issue?.number || '${{ github.event.inputs.issue_number }}';
+            const issue = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber
+            });
+
+            const assignee = issue.data.assignee?.login;
+            const issueTitle = issue.data.title;
+            const issueBody = issue.data.body || '';
+            const labels = issue.data.labels.map(l => l.name);
+
+            // Check if assigned to AI bot (configure this username)
+            const aiBotUsername = process.env.AI_BOT_USERNAME || 'github-actions[bot]';
+            const isAssignedToAI = assignee === aiBotUsername || 
+                                   assignee === process.env.AI_BOT_USERNAME ||
+                                   labels.includes('ai-assigned');
+
+            core.setOutput('issue_number', issueNumber);
+            core.setOutput('issue_title', issueTitle);
+            core.setOutput('issue_body', issueBody);
+            core.setOutput('assignee', assignee || '');
+            core.setOutput('is_ai_assigned', isAssignedToAI);
+            core.setOutput('labels', JSON.stringify(labels));
+
+            return { isAssignedToAI, issueNumber, issueTitle };
+
+      - name: Check if AI should handle issue
+        id: check_ai
+        run: |
+          if [ "${{ steps.issue_info.outputs.is_ai_assigned }}" != "true" ]; then
+            echo "Issue not assigned to AI bot. Skipping."
+            echo "assignee=${{ steps.issue_info.outputs.assignee }}"
+            exit 0
+          fi
+          echo "AI will handle this issue"
+
+      - name: Get default branch
+        id: default_branch
+        run: |
+          DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@')
+          if [ -z "$DEFAULT_BRANCH" ]; then
+            DEFAULT_BRANCH="main"
+          fi
+          echo "default_branch=$DEFAULT_BRANCH" >> $GITHUB_OUTPUT
+          echo "Default branch: $DEFAULT_BRANCH"
+
+      - name: Create feature branch
+        id: create_branch
+        run: |
+          ISSUE_NUM="${{ steps.issue_info.outputs.issue_number }}"
+          ISSUE_TITLE="${{ steps.issue_info.outputs.issue_title }}"
+          DEFAULT_BRANCH="${{ steps.default_branch.outputs.default_branch }}"
+
+          # Fetch latest and checkout default branch
+          git fetch origin
+          git checkout "$DEFAULT_BRANCH"
+          git pull origin "$DEFAULT_BRANCH"
+
+          # Sanitize issue title for branch name
+          BRANCH_NAME=$(echo "$ISSUE_TITLE" | \
+            tr '[:upper:]' '[:lower:]' | \
+            sed 's/[^a-z0-9]/-/g' | \
+            sed 's/--*/-/g' | \
+            sed 's/^-\|-$//g' | \
+            head -c 50)
+
+          BRANCH_NAME="ai/issue-$ISSUE_NUM-$BRANCH_NAME"
+
+          # Check if branch already exists
+          if git ls-remote --heads origin "$BRANCH_NAME" | grep -q "$BRANCH_NAME"; then
+            echo "Branch $BRANCH_NAME already exists"
+            git fetch origin "$BRANCH_NAME"
+            git checkout "$BRANCH_NAME"
+          else
+            git checkout -b "$BRANCH_NAME"
+            echo "Created branch: $BRANCH_NAME"
+          fi
+
+          echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          echo "Created/checked out branch: $BRANCH_NAME"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f backend/requirements.txt ]; then
+            pip install -r backend/requirements.txt
+          fi
+          # Install AI integration dependencies
+          pip install openai anthropic requests
+
+      - name: Process issue with AI
+        id: ai_process
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.issue_info.outputs.issue_number }}
+          ISSUE_TITLE: ${{ steps.issue_info.outputs.issue_title }}
+          ISSUE_BODY: ${{ steps.issue_info.outputs.issue_body }}
+          BRANCH_NAME: ${{ steps.create_branch.outputs.branch_name }}
+        run: |
+          python .github/scripts/ai_issue_processor.py
+
+      - name: Commit changes
+        if: steps.ai_process.outputs.has_changes == 'true'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          git add -A
+          git commit -m "AI: Work on issue #${{ steps.issue_info.outputs.issue_number }} - ${{ steps.issue_info.outputs.issue_title }}" || exit 0
+
+          git push origin "${{ steps.create_branch.outputs.branch_name }}"
+
+      - name: Create Pull Request
+        if: steps.ai_process.outputs.has_changes == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issueNumber = '${{ steps.issue_info.outputs.issue_number }}';
+            const branchName = '${{ steps.create_branch.outputs.branch_name }}';
+            const issueTitle = '${{ steps.issue_info.outputs.issue_title }}';
+
+            // Check if PR already exists for this branch
+            const existingPRs = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:${branchName}`,
+              state: 'open'
+            });
+
+            if (existingPRs.data.length > 0) {
+              console.log(`PR already exists: ${existingPRs.data[0].html_url}`);
+              core.setOutput('pr_url', existingPRs.data[0].html_url);
+              return;
+            }
+
+            // Get default branch
+            const repo = await github.rest.repos.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo
+            });
+            const defaultBranch = repo.data.default_branch;
+
+            // Create new PR
+            const pr = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[AI] Fixes issue #${issueNumber}: ${issueTitle}`,
+              head: branchName,
+              base: defaultBranch,
+              body: `This PR addresses issue #${issueNumber}\n\n**AI-generated changes**\n\nCloses #${issueNumber}`,
+              draft: false
+            });
+
+            console.log(`Created PR: ${pr.data.html_url}`);
+            core.setOutput('pr_url', pr.data.html_url);
+
+            // Link PR to issue
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: `🤖 AI has started working on this issue. PR: #${pr.data.number}`
+            });
+
+      - name: Update issue status
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issueNumber = '${{ steps.issue_info.outputs.issue_number }}';
+            const hasChanges = '${{ steps.ai_process.outputs.has_changes }}' === 'true';
+            const prUrl = '${{ steps.create_branch.outputs.branch_name }}';
+
+            if (hasChanges) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                labels: ['ai-in-progress']
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: `🤖 AI analyzed the issue but didn't make any code changes. The issue may need manual intervention or clarification.`
+              });
+            }
