@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 class PlotterConnectRequest(BaseModel):
     port: str
-    baud_rate: int = 9600
+    baud_rate: int = 115200
 
 
 class GcodeRequest(BaseModel):

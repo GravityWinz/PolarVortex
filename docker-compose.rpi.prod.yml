@@ -1,8 +1,6 @@
 services:
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    image: ghcr.io/gravitywinz/polarvortex-frontend:latest
     ports:
       - "80:80"
     environment:
@@ -34,14 +32,14 @@ services:
     tmpfs:
       - /tmp
       - /var/cache/nginx
+      - /run
 
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: ghcr.io/gravitywinz/polarvortex-backend:latest
     ports:
       - "8000:8000"
     volumes:
+      - ./backend/local_storage:/app/local_storage:rw
       - ./backend/uploads:/app/uploads:rw
       - ./backend/processed_images:/app/processed_images:rw
       - ./backend/logs:/app/logs:rw
@@ -76,7 +74,6 @@ services:
         max-file: "3"
     security_opt:
       - no-new-privileges:true
-    read_only: true
     tmpfs:
       - /tmp
 

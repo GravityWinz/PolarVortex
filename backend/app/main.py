@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, WebSocket, WebSocketDisconnect, HTTPException, Form
+from fastapi import FastAPI, UploadFile, WebSocket, WebSocketDisconnect, HTTPException, Form, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse, FileResponse
@@ -16,11 +16,14 @@ from datetime import datetime
 from pathlib import Path
 from datetime import datetime
 import re
+from concurrent.futures import ThreadPoolExecutor
 from .image_processor import ImageHelper
 from .config import Config, Settings
 from .project_models import ProjectCreate, ProjectResponse, ProjectListResponse
 from .project_service import project_service
 from .vectorizer import PolargraphVectorizer, VectorizationSettings
+from .vectorizers import get_vectorizer, get_available_vectorizers, get_vectorizer_info
+from .svg_generators import get_svg_generator, get_available_svg_generators, get_svg_generator_info
 from .vpype_converter import convert_svg_to_gcode_file
 from .config_models import (
     PlotterCreate, PlotterUpdate, PlotterResponse, PlotterListResponse,
@@ -52,6 +55,10 @@ MAX_GCODE_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
 # Initialize ImageHelper
 image_helper = ImageHelper()
 
+# Thread pool executor for CPU-intensive operations (vectorization, image processing)
+# This prevents blocking the async event loop
+vectorization_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="vectorize")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -63,6 +70,9 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down PolarVortex API...")
     if plotter_service.arduino and getattr(plotter_service.arduino, "is_open", False):
         plotter_service.arduino.close()
+    # Shutdown thread pool executor
+    vectorization_executor.shutdown(wait=True)
+    logger.info("Thread pool executor shut down")
 
 app = FastAPI(
     title="PolarVortex API",
@@ -781,10 +791,17 @@ async def analyze_project_svg(project_id: str, filename: str):
 @app.post("/projects/{project_id}/gcode/run")
 async def run_project_gcode(project_id: str, request: ProjectGcodeRunRequest):
     """
-    Stream a stored project G-code file to the plotter in a background thread.
+    Stream a stored project G-code file to the plotter using PlotterCore.
     """
     try:
-        if not plotter_service.arduino or not getattr(plotter_service.arduino, "is_open", False):
+        # Check connection - prefer PlotterCore, fallback to arduino (simulator)
+        is_connected = False
+        if plotter_service.plotter_core and plotter_service.plotter_core.online:
+            is_connected = True
+        elif plotter_service.arduino and getattr(plotter_service.arduino, "is_open", False):
+            is_connected = True
+        
+        if not is_connected:
             raise HTTPException(status_code=400, detail="Plotter not connected")
 
         project = project_service.get_project(project_id)
@@ -840,28 +857,58 @@ async def run_project_gcode(project_id: str, request: ProjectGcodeRunRequest):
         plotter_service.gcode_cancel_all.clear()
         plotter_service.gcode_pause_all.clear()
 
-        plotter_service.gcode_jobs[job_id] = {
-            "status": "queued",
-            "project_id": project_id,
-            "filename": request.filename,
-            "commands_total": len(commands),
-            "started_at": None,
-            "finished_at": None,
-            "error": None,
-            "cancel_requested": False,
-            "paused": False,
-        }
+        # Create job entry with lock protection
+        with plotter_service._gcode_jobs_lock:
+            plotter_service.gcode_jobs[job_id] = {
+                "status": "queued",
+                "project_id": project_id,
+                "filename": request.filename,
+                "commands_total": len(commands),
+                "lines_total": len(commands),
+                "lines_sent": 0,
+                "progress": 0,
+                "started_at": None,
+                "finished_at": None,
+                "error": None,
+                "cancel_requested": False,
+                "paused": False,
+            }
 
         if commands:
-            thread = threading.Thread(
-                target=_run_gcode_commands_thread,
-                args=(job_id, commands, request.filename),
-                daemon=True,
-            )
-            thread.start()
+            # Use PlotterCore if available
+            if plotter_service.plotter_core and plotter_service.plotter_core.online:
+                # Start print using PlotterCore
+                success = plotter_service.start_gcode_print(commands, job_id)
+                if success:
+                    with plotter_service._gcode_jobs_lock:
+                        plotter_service.gcode_jobs[job_id]["started_at"] = datetime.now().isoformat()
+                    # Start monitoring thread to track print progress
+                    thread = threading.Thread(
+                        target=_monitor_gcode_print,
+                        args=(job_id, len(commands)),
+                        daemon=True,
+                    )
+                    thread.start()
+                else:
+                    with plotter_service._gcode_jobs_lock:
+                        plotter_service.gcode_jobs[job_id]["status"] = "failed"
+                        plotter_service.gcode_jobs[job_id]["error"] = "Failed to start print"
+            else:
+                # Fallback to old method for simulator
+                thread = threading.Thread(
+                    target=_run_gcode_commands_thread,
+                    args=(job_id, commands, request.filename),
+                    daemon=True,
+                )
+                thread.start()
         else:
-            plotter_service.gcode_jobs[job_id]["status"] = "completed"
-            plotter_service.gcode_jobs[job_id]["finished_at"] = datetime.now().isoformat()
+            with plotter_service._gcode_jobs_lock:
+                plotter_service.gcode_jobs[job_id]["status"] = "completed"
+                plotter_service.gcode_jobs[job_id]["finished_at"] = datetime.now().isoformat()
+
+        # Get status for response with lock protection
+        with plotter_service._gcode_jobs_lock:
+            job_status = plotter_service.gcode_jobs[job_id]["status"]
 
         return {
             "success": True,
@@ -869,7 +916,9 @@ async def run_project_gcode(project_id: str, request: ProjectGcodeRunRequest):
             "project_id": project_id,
             "filename": request.filename,
             "queued": len(commands),
-            "status": plotter_service.gcode_jobs[job_id]["status"],
+            "lines_total": len(commands),
+            "status": job_status,
+            "progress": 0,
         }
     except HTTPException:
         raise
@@ -878,57 +927,202 @@ async def run_project_gcode(project_id: str, request: ProjectGcodeRunRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _monitor_gcode_print(job_id: str, total_commands: int):
+    """Monitor print progress when using PlotterCore."""
+    import time
+    try:
+        cancel_event = plotter_service.gcode_cancel_all
+        pause_event = plotter_service.gcode_pause_all
+        
+        core = plotter_service.plotter_core
+        if not core:
+            with plotter_service._gcode_jobs_lock:
+                if job_id in plotter_service.gcode_jobs:
+                    plotter_service.gcode_jobs[job_id]["status"] = "failed"
+                    plotter_service.gcode_jobs[job_id]["error"] = "PlotterCore not available"
+                    plotter_service.gcode_jobs[job_id]["finished_at"] = datetime.now().isoformat()
+            return
+        
+        while True:
+            # Check for cancellation (read with lock)
+            cancel_requested = False
+            with plotter_service._gcode_jobs_lock:
+                if job_id in plotter_service.gcode_jobs:
+                    cancel_requested = plotter_service.gcode_jobs[job_id].get("cancel_requested", False)
+            
+            if cancel_event.is_set() or cancel_requested:
+                if core.printing:
+                    core.cancelprint()
+                with plotter_service._gcode_jobs_lock:
+                    if job_id in plotter_service.gcode_jobs:
+                        plotter_service.gcode_jobs[job_id]["status"] = "canceled"
+                        plotter_service.gcode_jobs[job_id]["finished_at"] = datetime.now().isoformat()
+                break
+            
+            # Check for pause
+            if pause_event.is_set():
+                if core.printing and not core.paused:
+                    core.pause()
+                with plotter_service._gcode_jobs_lock:
+                    if job_id in plotter_service.gcode_jobs:
+                        plotter_service.gcode_jobs[job_id]["status"] = "paused"
+                        plotter_service.gcode_jobs[job_id]["paused"] = True
+            else:
+                if core.paused and not pause_event.is_set():
+                    core.resume()
+                with plotter_service._gcode_jobs_lock:
+                    if job_id in plotter_service.gcode_jobs:
+                        if plotter_service.gcode_jobs[job_id].get("status") == "paused":
+                            plotter_service.gcode_jobs[job_id]["status"] = "running"
+                            plotter_service.gcode_jobs[job_id]["paused"] = False
+            
+            # Check if print finished
+            # Check completion regardless of pause state - a print can finish while paused
+            job_status = None
+            with plotter_service._gcode_jobs_lock:
+                if job_id in plotter_service.gcode_jobs:
+                    job_status = plotter_service.gcode_jobs[job_id].get("status")
+            
+            if not core.printing and job_status in ("running", "paused"):
+                with plotter_service._gcode_jobs_lock:
+                    if job_id in plotter_service.gcode_jobs:
+                        plotter_service.gcode_jobs[job_id]["status"] = "completed"
+                        plotter_service.gcode_jobs[job_id]["finished_at"] = datetime.now().isoformat()
+                        plotter_service.gcode_jobs[job_id]["paused"] = False  # Clear pause flag when completed
+                        # Set progress to 100% when completed
+                        if plotter_service.gcode_jobs[job_id].get("lines_total", 0) > 0:
+                            plotter_service.gcode_jobs[job_id]["lines_sent"] = plotter_service.gcode_jobs[job_id]["lines_total"]
+                            plotter_service.gcode_jobs[job_id]["progress"] = 100
+                break
+            
+            # Update progress based on lines sent
+            # Use lock to atomically read both mainqueue and queueindex to avoid race condition
+            # where cancelprint() sets mainqueue = None between the check and use
+            with core._queue_lock:
+                mainqueue = core.mainqueue
+                queueindex = core.queueindex
+            
+            # Check values after releasing lock (local copies are safe)
+            if mainqueue is not None and queueindex >= 0:
+                lines_sent = queueindex
+                lines_total = len(mainqueue)
+                
+                with plotter_service._gcode_jobs_lock:
+                    if job_id in plotter_service.gcode_jobs:
+                        plotter_service.gcode_jobs[job_id]["lines_sent"] = lines_sent
+                        plotter_service.gcode_jobs[job_id]["lines_total"] = lines_total
+                        
+                        if lines_total > 0:
+                            progress = int((lines_sent / lines_total) * 100)
+                            plotter_service.gcode_jobs[job_id]["progress"] = min(progress, 100)
+                        else:
+                            plotter_service.gcode_jobs[job_id]["progress"] = 0
+            
+            time.sleep(0.5)  # Check every 500ms
+            
+    except Exception as e:
+        logger.error(f"G-code job {job_id} monitoring failed: {e}")
+        with plotter_service._gcode_jobs_lock:
+            if job_id in plotter_service.gcode_jobs:
+                plotter_service.gcode_jobs[job_id]["status"] = "failed"
+                plotter_service.gcode_jobs[job_id]["error"] = str(e)
+                plotter_service.gcode_jobs[job_id]["finished_at"] = datetime.now().isoformat()
+
+
 def _run_gcode_commands_thread(job_id: str, commands: List[str], filename: str):
-    """Background thread runner to stream G-code commands."""
+    """Background thread runner to stream G-code commands (fallback for simulator)."""
     async def runner():
         try:
-            jobs = plotter_service.gcode_jobs
             cancel_event = plotter_service.gcode_cancel_all
             pause_event = plotter_service.gcode_pause_all
 
-            jobs[job_id]["status"] = "running"
-            jobs[job_id]["started_at"] = datetime.now().isoformat()
+            with plotter_service._gcode_jobs_lock:
+                if job_id in plotter_service.gcode_jobs:
+                    plotter_service.gcode_jobs[job_id]["status"] = "running"
+                    plotter_service.gcode_jobs[job_id]["started_at"] = datetime.now().isoformat()
+            
             results: List[Dict[str, Any]] = []
+            total_commands = len(commands)
 
-            for cmd in commands:
-                if cancel_event.is_set() or jobs[job_id].get("cancel_requested"):
-                    jobs[job_id]["status"] = "canceled"
-                    jobs[job_id]["finished_at"] = datetime.now().isoformat()
-                    jobs[job_id]["results"] = results
+            for idx, cmd in enumerate(commands):
+                # Check for cancellation (read with lock)
+                cancel_requested = False
+                with plotter_service._gcode_jobs_lock:
+                    if job_id in plotter_service.gcode_jobs:
+                        cancel_requested = plotter_service.gcode_jobs[job_id].get("cancel_requested", False)
+                
+                if cancel_event.is_set() or cancel_requested:
+                    with plotter_service._gcode_jobs_lock:
+                        if job_id in plotter_service.gcode_jobs:
+                            plotter_service.gcode_jobs[job_id]["status"] = "canceled"
+                            plotter_service.gcode_jobs[job_id]["finished_at"] = datetime.now().isoformat()
+                            plotter_service.gcode_jobs[job_id]["results"] = results
                     return
 
                 # Handle pause
                 if pause_event.is_set():
-                    jobs[job_id]["status"] = "paused"
-                    jobs[job_id]["paused"] = True
+                    with plotter_service._gcode_jobs_lock:
+                        if job_id in plotter_service.gcode_jobs:
+                            plotter_service.gcode_jobs[job_id]["status"] = "paused"
+                            plotter_service.gcode_jobs[job_id]["paused"] = True
                     while pause_event.is_set():
                         await asyncio.sleep(0.1)
-                        if cancel_event.is_set() or jobs[job_id].get("cancel_requested"):
-                            jobs[job_id]["status"] = "canceled"
-                            jobs[job_id]["finished_at"] = datetime.now().isoformat()
-                            jobs[job_id]["results"] = results
+                        # Check for cancellation while paused
+                        cancel_requested = False
+                        with plotter_service._gcode_jobs_lock:
+                            if job_id in plotter_service.gcode_jobs:
+                                cancel_requested = plotter_service.gcode_jobs[job_id].get("cancel_requested", False)
+                        if cancel_event.is_set() or cancel_requested:
+                            with plotter_service._gcode_jobs_lock:
+                                if job_id in plotter_service.gcode_jobs:
+                                    plotter_service.gcode_jobs[job_id]["status"] = "canceled"
+                                    plotter_service.gcode_jobs[job_id]["finished_at"] = datetime.now().isoformat()
+                                    plotter_service.gcode_jobs[job_id]["results"] = results
                             return
-                    jobs[job_id]["status"] = "running"
-                    jobs[job_id]["paused"] = False
+                    with plotter_service._gcode_jobs_lock:
+                        if job_id in plotter_service.gcode_jobs:
+                            plotter_service.gcode_jobs[job_id]["status"] = "running"
+                            plotter_service.gcode_jobs[job_id]["paused"] = False
 
                 try:
                     resp = await plotter_service.send_gcode_command(GcodeRequest(command=cmd))
                 except Exception as e:
                     resp = {"success": False, "error": str(e), "command": cmd}
                 results.append(resp)
+                
+                # Update progress
+                lines_sent = idx + 1
+                with plotter_service._gcode_jobs_lock:
+                    if job_id in plotter_service.gcode_jobs:
+                        plotter_service.gcode_jobs[job_id]["lines_sent"] = lines_sent
+                        plotter_service.gcode_jobs[job_id]["lines_total"] = total_commands
+                        if total_commands > 0:
+                            progress = int((lines_sent / total_commands) * 100)
+                            plotter_service.gcode_jobs[job_id]["progress"] = min(progress, 100)
+                
                 if not resp.get("success"):
                     break
                 # Yield control and add a small delay to avoid overrun
                 await asyncio.sleep(GCODE_SEND_DELAY_SECONDS)
 
-            jobs[job_id]["status"] = "completed" if all(r.get("success") for r in results) else "failed"
-            jobs[job_id]["finished_at"] = datetime.now().isoformat()
-            jobs[job_id]["results"] = results
+            # Mark job as completed or failed
+            job_status = "completed" if all(r.get("success") for r in results) else "failed"
+            with plotter_service._gcode_jobs_lock:
+                if job_id in plotter_service.gcode_jobs:
+                    plotter_service.gcode_jobs[job_id]["status"] = job_status
+                    plotter_service.gcode_jobs[job_id]["finished_at"] = datetime.now().isoformat()
+                    plotter_service.gcode_jobs[job_id]["results"] = results
+                    # Set progress to 100% when completed
+                    if job_status == "completed" and total_commands > 0:
+                        plotter_service.gcode_jobs[job_id]["lines_sent"] = total_commands
+                        plotter_service.gcode_jobs[job_id]["progress"] = 100
         except Exception as e:
             logger.error(f"G-code job {job_id} failed: {e}")
-            jobs[job_id]["status"] = "failed"
-            jobs[job_id]["error"] = str(e)
-            jobs[job_id]["finished_at"] = datetime.now().isoformat()
+            with plotter_service._gcode_jobs_lock:
+                if job_id in plotter_service.gcode_jobs:
+                    plotter_service.gcode_jobs[job_id]["status"] = "failed"
+                    plotter_service.gcode_jobs[job_id]["error"] = str(e)
+                    plotter_service.gcode_jobs[job_id]["finished_at"] = datetime.now().isoformat()
 
     asyncio.run(runner())
 
@@ -943,6 +1137,39 @@ async def stop_plotter():
 async def pause_plotter():
     """Toggle pause/resume: on pause send M0, on resume clear pause flag."""
     return await plotter_service.pause_plotter()
+
+
+@app.get("/plotter/jobs/{job_id}/progress")
+async def get_job_progress(job_id: str):
+    """Get progress information for a G-code job."""
+    try:
+        # Read job data with lock protection
+        with plotter_service._gcode_jobs_lock:
+            if job_id not in plotter_service.gcode_jobs:
+                raise HTTPException(status_code=404, detail="Job not found")
+            
+            # Create a copy of the job data to avoid holding the lock
+            job = plotter_service.gcode_jobs[job_id].copy()
+        
+        return {
+            "success": True,
+            "job_id": job_id,
+            "status": job.get("status", "unknown"),
+            "filename": job.get("filename"),
+            "lines_sent": job.get("lines_sent", 0),
+            "lines_total": job.get("lines_total", 0),
+            "progress": job.get("progress", 0),
+            "started_at": job.get("started_at"),
+            "finished_at": job.get("finished_at"),
+            "paused": job.get("paused", False),
+            "error": job.get("error"),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get job progress error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # Project Management Endpoints
 @app.post("/projects", response_model=ProjectResponse)
@@ -1019,17 +1246,34 @@ async def delete_project(project_id: str):
 
 
 @app.post("/projects/{project_id}/vectorize")
-async def vectorize_project_image(project_id: str, 
-                                 blur_radius: int = 1,
-                                 posterize_levels: int = 5,
-                                 simplification_threshold: float = 2.0,
-                                 min_contour_area: int = 10,
-                                 color_tolerance: int = 10,
-                                 enable_color_separation: bool = True,
-                                 enable_contour_simplification: bool = True,
-                                 enable_noise_reduction: bool = True):
-    """Vectorize the source image of a project"""
+async def vectorize_project_image(
+    project_id: str,
+    algorithm: str = "polargraph",
+    settings: Dict[str, Any] = Body(default={}),
+    # Legacy query parameters for backward compatibility
+    blur_radius: Optional[int] = None,
+    posterize_levels: Optional[int] = None,
+    simplification_threshold: Optional[float] = None,
+    min_contour_area: Optional[int] = None,
+    color_tolerance: Optional[int] = None,
+    enable_color_separation: Optional[bool] = None,
+    enable_contour_simplification: Optional[bool] = None,
+    enable_noise_reduction: Optional[bool] = None
+):
+    """Vectorize the source image of a project
+    
+    Settings can be provided either:
+    1. As JSON body in 'settings' parameter (recommended for algorithm-specific settings)
+    2. As query parameters (legacy, for backward compatibility)
+    
+    If both are provided, query parameters override JSON body settings.
+    """
     try:
+        # Get the selected vectorizer
+        vectorizer = get_vectorizer(algorithm)
+        if not vectorizer:
+            raise HTTPException(status_code=400, detail=f"Unknown algorithm: {algorithm}")
+        
         # Verify project exists
         project = project_service.get_project(project_id)
         if not project:
@@ -1051,53 +1295,77 @@ async def vectorize_project_image(project_id: str,
         with open(source_image_path, 'rb') as f:
             image_data = f.read()
         
-        # Create vectorization settings
-        settings = VectorizationSettings(
-            blur_radius=blur_radius,
-            posterize_levels=posterize_levels,
-            simplification_threshold=simplification_threshold,
-            min_contour_area=min_contour_area,
-            color_tolerance=color_tolerance,
-            enable_color_separation=enable_color_separation,
-            enable_contour_simplification=enable_contour_simplification,
-            enable_noise_reduction=enable_noise_reduction
-        )
+        # Merge settings: start with JSON body, then override with query params if provided
+        # This allows backward compatibility while supporting algorithm-specific settings
+        merged_settings = settings.copy() if settings else {}
         
-        # Initialize vectorizer
-        vectorizer = PolargraphVectorizer()
+        # Override with query parameters if provided (for backward compatibility)
+        if blur_radius is not None:
+            merged_settings["blur_radius"] = blur_radius
+        if posterize_levels is not None:
+            merged_settings["posterize_levels"] = posterize_levels
+        if simplification_threshold is not None:
+            merged_settings["simplification_threshold"] = simplification_threshold
+        if min_contour_area is not None:
+            merged_settings["min_contour_area"] = min_contour_area
+        if color_tolerance is not None:
+            merged_settings["color_tolerance"] = color_tolerance
+        if enable_color_separation is not None:
+            merged_settings["enable_color_separation"] = enable_color_separation
+        if enable_contour_simplification is not None:
+            merged_settings["enable_contour_simplification"] = enable_contour_simplification
+        if enable_noise_reduction is not None:
+            merged_settings["enable_noise_reduction"] = enable_noise_reduction
         
-        # Vectorize the image with SVG creation in project directory
+        # Validate settings for the selected algorithm
+        # This will merge with defaults and validate/clamp values
+        validated_settings = vectorizer.validate_settings(merged_settings)
+        
+        # Vectorize the image in a thread pool to avoid blocking the event loop
         base_name = Path(project.source_image).stem
-        result = vectorizer.vectorize_image(
-            image_data,
-            settings,
-            str(project_dir),
-            base_filename=base_name,
-        )
         
-        # Generate plotting commands
+        def run_vectorization():
+            """Run vectorization in a separate thread"""
+            return vectorizer.vectorize_image(
+                image_data,
+                validated_settings,
+                str(project_dir),
+                base_filename=base_name,
+            )
+        
+        # Run vectorization in thread pool
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(vectorization_executor, run_vectorization)
+        
+        # Export to plotting commands (if supported) - also CPU-intensive
         machine_settings = {
             "width": 1000,
             "height": 1000,
             "mm_per_rev": 95.0,
             "steps_per_rev": 200.0
         }
-        plotting_commands = vectorizer.export_to_plotting_commands(result, machine_settings)
+        plotting_commands = []
+        try:
+            def run_export_commands():
+                return vectorizer.export_to_plotting_commands(result, machine_settings)
+            plotting_commands = await loop.run_in_executor(vectorization_executor, run_export_commands)
+        except NotImplementedError:
+            logger.warning(f"Plotting commands not supported for {algorithm}")
         
-        # Generate preview
-        preview = vectorizer.get_vectorization_preview(result)
+        # Get preview (if supported) - also CPU-intensive
+        preview = ""
+        try:
+            def run_preview():
+                return vectorizer.get_vectorization_preview(result)
+            preview = await loop.run_in_executor(vectorization_executor, run_preview)
+        except NotImplementedError:
+            logger.warning(f"Preview not supported for {algorithm}")
         
         # Update project with vectorization information
         svg_filename = Path(result.svg_path).name if result.svg_path else None
         vectorization_parameters = {
-            "blur_radius": settings.blur_radius,
-            "posterize_levels": settings.posterize_levels,
-            "simplification_threshold": settings.simplification_threshold,
-            "min_contour_area": settings.min_contour_area,
-            "color_tolerance": settings.color_tolerance,
-            "enable_color_separation": settings.enable_color_separation,
-            "enable_contour_simplification": settings.enable_contour_simplification,
-            "enable_noise_reduction": settings.enable_noise_reduction
+            "algorithm": algorithm,
+            **validated_settings
         }
         
         project_service.update_project_vectorization(
@@ -1114,6 +1382,7 @@ async def vectorize_project_image(project_id: str,
             "type": "image_vectorized",
             "project_id": project_id,
             "project_name": project.name,
+            "algorithm": algorithm,
             "total_paths": result.total_paths,
             "colors_detected": result.colors_detected,
             "processing_time": result.processing_time,
@@ -1122,6 +1391,7 @@ async def vectorize_project_image(project_id: str,
         
         return {
             "success": True,
+            "algorithm": algorithm,
             "project_id": project_id,
             "source_image": project.source_image,
             "vectorization_result": {
@@ -1134,16 +1404,7 @@ async def vectorize_project_image(project_id: str,
             "svg_path": result.svg_path,
             "plotting_commands": plotting_commands,
             "preview": preview,
-            "settings_used": {
-                "blur_radius": settings.blur_radius,
-                "posterize_levels": settings.posterize_levels,
-                "simplification_threshold": settings.simplification_threshold,
-                "min_contour_area": settings.min_contour_area,
-                "color_tolerance": settings.color_tolerance,
-                "enable_color_separation": settings.enable_color_separation,
-                "enable_contour_simplification": settings.enable_contour_simplification,
-                "enable_noise_reduction": settings.enable_noise_reduction
-            }
+            "settings_used": validated_settings
         }
         
     except HTTPException:
@@ -1190,6 +1451,7 @@ async def export_project_vectorization_svg(project_id: str):
 
 @app.get("/projects/{project_id}/vectorize/commands")
 async def get_project_vectorization_commands(project_id: str, 
+                                           algorithm: str = "polargraph",
                                            width: int = 1000,
                                            height: int = 1000,
                                            mm_per_rev: float = 95.0,
@@ -1205,6 +1467,11 @@ async def get_project_vectorization_commands(project_id: str,
         if not project.source_image:
             raise HTTPException(status_code=400, detail="Project has no source image to vectorize")
         
+        # Get vectorizer using plugin system
+        vectorizer = get_vectorizer(algorithm)
+        if not vectorizer:
+            raise HTTPException(status_code=400, detail=f"Unknown vectorization algorithm: {algorithm}")
+        
         # Get project directory
         project_dir = image_helper.get_project_directory(project_id)
         source_image_path = project_dir / project.source_image
@@ -1217,23 +1484,36 @@ async def get_project_vectorization_commands(project_id: str,
         with open(source_image_path, 'rb') as f:
             image_data = f.read()
         
-        # Use default vectorization settings
-        settings = VectorizationSettings()
+        # Use default vectorization settings from the vectorizer
+        settings = vectorizer.get_default_settings()
+        # Validate settings (merges with defaults and clamps values)
+        settings = vectorizer.validate_settings(settings)
         
-        # Initialize vectorizer
-        vectorizer = PolargraphVectorizer()
+        # Vectorize the image in a thread pool to avoid blocking the event loop
+        def run_vectorization():
+            return vectorizer.vectorize_image(image_data, settings)
         
-        # Vectorize the image
-        result = vectorizer.vectorize_image(image_data, settings)
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(vectorization_executor, run_vectorization)
         
-        # Generate plotting commands
+        # Generate plotting commands (also CPU-intensive)
         machine_settings = {
             "width": width,
             "height": height,
             "mm_per_rev": mm_per_rev,
             "steps_per_rev": steps_per_rev
         }
-        plotting_commands = vectorizer.export_to_plotting_commands(result, machine_settings)
+        
+        def run_export_commands():
+            return vectorizer.export_to_plotting_commands(result, machine_settings)
+        
+        try:
+            plotting_commands = await loop.run_in_executor(vectorization_executor, run_export_commands)
+        except NotImplementedError:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Plotting commands export not supported for algorithm: {algorithm}"
+            )
         
         return {
             "success": True,
@@ -1321,10 +1601,35 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 # Vectorization endpoints
+@app.get("/vectorizers")
+async def list_vectorizers():
+    """Get list of available vectorization algorithms"""
+    try:
+        vectorizers = get_available_vectorizers()
+        return {"vectorizers": vectorizers}
+    except Exception as e:
+        logger.error(f"Error listing vectorizers: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/vectorizers/{algorithm_id}")
+async def get_vectorizer_details(algorithm_id: str):
+    """Get details about a specific vectorizer"""
+    try:
+        info = get_vectorizer_info(algorithm_id)
+        if not info:
+            raise HTTPException(status_code=404, detail=f"Vectorizer '{algorithm_id}' not found")
+        return info
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting vectorizer info: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/vectorize")
 async def vectorize_image(
     file: UploadFile,
-    settings: str = Form(default="{}")
+    settings: str = Form(default="{}"),
+    algorithm: str = Form(default="polargraph")
 ):
     """Vectorize an uploaded image"""
     try:
@@ -1337,13 +1642,18 @@ async def vectorize_image(
         # Create a temporary ImageHelper instance with vectorizer
         temp_helper = ImageHelper()
         
-        # Perform vectorization
-        result = temp_helper.vectorize_image(contents, vectorization_settings)
+        # Perform vectorization with selected algorithm in a thread pool to avoid blocking
+        def run_vectorization():
+            return temp_helper.vectorize_image(contents, vectorization_settings, algorithm)
+        
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(vectorization_executor, run_vectorization)
         
         # Broadcast vectorization complete
         await manager.broadcast(json.dumps({
             "type": "vectorization_complete",
             "filename": file.filename,
+            "algorithm": algorithm,
             "total_paths": result.get("vectorization_result", {}).get("total_paths", 0),
             "colors_detected": result.get("vectorization_result", {}).get("colors_detected", 0),
             "processing_time": result.get("vectorization_result", {}).get("processing_time", 0)
@@ -1370,8 +1680,12 @@ async def quick_vectorize_image(
         # Create a temporary ImageHelper instance with vectorizer
         temp_helper = ImageHelper()
         
-        # Perform quick vectorization
-        result = temp_helper.quick_vectorize(contents, blur, posterize, simplify)
+        # Perform quick vectorization in a thread pool to avoid blocking
+        def run_quick_vectorize():
+            return temp_helper.quick_vectorize(contents, blur, posterize, simplify)
+        
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(vectorization_executor, run_quick_vectorize)
         
         return result
         
@@ -1391,6 +1705,171 @@ async def get_vectorization_presets():
         
     except Exception as e:
         logger.error(f"Presets error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# SVG Generation endpoints
+@app.get("/svg-generators")
+async def list_svg_generators():
+    """Get list of available SVG generation algorithms"""
+    try:
+        generators = get_available_svg_generators()
+        return {"generators": generators}
+    except Exception as e:
+        logger.error(f"Error listing SVG generators: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/svg-generators/{generator_id}")
+async def get_svg_generator_details(generator_id: str):
+    """Get details about a specific SVG generator"""
+    try:
+        info = get_svg_generator_info(generator_id)
+        if not info:
+            raise HTTPException(status_code=404, detail=f"SVG generator '{generator_id}' not found")
+        return info
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting SVG generator info: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/projects/{project_id}/generate-svg")
+async def generate_project_svg(
+    project_id: str,
+    algorithm: str = "geometric_pattern",
+    request: Dict[str, Any] = Body(default={}),
+):
+    """Generate SVG for a project using the specified generator algorithm
+    
+    Settings can be provided as JSON body in 'settings' parameter.
+    """
+    try:
+        # Extract settings from request body (frontend sends {settings: {...}})
+        settings = request.get("settings", {}) if isinstance(request, dict) else {}
+        
+        # Get the selected generator
+        generator = get_svg_generator(algorithm)
+        if not generator:
+            raise HTTPException(status_code=400, detail=f"Unknown algorithm: {algorithm}")
+        
+        # Verify project exists
+        project = project_service.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        # Validate settings for the selected algorithm
+        # This will merge with defaults and validate/clamp values
+        validated_settings = generator.validate_settings(settings)
+        
+        # Generate SVG in a thread pool to avoid blocking the event loop
+        # Save to temporary directory, not project directory
+        temp_dir = Path("local_storage/tmp")
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        
+        def run_generation():
+            """Run SVG generation in a separate thread"""
+            return generator.generate_svg(
+                validated_settings,
+                str(temp_dir),  # Save to temp directory
+                base_filename=f"temp_{algorithm}",
+            )
+        
+        # Run generation in thread pool
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(vectorization_executor, run_generation)
+        
+        # Don't broadcast - this is just a temporary generation
+        # The file is saved to temp directory and will be moved to project on save
+        
+        return {
+            "success": True,
+            "algorithm": algorithm,
+            "project_id": project_id,
+            "svg_content": result.svg_content,  # Include SVG content for saving
+            "width": result.width,
+            "height": result.height,
+            "processing_time": result.processing_time,
+            "preview": result.preview,
+            "settings_used": validated_settings
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"SVG generation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/projects/{project_id}/save-svg")
+async def save_project_svg(
+    project_id: str,
+    request: Dict[str, Any] = Body(...),
+):
+    """Save SVG content to a project with a custom filename"""
+    try:
+        svg_content = request.get("svg_content", "")
+        filename = request.get("filename", "")
+        
+        if not svg_content:
+            raise HTTPException(status_code=400, detail="SVG content is required")
+        if not filename:
+            raise HTTPException(status_code=400, detail="Filename is required")
+        
+        # Verify project exists
+        project = project_service.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        # Get project directory
+        project_dir = image_helper.get_project_directory(project_id)
+        
+        # Validate filename - ensure it ends with .svg and doesn't contain path traversal
+        if not filename.endswith('.svg'):
+            filename = f"{filename}.svg"
+        
+        # Sanitize filename - remove any path separators
+        filename = Path(filename).name
+        
+        # Ensure filename is safe (no path traversal)
+        if '..' in filename or '/' in filename or '\\' in filename:
+            raise HTTPException(status_code=400, detail="Invalid filename")
+        
+        # Create full path
+        svg_path = project_dir / filename
+        
+        # Ensure unique filename if file already exists
+        original_filename = filename
+        counter = 1
+        while svg_path.exists():
+            name_part = Path(original_filename).stem
+            filename = f"{name_part}_{counter}.svg"
+            svg_path = project_dir / filename
+            counter += 1
+        
+        # Write SVG content to file
+        with open(svg_path, 'w', encoding='utf-8') as f:
+            f.write(svg_content)
+        
+        logger.info(f"SVG saved to project: {svg_path}")
+        
+        # Broadcast save completion
+        await manager.broadcast(json.dumps({
+            "type": "svg_saved",
+            "project_id": project_id,
+            "project_name": project.name,
+            "svg_filename": filename,
+        }))
+        
+        return {
+            "success": True,
+            "project_id": project_id,
+            "svg_filename": filename,
+            "svg_path": str(svg_path),
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"SVG save error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

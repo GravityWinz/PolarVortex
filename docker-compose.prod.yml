@@ -1,8 +1,6 @@
 services:
   frontend:
-    build: 
-      context: ./frontend
-      dockerfile: Dockerfile
+    image: ghcr.io/gravitywinz/polarvortex-frontend:latest
     ports:
       - "80:80"  # Map to standard HTTP port
     environment:
@@ -34,14 +32,14 @@ services:
     tmpfs:
       - /tmp
       - /var/cache/nginx
+      - /run
 
   backend:
-    build: 
-      context: ./backend
-      dockerfile: Dockerfile
+    image: ghcr.io/gravitywinz/polarvortex-backend:latest
     ports:
       - "8000:8000"
     volumes:
+      - ./backend/local_storage:/app/local_storage:rw
       - ./backend/uploads:/app/uploads:rw
       - ./backend/processed_images:/app/processed_images:rw
       - ./backend/logs:/app/logs:rw
@@ -56,11 +54,12 @@ services:
     # Serial port device access
     # For Linux: Uncomment and adjust device path (e.g., /dev/ttyUSB0, /dev/ttyACM0)
     # For Windows Docker Desktop: Use COM port mapping (see instructions below)
-    devices:
+    # devices:
       # - /dev/ttyUSB0:/dev/ttyUSB0  # Common Linux Arduino port
-      - /dev/ttyACM0:/dev/ttyACM0  # Alternative Linux Arduino port
-    # Note: Production Dockerfile runs as non-root user - may need privileged: true
-    # or modify Dockerfile to add user to dialout group for serial port access
+      # - /dev/ttyACM0:/dev/ttyACM0  # Alternative Linux Arduino port
+    # Note: Running as root for file permissions (required on Windows Docker Desktop)
+    # For serial port access on Linux, may need privileged: true or group_add: [dialout]
+    user: root
     networks:
       - polarvortex-network
     healthcheck:
@@ -77,7 +76,6 @@ services:
         max-file: "3"
     security_opt:
       - no-new-privileges:true
-    read_only: true
     tmpfs:
       - /tmp
 

@@ -14,7 +14,29 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class VectorizationSettings:
-    """Settings for the vectorization process"""
+    """
+    Settings for the vectorization process.
+    
+    See backend/app/vectorizers/PARAMETERS.md for detailed documentation of each parameter.
+    
+    Image Preprocessing:
+        blur_radius: Gaussian blur radius for noise reduction (0-10, default: 1)
+        posterize_levels: Number of color levels for quantization (2-256, default: 5)
+        enable_noise_reduction: Enable/disable noise reduction preprocessing (default: True)
+    
+    Color Separation:
+        enable_color_separation: Separate image into individual color layers (default: True)
+        color_tolerance: RGB tolerance for grouping similar colors (0-255, default: 10)
+    
+    Contour Detection:
+        min_contour_area: Minimum area in pixels² for valid contours (default: 10)
+        min_contour_points: Minimum points required for valid contours (default: 3)
+    
+    Contour Simplification:
+        enable_contour_simplification: Enable/disable Douglas-Peucker simplification (default: True)
+        simplification_threshold: Max deviation in pixels for simplification (default: 2.0)
+        simplification_iterations: Number of simplification passes (default: 3)
+    """
     blur_radius: int = 1
     posterize_levels: int = 5
     simplification_threshold: float = 2.0
@@ -153,16 +175,25 @@ class PolargraphVectorizer:
             raise
     
     def _preprocess_image(self, image: Image.Image) -> Image.Image:
-        """Preprocess image for better vectorization"""
+        """
+        Preprocess image for better vectorization.
+        
+        Applies:
+        1. RGB conversion if needed
+        2. Gaussian blur (if enable_noise_reduction=True and blur_radius > 0)
+        3. Color quantization/posterization (if posterize_levels > 1)
+        """
         # Convert to RGB if needed
         if image.mode != 'RGB':
             image = image.convert('RGB')
         
         # Apply blur for noise reduction
+        # blur_radius: Controls smoothing strength (0=no blur, higher=more smoothing)
         if self.settings.enable_noise_reduction and self.settings.blur_radius > 0:
             image = image.filter(ImageFilter.GaussianBlur(radius=self.settings.blur_radius))
         
         # Apply posterization to reduce color complexity
+        # posterize_levels: Reduces colors to N levels (2-256, lower=simpler, higher=more colors)
         if self.settings.posterize_levels > 1:
             image = image.quantize(colors=self.settings.posterize_levels).convert('RGB')
         
@@ -199,7 +230,12 @@ class PolargraphVectorizer:
         return unique_colors
     
     def _is_color_similar(self, color: Tuple[int, int, int], existing_colors: List[Tuple[int, int, int]]) -> bool:
-        """Check if color is similar to any existing color"""
+        """
+        Check if color is similar to any existing color.
+        
+        Uses color_tolerance to determine similarity: colors within tolerance
+        in all RGB channels are considered the same.
+        """
         for existing in existing_colors:
             if all(abs(c - e) <= self.settings.color_tolerance for c, e in zip(color, existing)):
                 return True
@@ -227,18 +263,18 @@ class PolargraphVectorizer:
         )
         
         for contour in contours:
-            # Filter by area
+            # Filter by area: min_contour_area removes small noise/artifacts
             area = cv2.contourArea(contour)
             if area < self.settings.min_contour_area:
                 continue
             
-            # Simplify contour if enabled
+            # Simplify contour if enabled: reduces points while preserving shape
             if self.settings.enable_contour_simplification:
                 simplified_contour = self._simplify_contour(contour)
             else:
                 simplified_contour = contour
             
-            # Convert to path
+            # Convert to path: min_contour_points ensures valid polygon (minimum 3 for triangle)
             if len(simplified_contour) >= self.settings.min_contour_points:
                 path = self._contour_to_path(simplified_contour, color, area)
                 if path:
@@ -247,10 +283,16 @@ class PolargraphVectorizer:
         return paths
     
     def _simplify_contour(self, contour: np.ndarray) -> np.ndarray:
-        """Simplify contour using Douglas-Peucker algorithm"""
+        """
+        Simplify contour using Douglas-Peucker algorithm.
+        
+        Applies simplification_iterations passes, each using simplification_threshold
+        as the maximum deviation allowed. Stops early if contour becomes too simple.
+        """
         simplified = contour.copy()
         
         for _ in range(self.settings.simplification_iterations):
+            # simplification_threshold: max distance in pixels from original curve
             epsilon = self.settings.simplification_threshold
             simplified = cv2.approxPolyDP(simplified, epsilon, True)
             

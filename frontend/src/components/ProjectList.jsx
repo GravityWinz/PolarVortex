@@ -405,7 +405,11 @@ export default function ProjectList({
                   }}
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (!uploadingProjects.has(project.id)) {
+                    // If project has a thumbnail, navigate to project instead of uploading
+                    if (project.thumbnail_image && !failedThumbnails.has(project.id)) {
+                      handleProjectSelect(project);
+                    } else if (!uploadingProjects.has(project.id)) {
+                      // No thumbnail - trigger upload
                       document
                         .getElementById(`file-input-${project.id}`)
                         .click();
@@ -473,8 +477,13 @@ export default function ProjectList({
                               position: "absolute",
                               top: 0,
                               left: 0,
+                              cursor: "pointer",
                             }}
                             onError={() => handleThumbnailError(project.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleProjectSelect(project);
+                            }}
                           />
                           <Box
                             sx={{
@@ -492,6 +501,12 @@ export default function ProjectList({
                               "&:hover": {
                                 opacity: 1,
                               },
+                            }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              // Overlay click can still trigger upload if desired
+                              // For now, clicking overlay also navigates
+                              handleProjectSelect(project);
                             }}
                           >
                             <CloudUploadIcon

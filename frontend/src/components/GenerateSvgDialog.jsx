@@ -1,4 +1,4 @@
-import { Close as CloseIcon } from "@mui/icons-material";
+import { Close as CloseIcon, Save as SaveIcon } from "@mui/icons-material";
 import {
     Alert,
     Accordion,
@@ -24,29 +24,31 @@ import {
     Select,
     Slider,
     Switch,
+    TextField,
     Tooltip,
     Typography,
 } from "@mui/material";
 import { Help as HelpIcon, ExpandMore as ExpandMoreIcon } from "@mui/icons-material";
 import React, { useEffect, useState } from "react";
 import { 
-    getProjectImageUrl, 
-    getProjectVectorizationSvgUrl, 
-    vectorizeProjectImage,
-    getAvailableVectorizers,
-    getVectorizerInfo
+    generateProjectSvg,
+    getAvailableSvgGenerators,
+    getSvgGeneratorInfo,
+    saveProjectSvg
 } from "../services/apiService";
 
-const VectorizeDialog = ({ open, onClose, project }) => {
-  const [selectedAlgorithm, setSelectedAlgorithm] = useState("polargraph");
+const GenerateSvgDialog = ({ open, onClose, project }) => {
+  const [selectedAlgorithm, setSelectedAlgorithm] = useState("geometric_pattern");
   const [availableAlgorithms, setAvailableAlgorithms] = useState([]);
   const [loadingAlgorithms, setLoadingAlgorithms] = useState(false);
   const [algorithmInfo, setAlgorithmInfo] = useState(null);
-  const [vectorizationSettings, setVectorizationSettings] = useState({});
+  const [generationSettings, setGenerationSettings] = useState({});
 
-  const [isVectorizing, setIsVectorizing] = useState(false);
-  const [vectorizationResult, setVectorizationResult] = useState(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generationResult, setGenerationResult] = useState(null);
   const [error, setError] = useState(null);
+  const [filename, setFilename] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
   // Load available algorithms on mount
   useEffect(() => {
@@ -65,16 +67,26 @@ const VectorizeDialog = ({ open, onClose, project }) => {
   // Reset state when dialog opens/closes
   useEffect(() => {
     if (open) {
-      setVectorizationResult(null);
+      setGenerationResult(null);
       setError(null);
-      setIsVectorizing(false);
+      setIsGenerating(false);
+      setFilename("");
+      setIsSaving(false);
     }
   }, [open]);
+
+  // Set default filename when generation completes
+  useEffect(() => {
+    if (generationResult && !filename) {
+      const defaultName = `${selectedAlgorithm}_${new Date().toISOString().slice(0, 10)}`;
+      setFilename(defaultName);
+    }
+  }, [generationResult, selectedAlgorithm, filename]);
 
   const loadAvailableAlgorithms = async () => {
     setLoadingAlgorithms(true);
     try {
-      const algorithms = await getAvailableVectorizers();
+      const algorithms = await getAvailableSvgGenerators();
       setAvailableAlgorithms(algorithms);
       if (algorithms.length > 0 && !algorithms.find(a => a.id === selectedAlgorithm)) {
         setSelectedAlgorithm(algorithms[0].id);
@@ -88,11 +100,11 @@ const VectorizeDialog = ({ open, onClose, project }) => {
 
   const loadAlgorithmSettings = async () => {
     try {
-      const info = await getVectorizerInfo(selectedAlgorithm);
+      const info = await getSvgGeneratorInfo(selectedAlgorithm);
       if (info) {
         setAlgorithmInfo(info);
         if (info.default_settings) {
-          setVectorizationSettings(info.default_settings);
+          setGenerationSettings(info.default_settings);
         }
       }
     } catch (err) {
@@ -103,44 +115,73 @@ const VectorizeDialog = ({ open, onClose, project }) => {
 
   const handleAlgorithmChange = (event) => {
     setSelectedAlgorithm(event.target.value);
-    setVectorizationResult(null);
+    setGenerationResult(null);
     setError(null);
   };
 
   const handleSettingChange = (setting, value) => {
-    setVectorizationSettings(prev => ({
+    setGenerationSettings(prev => ({
       ...prev,
       [setting]: value
     }));
   };
 
-  const handleVectorize = async () => {
-    if (!project?.source_image) {
-      setError("No source image available for vectorization");
+  const handleGenerate = async () => {
+    setIsGenerating(true);
+    setError(null);
+    setGenerationResult(null);
+
+    try {
+      const result = await generateProjectSvg(
+        project.id, 
+        generationSettings,
+        selectedAlgorithm
+      );
+      setGenerationResult(result);
+    } catch (err) {
+      setError(err.message || "SVG generation failed");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!generationResult?.svg_content) {
+      setError("Please generate an SVG first");
       return;
     }
 
-    setIsVectorizing(true);
+    // Prompt for filename if not provided
+    let saveFilename = filename.trim();
+    if (!saveFilename) {
+      const defaultName = `${selectedAlgorithm}_${new Date().toISOString().slice(0, 10)}`;
+      saveFilename = prompt("Enter filename (without .svg extension):", defaultName);
+      if (!saveFilename || !saveFilename.trim()) {
+        return; // User cancelled
+      }
+      setFilename(saveFilename.trim());
+      saveFilename = saveFilename.trim();
+    }
+
+    setIsSaving(true);
     setError(null);
-    setVectorizationResult(null);
 
     try {
-      const result = await vectorizeProjectImage(
-        project.id, 
-        vectorizationSettings,
-        selectedAlgorithm
-      );
-      setVectorizationResult(result);
+      await saveProjectSvg(project.id, generationResult.svg_content, saveFilename);
+      // Close dialog after successful save
+      handleClose();
     } catch (err) {
-      setError(err.message || "Vectorization failed");
+      setError(err.message || "Failed to save SVG");
     } finally {
-      setIsVectorizing(false);
+      setIsSaving(false);
     }
   };
 
   const handleClose = () => {
-    setVectorizationResult(null);
+    setGenerationResult(null);
     setError(null);
+    setFilename("");
+    setIsSaving(false);
     onClose();
   };
 
@@ -160,10 +201,10 @@ const VectorizeDialog = ({ open, onClose, project }) => {
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <Box>
             <Typography variant="h5" component="div">
-              Vectorize Image: {project.name}
+              Generate SVG: {project.name}
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Convert your image to vector paths for plotting
+              Generate SVG content algorithmically
             </Typography>
           </Box>
           <IconButton
@@ -178,45 +219,72 @@ const VectorizeDialog = ({ open, onClose, project }) => {
 
       <DialogContent>
         <Grid container spacing={3}>
-          {/* Left Column - Image Preview */}
+          {/* Left Column - Preview */}
           <Grid item xs={12} md={6}>
             <Card sx={{ height: '100%' }}>
-              <CardMedia
-                component="img"
-                height="400"
-                image={getProjectImageUrl(project.id, project.source_image)}
-                alt={`${project.name} source image`}
-                sx={{ objectFit: 'contain', backgroundColor: 'grey.100' }}
-              />
+              {generationResult?.preview ? (
+                <CardMedia
+                  component="img"
+                  height="400"
+                  image={generationResult.preview}
+                  alt="Generated SVG preview"
+                  sx={{ objectFit: 'contain', backgroundColor: 'grey.100' }}
+                />
+              ) : (
+                <Box
+                  sx={{
+                    height: 400,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: 'grey.100',
+                    color: 'text.secondary'
+                  }}
+                >
+                  <Typography variant="body1">
+                    Preview will appear here after generation
+                  </Typography>
+                </Box>
+              )}
               <Box sx={{ p: 2 }}>
                 <Typography variant="h6" gutterBottom>
-                  Source Image
+                  {generationResult ? "Generated SVG Preview" : "Preview"}
                 </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {project.source_image}
-                </Typography>
+                {generationResult && (
+                  <Box>
+                    <Typography variant="body2" color="text.secondary">
+                      Size: {generationResult.width} × {generationResult.height}px
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Processing time: {generationResult.processing_time?.toFixed(2)}s
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 1, fontStyle: 'italic' }}>
+                      Click "Save SVG" to save to project
+                    </Typography>
+                  </Box>
+                )}
               </Box>
             </Card>
           </Grid>
 
-          {/* Right Column - Vectorization Controls */}
+          {/* Right Column - Generation Controls */}
           <Grid item xs={12} md={6}>
             <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
               <Typography variant="h6" gutterBottom>
-                Vectorization Settings
+                Generation Settings
               </Typography>
 
               {/* Algorithm Selector */}
               <Box sx={{ mb: 3 }}>
                 <FormControl fullWidth>
-                  <InputLabel id="algorithm-select-label">Vectorization Algorithm</InputLabel>
+                  <InputLabel id="algorithm-select-label">SVG Generator</InputLabel>
                   <Select
                     labelId="algorithm-select-label"
                     id="algorithm-select"
                     value={selectedAlgorithm}
-                    label="Vectorization Algorithm"
+                    label="SVG Generator"
                     onChange={handleAlgorithmChange}
-                    disabled={loadingAlgorithms || isVectorizing}
+                    disabled={loadingAlgorithms || isGenerating}
                   >
                     {availableAlgorithms.map((alg) => (
                       <MenuItem key={alg.id} value={alg.id}>
@@ -230,7 +298,7 @@ const VectorizeDialog = ({ open, onClose, project }) => {
                     ))}
                   </Select>
                   {loadingAlgorithms && (
-                    <FormHelperText>Loading algorithms...</FormHelperText>
+                    <FormHelperText>Loading generators...</FormHelperText>
                   )}
                 </FormControl>
               </Box>
@@ -279,15 +347,16 @@ const VectorizeDialog = ({ open, onClose, project }) => {
 
               {/* Dynamic Algorithm-Specific Settings */}
               {algorithmInfo && algorithmInfo.default_settings ? (
-                <Box>
+                <Box sx={{ flexGrow: 1, overflowY: 'auto' }}>
                   {Object.entries(algorithmInfo.default_settings).map(([key, defaultValue]) => {
-                    const currentValue = vectorizationSettings[key] !== undefined 
-                      ? vectorizationSettings[key] 
+                    const currentValue = generationSettings[key] !== undefined 
+                      ? generationSettings[key] 
                       : defaultValue;
                     const settingType = typeof defaultValue;
                     const isBoolean = settingType === 'boolean';
                     const isNumber = settingType === 'number';
                     const isInteger = isNumber && Number.isInteger(defaultValue);
+                    const isString = settingType === 'string';
                     
                     // Format setting name for display (convert snake_case to Title Case)
                     const displayName = key
@@ -297,9 +366,6 @@ const VectorizeDialog = ({ open, onClose, project }) => {
                     
                     // Get parameter documentation if available
                     const paramDoc = algorithmInfo.parameter_documentation?.[key];
-                    const tooltipTitle = paramDoc 
-                      ? `${paramDoc.description}\n\nPurpose: ${paramDoc.purpose}\nRange: ${paramDoc.range}`
-                      : displayName;
                     
                     if (isBoolean) {
                       return (
@@ -310,7 +376,7 @@ const VectorizeDialog = ({ open, onClose, project }) => {
                                 <Switch
                                   checked={currentValue}
                                   onChange={(e) => handleSettingChange(key, e.target.checked)}
-                                  disabled={isVectorizing}
+                                  disabled={isGenerating}
                                 />
                               }
                               label={displayName}
@@ -324,9 +390,6 @@ const VectorizeDialog = ({ open, onClose, project }) => {
                                     </Typography>
                                     <Typography variant="caption" display="block">
                                       {paramDoc.purpose}
-                                    </Typography>
-                                    <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
-                                      Range: {paramDoc.range} | Default: {paramDoc.default}
                                     </Typography>
                                   </Box>
                                 }
@@ -342,44 +405,25 @@ const VectorizeDialog = ({ open, onClose, project }) => {
                         </Box>
                       );
                     } else if (isNumber) {
-                      // Determine reasonable min/max/step based on value
+                      // Determine reasonable min/max/step based on value and key name
                       let min = 0;
                       let max = 100;
                       let step = isInteger ? 1 : 0.1;
                       
                       // Smart defaults based on common setting patterns
-                      if (key.includes('ratio') || key.includes('threshold') || key.includes('thresh')) {
-                        min = 0;
-                        max = isInteger ? 100 : 1.0;
-                        step = isInteger ? 1 : 0.01;
-                      } else if (key.includes('size') || key.includes('length') || key.includes('area')) {
-                        min = 0;
-                        max = isInteger ? 200 : 20.0;
-                        step = isInteger ? 1 : 0.5;
-                      } else if (key.includes('angle') || key.includes('deg')) {
-                        min = 0;
-                        max = 180;
-                        step = 1;
-                      } else if (key.includes('kernel')) {
-                        min = 0;
-                        max = 50;
-                        step = 1;
-                      } else if (key.includes('level') || key.includes('count')) {
+                      if (key.includes('width') || key.includes('height')) {
+                        min = 100;
+                        max = 5000;
+                        step = 10;
+                      } else if (key.includes('complexity')) {
                         min = 1;
-                        max = 50;
-                        step = 1;
-                      } else if (key.includes('radius') || key.includes('blur')) {
-                        min = 0;
                         max = 10;
-                        step = isInteger ? 1 : 0.1;
-                      } else if (key.includes('tolerance') || key.includes('tolerance')) {
-                        min = 0;
-                        max = 100;
                         step = 1;
-                      }
-                      
-                      // Adjust max if default value suggests a different range
-                      if (defaultValue > max * 0.8) {
+                      } else if (key.includes('stroke_width')) {
+                        min = 0.1;
+                        max = 10;
+                        step = 0.1;
+                      } else if (defaultValue > max * 0.8) {
                         max = Math.ceil(defaultValue * 1.5);
                       }
                       
@@ -402,9 +446,6 @@ const VectorizeDialog = ({ open, onClose, project }) => {
                                     <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
                                       Range: {paramDoc.range} | Default: {paramDoc.default}
                                     </Typography>
-                                    <Typography variant="caption" display="block" sx={{ mt: 1, fontStyle: 'italic' }}>
-                                      {paramDoc.effects}
-                                    </Typography>
                                   </Box>
                                 }
                                 arrow
@@ -423,181 +464,99 @@ const VectorizeDialog = ({ open, onClose, project }) => {
                             max={max}
                             step={step}
                             valueLabelDisplay="auto"
-                            disabled={isVectorizing}
+                            disabled={isGenerating}
                           />
                         </Box>
                       );
-                    } else {
-                      // String or other types - show as text field
-                      return (
-                        <Box key={key} sx={{ mb: 2 }}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                            <Typography gutterBottom sx={{ mb: 0 }}>{displayName}</Typography>
-                            {paramDoc && (
-                              <Tooltip 
-                                title={
-                                  <Box>
-                                    <Typography variant="caption" display="block" sx={{ fontWeight: 'bold', mb: 0.5 }}>
-                                      {paramDoc.description}
-                                    </Typography>
-                                    <Typography variant="caption" display="block">
-                                      {paramDoc.purpose}
-                                    </Typography>
-                                  </Box>
-                                }
-                                arrow
-                                placement="right"
+                    } else if (isString) {
+                      // String input - check if it's a select (like pattern_type)
+                      const paramDoc = algorithmInfo.parameter_documentation?.[key];
+                      const rangeStr = paramDoc?.range || "";
+                      const isSelect = rangeStr.includes(',') || rangeStr.includes(' or ');
+                      
+                      if (isSelect) {
+                        // Extract options from range string
+                        const options = rangeStr.split(',').map(s => s.trim()).filter(s => s);
+                        return (
+                          <Box key={key} sx={{ mb: 2 }}>
+                            <FormControl fullWidth>
+                              <InputLabel>{displayName}</InputLabel>
+                              <Select
+                                value={currentValue}
+                                label={displayName}
+                                onChange={(e) => handleSettingChange(key, e.target.value)}
+                                disabled={isGenerating}
                               >
-                                <IconButton size="small" sx={{ p: 0.5 }}>
-                                  <HelpIcon fontSize="small" color="action" />
-                                </IconButton>
-                              </Tooltip>
-                            )}
+                                {options.map(opt => (
+                                  <MenuItem key={opt} value={opt}>{opt}</MenuItem>
+                                ))}
+                              </Select>
+                            </FormControl>
                           </Box>
-                          <input
-                            type="text"
-                            value={currentValue}
-                            onChange={(e) => handleSettingChange(key, e.target.value)}
-                            disabled={isVectorizing}
-                            style={{
-                              width: '100%',
-                              padding: '8px',
-                              border: '1px solid #ccc',
-                              borderRadius: '4px'
-                            }}
-                          />
-                        </Box>
-                      );
+                        );
+                      } else {
+                        // Regular text field
+                        return (
+                          <Box key={key} sx={{ mb: 2 }}>
+                            <TextField
+                              fullWidth
+                              label={displayName}
+                              value={currentValue}
+                              onChange={(e) => handleSettingChange(key, e.target.value)}
+                              disabled={isGenerating}
+                              helperText={paramDoc?.description}
+                            />
+                          </Box>
+                        );
+                      }
+                    } else {
+                      return null;
                     }
                   })}
                 </Box>
               ) : (
                 <Typography variant="body2" color="text.secondary">
-                  Loading settings...
+                  No settings available for this generator
                 </Typography>
+              )}
+
+              {error && (
+                <Alert severity="error" sx={{ mt: 2 }}>
+                  {error}
+                </Alert>
               )}
             </Box>
           </Grid>
         </Grid>
-
-        {/* Error Display */}
-        {error && (
-          <Alert severity="error" sx={{ mt: 2 }}>
-            {error}
-          </Alert>
-        )}
-
-        {/* Vectorization Result */}
-        {vectorizationResult && (
-          <Box sx={{ mt: 3 }}>
-            <Alert severity="success" sx={{ mb: 2 }}>
-              Vectorization completed successfully!
-            </Alert>
-            
-            <Grid container spacing={3}>
-              <Grid item xs={12} sm={6}>
-                <Typography variant="subtitle2" gutterBottom>Results:</Typography>
-                <Typography variant="body2">
-                  • Algorithm: {vectorizationResult.algorithm || selectedAlgorithm}
-                </Typography>
-                <Typography variant="body2">
-                  • Total Paths: {vectorizationResult.vectorization_result.total_paths}
-                </Typography>
-                <Typography variant="body2">
-                  • Colors Detected: {vectorizationResult.vectorization_result.colors_detected}
-                </Typography>
-                <Typography variant="body2">
-                  • Processing Time: {vectorizationResult.vectorization_result.processing_time.toFixed(2)}s
-                </Typography>
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <Typography variant="subtitle2" gutterBottom>Files Created:</Typography>
-                <Typography variant="body2">
-                  • SVG: {vectorizationResult.svg_path ? 'Created' : 'Not created'}
-                </Typography>
-                <Typography variant="body2">
-                  • Plotting Commands: {vectorizationResult.plotting_commands?.length || 0} commands
-                </Typography>
-              </Grid>
-            </Grid>
-
-            {/* SVG Result Display */}
-            {vectorizationResult.svg_path && (
-              <Box sx={{ mt: 3 }}>
-                <Typography variant="subtitle2" gutterBottom>
-                  Generated SVG:
-                </Typography>
-                <Card sx={{ p: 2, backgroundColor: 'grey.50' }}>
-                  <Box sx={{ 
-                    maxHeight: '400px', 
-                    overflow: 'auto',
-                    border: '1px solid #ccc',
-                    borderRadius: '4px',
-                    backgroundColor: 'white'
-                  }}>
-                    <iframe
-                      src={getProjectVectorizationSvgUrl(project.id)}
-                      style={{
-                        width: '100%',
-                        height: '400px',
-                        border: 'none'
-                      }}
-                      title="Generated SVG"
-                    />
-                  </Box>
-                </Card>
-              </Box>
-            )}
-
-            {/* Preview Image */}
-            {vectorizationResult.preview && (
-              <Box sx={{ mt: 3 }}>
-                <Typography variant="subtitle2" gutterBottom>
-                  Vectorization Preview:
-                </Typography>
-                <img
-                  src={vectorizationResult.preview}
-                  alt="Vectorization preview"
-                  style={{
-                    maxWidth: '100%',
-                    height: 'auto',
-                    border: '1px solid #ccc',
-                    borderRadius: '4px'
-                  }}
-                />
-              </Box>
-            )}
-          </Box>
-        )}
       </DialogContent>
 
-      <DialogActions sx={{ p: 3 }}>
-        <Button onClick={handleClose} disabled={isVectorizing}>
-          Close
-        </Button>
-        {vectorizationResult && (
-          <Button
-            onClick={() => {
-              setVectorizationResult(null);
-              setError(null);
-            }}
-            variant="outlined"
-            disabled={isVectorizing}
-          >
-            Vectorize Again
-          </Button>
-        )}
-        <Button
-          onClick={handleVectorize}
-          variant="contained"
-          disabled={isVectorizing || !project.source_image || loadingAlgorithms}
-          startIcon={isVectorizing ? <CircularProgress size={20} /> : null}
+      <DialogActions>
+        <Button 
+          onClick={handleClose} 
+          disabled={isGenerating || isSaving}
         >
-          {isVectorizing ? 'Vectorizing...' : 'Apply Vectorization'}
+          Cancel
+        </Button>
+        <Button
+          onClick={handleSave}
+          variant="contained"
+          color="primary"
+          disabled={!generationResult || isSaving}
+          startIcon={isSaving ? <CircularProgress size={20} /> : <SaveIcon />}
+        >
+          {isSaving ? "Saving..." : "Save"}
+        </Button>
+        <Button
+          onClick={handleGenerate}
+          variant="contained"
+          disabled={isGenerating || !selectedAlgorithm}
+          startIcon={isGenerating ? <CircularProgress size={20} /> : null}
+        >
+          {isGenerating ? "Generating..." : "Generate"}
         </Button>
       </DialogActions>
     </Dialog>
   );
 };
 
-export default VectorizeDialog;
+export default GenerateSvgDialog;

@@ -249,6 +249,27 @@ export async function runProjectGcode(projectId, filename) {
   }
 }
 
+export async function getJobProgress(jobId) {
+  try {
+    const response = await fetch(`${BASE_URL}/plotter/jobs/${jobId}/progress`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    const data = await response.json();
+    if (!response.ok || data.success === false) {
+      throw new Error(data.detail || data.error || "Failed to get job progress");
+    }
+
+    return data;
+  } catch (err) {
+    console.error("Error getting job progress:", err);
+    throw err;
+  }
+}
+
 export async function togglePausePlotter() {
   try {
     const response = await fetch(`${BASE_URL}/plotter/pause`, {
@@ -275,23 +296,53 @@ export function getProjectImageUrl(projectId, filename) {
 }
 
 // Vectorization API
-export async function vectorizeProjectImage(projectId, vectorizationSettings) {
+export async function getAvailableVectorizers() {
   try {
+    const response = await fetch(`${BASE_URL}/vectorizers`);
+    if (!response.ok) {
+      throw new Error(`Failed to get vectorizers: ${response.statusText}`);
+    }
+    const data = await response.json();
+    return data.vectorizers || [];
+  } catch (err) {
+    console.error("Error getting vectorizers:", err);
+    throw err;
+  }
+}
+
+export async function getVectorizerInfo(algorithmId) {
+  try {
+    const response = await fetch(`${BASE_URL}/vectorizers/${algorithmId}`);
+    if (!response.ok) {
+      throw new Error(`Failed to get vectorizer info: ${response.statusText}`);
+    }
+    return await response.json();
+  } catch (err) {
+    console.error("Error getting vectorizer info:", err);
+    throw err;
+  }
+}
+
+export async function vectorizeProjectImage(projectId, vectorizationSettings, algorithm = "polargraph") {
+  try {
+    // Use query params for algorithm (for URL visibility) and JSON body for settings
+    // This allows any algorithm-specific settings (like "booger") to be passed
     const params = new URLSearchParams();
-    
-    // Add all vectorization parameters
-    Object.entries(vectorizationSettings).forEach(([key, value]) => {
-      if (value !== undefined && value !== null) {
-        params.append(key, value.toString());
-      }
-    });
+    params.append("algorithm", algorithm);
     
     const response = await fetch(`${BASE_URL}/projects/${projectId}/vectorize?${params}`, {
       method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        settings: vectorizationSettings
+      }),
     });
     
     if (!response.ok) {
-      throw new Error(`Vectorization failed: ${response.statusText}`);
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || `Vectorization failed: ${response.statusText}`);
     }
     
     return await response.json();
@@ -321,6 +372,86 @@ export async function getProjectVectorizationCommands(projectId, machineSettings
     return await response.json();
   } catch (err) {
     console.error("Error getting vectorization commands:", err);
+    throw err;
+  }
+}
+
+// SVG Generation API
+export async function getAvailableSvgGenerators() {
+  try {
+    const response = await fetch(`${BASE_URL}/svg-generators`);
+    if (!response.ok) {
+      throw new Error(`Failed to get SVG generators: ${response.statusText}`);
+    }
+    const data = await response.json();
+    return data.generators || [];
+  } catch (err) {
+    console.error("Error getting SVG generators:", err);
+    throw err;
+  }
+}
+
+export async function getSvgGeneratorInfo(generatorId) {
+  try {
+    const response = await fetch(`${BASE_URL}/svg-generators/${generatorId}`);
+    if (!response.ok) {
+      throw new Error(`Failed to get SVG generator info: ${response.statusText}`);
+    }
+    return await response.json();
+  } catch (err) {
+    console.error("Error getting SVG generator info:", err);
+    throw err;
+  }
+}
+
+export async function generateProjectSvg(projectId, settings, algorithm = "geometric_pattern") {
+  try {
+    const params = new URLSearchParams();
+    params.append("algorithm", algorithm);
+    
+    const response = await fetch(`${BASE_URL}/projects/${projectId}/generate-svg?${params}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        settings: settings
+      }),
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || `SVG generation failed: ${response.statusText}`);
+    }
+    
+    return await response.json();
+  } catch (err) {
+    console.error("Error generating SVG:", err);
+    throw err;
+  }
+}
+
+export async function saveProjectSvg(projectId, svgContent, filename) {
+  try {
+    const response = await fetch(`${BASE_URL}/projects/${projectId}/save-svg`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        svg_content: svgContent,
+        filename: filename
+      }),
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || `Failed to save SVG: ${response.statusText}`);
+    }
+    
+    return await response.json();
+  } catch (err) {
+    console.error("Error saving SVG:", err);
     throw err;
   }
 }

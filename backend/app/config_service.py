@@ -111,7 +111,7 @@ class ConfigurationService:
                 ]
             },
             "arduino": {
-                "baudrate": 9600,
+                "baudrate": 115200,
                 "timeout": 1,
                 "ports": [
                     '/dev/ttyUSB0',

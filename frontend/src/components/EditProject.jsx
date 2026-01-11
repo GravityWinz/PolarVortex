@@ -13,6 +13,7 @@ import {
   RestartAlt as ResetZoomIcon,
   Article as SvgIcon,
   AutoGraph as VectorizeIcon,
+  Create as GenerateSvgIcon,
   ZoomIn as ZoomInIcon,
   ZoomOut as ZoomOutIcon,
 } from "@mui/icons-material";
@@ -60,6 +61,7 @@ import {
   uploadImageToProject,
 } from "../services/apiService";
 import VectorizeDialog from "./VectorizeDialog";
+import GenerateSvgDialog from "./GenerateSvgDialog";
 
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "bmp", "webp"];
 const SVG_EXTENSIONS = ["svg"];
@@ -102,6 +104,11 @@ function groupAssets(imageEntries = [], gcodeEntries = []) {
   const svgs = [];
 
   imageEntries.forEach((entry) => {
+    // Skip thumbnail files - they shouldn't appear in the asset viewer
+    if (entry.is_thumbnail) {
+      return;
+    }
+    
     const normalized = normalizeAsset(entry.filename, {
       is_thumbnail: entry.is_thumbnail,
       is_processed: entry.is_processed,
@@ -210,6 +217,7 @@ export default function EditProject({ currentProject }) {
   const [paperLoadError, setPaperLoadError] = useState("");
   const [vectorizeDialogOpen, setVectorizeDialogOpen] = useState(false);
   const [vectorizeProject, setVectorizeProject] = useState(null);
+  const [generateSvgDialogOpen, setGenerateSvgDialogOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);
   const [gcodeZoom, setGcodeZoom] = useState(1);
@@ -505,6 +513,23 @@ export default function EditProject({ currentProject }) {
   const handleCloseVectorizeDialog = () => {
     setVectorizeDialogOpen(false);
     setVectorizeProject(null);
+    // Refresh assets after vectorization
+    if (currentProject) {
+      loadProjectAssets();
+    }
+  };
+
+  const openGenerateSvgDialog = () => {
+    if (!currentProject) return;
+    setGenerateSvgDialogOpen(true);
+  };
+
+  const handleCloseGenerateSvgDialog = () => {
+    setGenerateSvgDialogOpen(false);
+    // Refresh assets after generation
+    if (currentProject) {
+      loadProjectAssets();
+    }
   };
 
   const renderGcodePlot = () => {
@@ -1228,6 +1253,14 @@ export default function EditProject({ currentProject }) {
           >
             Refresh
           </Button>
+          <Button
+            variant="outlined"
+            startIcon={<GenerateSvgIcon />}
+            onClick={openGenerateSvgDialog}
+            disabled={!currentProject}
+          >
+            Generate SVG
+          </Button>
         </Stack>
       </Stack>
 
@@ -1244,8 +1277,7 @@ export default function EditProject({ currentProject }) {
               <Typography variant="h6">Asset Viewer</Typography>
             </Stack>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-              Select a file to preview. Includes images, thumbnails, SVGs, and
-              G-code.
+              Select a file to preview. Includes images, SVGs, and G-code.
             </Typography>
             <Divider sx={{ mb: 1 }} />
 
@@ -1386,6 +1418,12 @@ export default function EditProject({ currentProject }) {
         open={vectorizeDialogOpen}
         onClose={handleCloseVectorizeDialog}
         project={vectorizeProject}
+      />
+
+      <GenerateSvgDialog
+        open={generateSvgDialogOpen}
+        onClose={handleCloseGenerateSvgDialog}
+        project={currentProject}
       />
     </Box>
   );

@@ -267,55 +267,54 @@ class ImageHelper:
             logger.error(f"Upload processing error: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
-    def vectorize_image(self, image_data: bytes, vectorization_settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Vectorize an image using the polargraph vectorizer"""
+    def vectorize_image(
+        self, 
+        image_data: bytes, 
+        vectorization_settings: Optional[Dict[str, Any]] = None,
+        algorithm: str = "polargraph"
+    ) -> Dict[str, Any]:
+        """Vectorize an image using the specified algorithm"""
         try:
-            from .vectorizer import PolargraphVectorizer, VectorizationSettings
-            vectorizer = PolargraphVectorizer()
+            from .vectorizers import get_vectorizer
             
-            if vectorization_settings:
-                settings = VectorizationSettings(
-                    blur_radius=vectorization_settings.get("blur_radius", 1),
-                    posterize_levels=vectorization_settings.get("posterize_levels", 5),
-                    simplification_threshold=vectorization_settings.get("simplification_threshold", 2.0),
-                    simplification_iterations=vectorization_settings.get("simplification_iterations", 3),
-                    min_contour_points=vectorization_settings.get("min_contour_points", 3),
-                    min_contour_area=vectorization_settings.get("min_contour_area", 10),
-                    color_tolerance=vectorization_settings.get("color_tolerance", 10),
-                    enable_color_separation=vectorization_settings.get("enable_color_separation", True),
-                    enable_contour_simplification=vectorization_settings.get("enable_contour_simplification", True),
-                    enable_noise_reduction=vectorization_settings.get("enable_noise_reduction", True)
-                )
+            vectorizer = get_vectorizer(algorithm)
+            if not vectorizer:
+                raise ValueError(f"Unknown algorithm: {algorithm}")
+            
+            # Use default settings if none provided
+            if not vectorization_settings:
+                vectorization_settings = vectorizer.get_default_settings()
             else:
-                settings = VectorizationSettings()
+                # Merge with defaults
+                defaults = vectorizer.get_default_settings()
+                defaults.update(vectorization_settings)
+                vectorization_settings = defaults
             
-            result = vectorizer.vectorize_image(image_data, settings)
-            preview = vectorizer.get_vectorization_preview(result)
+            # Validate settings
+            vectorization_settings = vectorizer.validate_settings(vectorization_settings)
+            
+            result = vectorizer.vectorize_image(image_data, vectorization_settings)
+            
+            # Get preview if supported
+            preview = ""
+            try:
+                preview = vectorizer.get_vectorization_preview(result)
+            except NotImplementedError:
+                pass
             
             return {
                 "success": True,
+                "algorithm": algorithm,
                 "vectorization_result": {
                     "total_paths": result.total_paths,
                     "colors_detected": result.colors_detected,
                     "original_size": result.original_size,
                     "processed_size": result.processed_size,
-                    "processing_time": result.processing_time,
-                    "preview": preview
+                    "processing_time": result.processing_time
                 },
-                "settings_used": {
-                    "blur_radius": settings.blur_radius,
-                    "posterize_levels": settings.posterize_levels,
-                    "simplification_threshold": settings.simplification_threshold,
-                    "simplification_iterations": settings.simplification_iterations,
-                    "min_contour_points": settings.min_contour_points,
-                    "min_contour_area": settings.min_contour_area,
-                    "color_tolerance": settings.color_tolerance,
-                    "enable_color_separation": settings.enable_color_separation,
-                    "enable_contour_simplification": settings.enable_contour_simplification,
-                    "enable_noise_reduction": settings.enable_noise_reduction
-                }
+                "preview": preview,
+                "settings_used": vectorization_settings
             }
-            
         except Exception as e:
             logger.error(f"Vectorization error: {e}")
             return {"success": False, "error": str(e)}
