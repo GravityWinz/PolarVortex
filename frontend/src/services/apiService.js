@@ -376,6 +376,86 @@ export async function getProjectVectorizationCommands(projectId, machineSettings
   }
 }
 
+// SVG Generation API
+export async function getAvailableSvgGenerators() {
+  try {
+    const response = await fetch(`${BASE_URL}/svg-generators`);
+    if (!response.ok) {
+      throw new Error(`Failed to get SVG generators: ${response.statusText}`);
+    }
+    const data = await response.json();
+    return data.generators || [];
+  } catch (err) {
+    console.error("Error getting SVG generators:", err);
+    throw err;
+  }
+}
+
+export async function getSvgGeneratorInfo(generatorId) {
+  try {
+    const response = await fetch(`${BASE_URL}/svg-generators/${generatorId}`);
+    if (!response.ok) {
+      throw new Error(`Failed to get SVG generator info: ${response.statusText}`);
+    }
+    return await response.json();
+  } catch (err) {
+    console.error("Error getting SVG generator info:", err);
+    throw err;
+  }
+}
+
+export async function generateProjectSvg(projectId, settings, algorithm = "geometric_pattern") {
+  try {
+    const params = new URLSearchParams();
+    params.append("algorithm", algorithm);
+    
+    const response = await fetch(`${BASE_URL}/projects/${projectId}/generate-svg?${params}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        settings: settings
+      }),
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || `SVG generation failed: ${response.statusText}`);
+    }
+    
+    return await response.json();
+  } catch (err) {
+    console.error("Error generating SVG:", err);
+    throw err;
+  }
+}
+
+export async function saveProjectSvg(projectId, svgContent, filename) {
+  try {
+    const response = await fetch(`${BASE_URL}/projects/${projectId}/save-svg`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        svg_content: svgContent,
+        filename: filename
+      }),
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || `Failed to save SVG: ${response.statusText}`);
+    }
+    
+    return await response.json();
+  } catch (err) {
+    console.error("Error saving SVG:", err);
+    throw err;
+  }
+}
+
 export function getProjectVectorizationSvgUrl(projectId) {
   return `${BASE_URL}/projects/${projectId}/vectorize/export-svg`;
 }

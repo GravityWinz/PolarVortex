@@ -67,6 +67,7 @@ class PlotterCore:
         self.priqueue = Queue(0)  # Priority queue for immediate commands
         self.mainqueue: Optional[List[str]] = None  # Main queue for print jobs
         self.queueindex = 0
+        self._queue_lock = threading.Lock()  # Lock for thread-safe queue access
         
         # Command numbering and resend
         self.lineno = 0
@@ -326,6 +327,9 @@ class PlotterCore:
             
             self._send(command, wait_for_ok=True)
             
+            # Mark task as done after processing
+            self.priqueue.task_done()
+            
             # Wait for clear after sending
             while self.device and self.printing and not self.clear:
                 time.sleep(0.001)
@@ -420,8 +424,9 @@ class PlotterCore:
         if self.printing or not self.online or not self.device:
             return False
         
-        self.queueindex = startindex
-        self.mainqueue = commands.copy() if commands else []
+        with self._queue_lock:
+            self.queueindex = startindex
+            self.mainqueue = commands.copy() if commands else []
         self.printing = True
         self.lineno = 0
         self.resendfrom = -1
@@ -556,5 +561,7 @@ class PlotterCore:
         """Cancel the current print."""
         self.pause()
         self.paused = False
-        self.mainqueue = None
+        with self._queue_lock:
+            self.mainqueue = None
+            self.queueindex = 0
         self.clear = True

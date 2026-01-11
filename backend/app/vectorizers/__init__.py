@@ -163,6 +163,12 @@ def _register_builtin_vectorizers():
     except Exception as e:
         logger.error(f"Failed to register img2plot vectorizer: {e}")
     
+    try:
+        from .stippling import StipplingVectorizer
+        register_vectorizer(StipplingVectorizer)
+    except Exception as e:
+        logger.error(f"Failed to register stippling vectorizer: {e}")
+    
     # Uncomment to enable the example booger vectorizer (for testing custom settings)
     # try:
     #     from .example_booger import ExampleBoogerVectorizer
