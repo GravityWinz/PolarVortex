@@ -17,7 +17,6 @@ import {
   DialogTitle,
   Grid,
   IconButton,
-  LinearProgress,
   Paper,
   TextField,
   Typography,
@@ -115,6 +114,10 @@ export default function ProjectList({
     if (onNavigate) {
       onNavigate("edit");
     }
+  };
+
+  const formatDate = (dateString) => {
+    return new Date(dateString).toLocaleDateString();
   };
 
   if (loading) {
@@ -236,14 +239,13 @@ export default function ProjectList({
                   }}
                   onClick={(e) => {
                     e.stopPropagation();
-                    // If project has a thumbnail, navigate to project instead of uploading
-                    if (project.thumbnail_image && !failedThumbnails.has(project.id)) {
+                    // If project has a thumbnail, navigate to project
+                    if (project.thumbnail_image) {
                       handleProjectSelect(project);
                     }
                   }}
                 >
-                  {project.thumbnail_image &&
-                  !failedThumbnails.has(project.id) ? (
+                  {project.thumbnail_image ? (
                     // Show actual thumbnail if it exists and hasn't failed
                     <img
                       src={getProjectThumbnailUrl(project.id)}
@@ -345,11 +347,7 @@ export default function ProjectList({
                     }}
                   >
                     <Button
-                      variant={
-                        currentProject?.id === project.id
-                          ? "contained"
-                          : "outlined"
-                      }
+                      variant="outlined"
                       size="small"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -357,9 +355,7 @@ export default function ProjectList({
                       }}
                       sx={{ textTransform: "none" }}
                     >
-                      {currentProject?.id === project.id
-                        ? "Current"
-                        : "Set Current"}
+                      Edit Project
                     </Button>
 
                     <IconButton
