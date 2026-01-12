@@ -130,7 +130,27 @@ You'll need an API key from either OpenAI or Anthropic (or both):
    - In the Actions tab, you should see "AI Issue Handler" in the workflow list
    - If not, make sure `.github/workflows/ai-issue-handler.yml` is committed and pushed
 
-### Step 5: Create the `ai-assigned` Label (Recommended - Easiest Method)
+### Step 5: Enable Workflow Permissions (Required!)
+
+**This is critical** - Without this, the workflow cannot create pull requests:
+
+1. **Go to Repository Settings**:
+   - Click **Settings** tab in your repository
+   - In the left sidebar, click **Actions** → **General**
+
+2. **Enable Workflow Permissions**:
+   - Scroll down to the **Workflow permissions** section
+   - Select **Read and write permissions** (not "Read repository contents and packages permissions")
+   - **IMPORTANT**: Check the box **Allow GitHub Actions to create and approve pull requests**
+   - Click **Save** at the bottom of the page
+
+3. **Verify**:
+   - You should see a green checkmark or confirmation that settings were saved
+   - The workflow will now be able to create pull requests automatically
+
+**Why this is needed**: GitHub Actions needs explicit permission to create pull requests for security reasons. This setting allows the workflow to create PRs on your behalf.
+
+### Step 6: Create the `ai-assigned` Label (Recommended - Easiest Method)
 
 This is the easiest way to trigger the workflow without needing a bot:
 
@@ -354,17 +374,34 @@ Add a new vectorization algorithm for edge detection.
 - Previous changes will be preserved
 - If you want a fresh start, delete the old branch first
 
-### PR not created
+### PR not created / "GitHub Actions is not permitted to create pull requests"
 
-**Problem**: Workflow completes but no Pull Request appears.
+**Problem**: Workflow completes but no Pull Request appears, or you see an error about permissions.
 
 **Solutions**:
-1. **Check workflow permissions**: Go to **Settings** → **Actions** → **General** → **Workflow permissions**
-   - Make sure "Read and write permissions" is selected
-   - Check "Allow GitHub Actions to create and approve pull requests"
+1. **Enable Workflow Permissions** (Most Common Fix):
+   - Go to **Settings** → **Actions** → **General**
+   - Scroll to **Workflow permissions** section
+   - Select **Read and write permissions** (not just "Read repository contents")
+   - **CRITICAL**: Check the box **Allow GitHub Actions to create and approve pull requests**
+   - Click **Save**
+   - Re-run the workflow
+
 2. **Check workflow logs**: Look for errors in the "Create Pull Request" step
+   - If you see a 403 error, it's definitely a permissions issue
+   - The workflow will add a comment to the issue with instructions if this happens
+
 3. **Verify branch was pushed**: Check that the branch exists in your repository
+   - Go to your repository → **Code** → **Branches**
+   - Look for branches starting with `ai/issue-`
+
 4. **Check if PR already exists**: The workflow won't create a duplicate PR
+   - Check the **Pull requests** tab to see if a PR was already created
+
+5. **Manual PR creation** (if permissions can't be enabled):
+   - If you can't enable the permission (e.g., organization policy), you can manually create a PR
+   - The workflow will still create the branch and make changes
+   - Just create a PR from the `ai/issue-{number}-{title}` branch to your default branch
 
 ### "Permission denied" errors
 
