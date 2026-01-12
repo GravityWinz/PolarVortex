@@ -2,7 +2,7 @@ name: AI Issue Handler
 
 on:
   issues:
-    types: [assigned]
+    types: [assigned, labeled]
   workflow_dispatch:
     inputs:
       issue_number:
@@ -51,7 +51,27 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            // Get issue number from different event types
+            // For both 'assigned' and 'labeled' events, issue number is in payload.issue.number
             const issueNumber = context.payload.issue?.number || '${{ github.event.inputs.issue_number }}';
+            
+            // For labeled events, check if the ai-assigned label was added
+            const isLabeledEvent = context.payload.action === 'labeled';
+            const addedLabel = isLabeledEvent ? context.payload.label?.name : null;
+            
+            // If this is a labeled event but not the ai-assigned label, skip early
+            if (isLabeledEvent && addedLabel !== 'ai-assigned') {
+              console.log(`Label event for '${addedLabel}', not 'ai-assigned'. Skipping.`);
+              core.setOutput('is_ai_assigned', 'false');
+              core.setOutput('issue_number', issueNumber);
+              core.setOutput('issue_title', '');
+              core.setOutput('issue_body', '');
+              core.setOutput('assignee', '');
+              core.setOutput('labels', '[]');
+              return;
+            }
+            
+            // Get full issue details
             const issue = await github.rest.issues.get({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -63,7 +83,7 @@ jobs:
             const issueBody = issue.data.body || '';
             const labels = issue.data.labels.map(l => l.name);
 
-            // Check if assigned to AI bot (configure this username)
+            // Check if assigned to AI bot (configure this username) or has ai-assigned label
             const aiBotUsername = process.env.AI_BOT_USERNAME || 'github-actions[bot]';
             const isAssignedToAI = assignee === aiBotUsername || 
                                    assignee === process.env.AI_BOT_USERNAME ||
@@ -75,6 +95,8 @@ jobs:
             core.setOutput('assignee', assignee || '');
             core.setOutput('is_ai_assigned', isAssignedToAI);
             core.setOutput('labels', JSON.stringify(labels));
+
+            console.log(`Issue #${issueNumber}: isAssignedToAI=${isAssignedToAI}, labels=${labels.join(', ')}, assignee=${assignee || 'none'}`);
 
             return { isAssignedToAI, issueNumber, issueTitle };
 
