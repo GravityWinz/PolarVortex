@@ -155,11 +155,12 @@ def get_repo_context() -> str:
         with open(repo_root / "AGENTS.md", "r", encoding="utf-8") as f:
             context_parts.append(f"## Project Guidelines\n{f.read()}\n")
     
-    # Read README files
+    # Read README files (limit size to avoid rate limits)
     for readme in ["README.md", "backend/README.md", "frontend/README.md"]:
         if (repo_root / readme).exists():
             with open(repo_root / readme, "r", encoding="utf-8") as f:
-                context_parts.append(f"## {readme}\n{f.read()[:2000]}\n")  # Limit size
+                content = f.read()[:1500]  # Limit to 1500 chars per README
+                context_parts.append(f"## {readme}\n{content}\n")
     
     # Get file structure
     try:
@@ -300,14 +301,20 @@ def implement_changes_with_ai(client: Any, analysis: Dict[str, Any], issue_title
         print("No files identified for modification")
         return False
     
-    # Read existing files
+    # Read existing files (limit size to avoid rate limits)
     file_contents = {}
+    max_file_size = 50000  # Limit each file to ~50KB to avoid token limits
     for file_path in files_to_modify:
         path = Path(file_path)
         if path.exists():
             try:
                 with open(path, "r", encoding="utf-8") as f:
-                    file_contents[file_path] = f.read()
+                    content = f.read()
+                    # Truncate if too large
+                    if len(content) > max_file_size:
+                        print(f"Warning: {file_path} is large ({len(content)} chars), truncating to {max_file_size} chars")
+                        content = content[:max_file_size] + "\n# ... (file truncated due to size limits) ..."
+                    file_contents[file_path] = content
             except Exception as e:
                 print(f"Warning: Could not read {file_path}: {e}")
     
@@ -392,20 +399,32 @@ Respond in JSON format:
                             break
                         except Exception as fix_error:
                             print(f"Failed to fix JSON: {fix_error}")
-                            # Continue to next model
+                            error_str = str(fix_error)
+                            # If it's a rate limit error, fail immediately
+                            if "rate_limit" in error_str.lower() or "429" in error_str or "tokens per min" in error_str.lower():
+                                raise Exception(f"Rate limit exceeded while fixing JSON: {error_str}") from fix_error
+                            # Continue to next model for other errors
                             last_error = json_error
                             continue
                 except Exception as model_error:
                     last_error = model_error
-                    if "model_not_found" in str(model_error) or "does not exist" in str(model_error):
+                    error_str = str(model_error)
+                    if "model_not_found" in error_str or "does not exist" in error_str:
                         print(f"Model {model_to_try} not available, trying next...")
                         continue
+                    elif "rate_limit" in error_str.lower() or "429" in error_str or "tokens per min" in error_str.lower():
+                        print(f"Rate limit error with {model_to_try}: {error_str}")
+                        # Rate limit errors should fail immediately, don't try other models
+                        raise Exception(f"Rate limit exceeded: {error_str}") from model_error
                     else:
                         # Other error, don't try other models
                         raise
             
             if result is None:
-                raise last_error if last_error else Exception("All OpenAI models failed")
+                error_msg = "All OpenAI models failed"
+                if last_error:
+                    error_msg = f"{error_msg}: {str(last_error)}"
+                raise Exception(error_msg) from last_error
         
         elif isinstance(client, anthropic.Anthropic):
             model = get_anthropic_model()
@@ -446,20 +465,32 @@ Respond in JSON format:
                             break
                         except Exception as fix_error:
                             print(f"Failed to fix JSON: {fix_error}")
-                            # Continue to next model
+                            error_str = str(fix_error)
+                            # If it's a rate limit error, fail immediately
+                            if "rate_limit" in error_str.lower() or "429" in error_str or "tokens per min" in error_str.lower():
+                                raise Exception(f"Rate limit exceeded while fixing JSON: {error_str}") from fix_error
+                            # Continue to next model for other errors
                             last_error = json_error
                             continue
                 except Exception as model_error:
                     last_error = model_error
-                    if "model_not_found" in str(model_error) or "does not exist" in str(model_error):
+                    error_str = str(model_error)
+                    if "model_not_found" in error_str or "does not exist" in error_str:
                         print(f"Model {model_to_try} not available, trying next...")
                         continue
+                    elif "rate_limit" in error_str.lower() or "429" in error_str or "tokens per min" in error_str.lower():
+                        print(f"Rate limit error with {model_to_try}: {error_str}")
+                        # Rate limit errors should fail immediately, don't try other models
+                        raise Exception(f"Rate limit exceeded: {error_str}") from model_error
                     else:
                         # Other error, don't try other models
                         raise
             
             if result is None:
-                raise last_error if last_error else Exception("All Anthropic models failed")
+                error_msg = "All Anthropic models failed"
+                if last_error:
+                    error_msg = f"{error_msg}: {str(last_error)}"
+                raise Exception(error_msg) from last_error
         else:
             return False
         
@@ -528,19 +559,28 @@ def main():
     
     # Implement changes
     print("Implementing changes with AI...")
-    success = implement_changes_with_ai(client, analysis, issue_title, issue_body, repo_context)
-    
-    if success:
-        print("Changes implemented successfully")
-        # Set output for GitHub Actions
-        with open(os.getenv("GITHUB_OUTPUT", "/dev/stdout"), "a") as f:
-            f.write("has_changes=true\n")
-        sys.exit(0)
-    else:
-        print("No changes were made")
+    try:
+        success = implement_changes_with_ai(client, analysis, issue_title, issue_body, repo_context)
+        
+        if success:
+            print("Changes implemented successfully")
+            # Set output for GitHub Actions
+            with open(os.getenv("GITHUB_OUTPUT", "/dev/stdout"), "a") as f:
+                f.write("has_changes=true\n")
+            sys.exit(0)
+        else:
+            print("No changes were made")
+            with open(os.getenv("GITHUB_OUTPUT", "/dev/stdout"), "a") as f:
+                f.write("has_changes=false\n")
+            sys.exit(0)
+    except Exception as e:
+        print(f"ERROR: Failed to implement changes: {e}")
+        import traceback
+        traceback.print_exc()
+        # Set output and exit with error code
         with open(os.getenv("GITHUB_OUTPUT", "/dev/stdout"), "a") as f:
             f.write("has_changes=false\n")
-        sys.exit(0)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
