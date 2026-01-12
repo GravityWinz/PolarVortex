@@ -239,27 +239,51 @@ jobs:
             });
             const defaultBranch = repo.data.default_branch;
 
-            // Create new PR
-            const pr = await github.rest.pulls.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `[AI] Fixes issue #${issueNumber}: ${issueTitle}`,
-              head: branchName,
-              base: defaultBranch,
-              body: `This PR addresses issue #${issueNumber}\n\n**AI-generated changes**\n\nCloses #${issueNumber}`,
-              draft: false
-            });
+            try {
+              // Create new PR
+              const pr = await github.rest.pulls.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `[AI] Fixes issue #${issueNumber}: ${issueTitle}`,
+                head: branchName,
+                base: defaultBranch,
+                body: `This PR addresses issue #${issueNumber}\n\n**AI-generated changes**\n\nCloses #${issueNumber}`,
+                draft: false
+              });
 
-            console.log(`Created PR: ${pr.data.html_url}`);
-            core.setOutput('pr_url', pr.data.html_url);
+              console.log(`Created PR: ${pr.data.html_url}`);
+              core.setOutput('pr_url', pr.data.html_url);
 
-            // Link PR to issue
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: issueNumber,
-              body: `🤖 AI has started working on this issue. PR: #${pr.data.number}`
-            });
+              // Link PR to issue
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: `🤖 AI has started working on this issue. PR: #${pr.data.number}`
+              });
+            } catch (error) {
+              if (error.status === 403 && error.message.includes('not permitted to create or approve pull requests')) {
+                const errorMsg = `❌ **Error: GitHub Actions cannot create pull requests.**\n\n` +
+                  `Please enable the permission in your repository settings:\n` +
+                  `1. Go to **Settings** → **Actions** → **General**\n` +
+                  `2. Scroll to **Workflow permissions**\n` +
+                  `3. Select **Read and write permissions**\n` +
+                  `4. Check **Allow GitHub Actions to create and approve pull requests**\n` +
+                  `5. Click **Save**\n\n` +
+                  `Branch created: \`${branchName}\` - You can manually create a PR if needed.`;
+                
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  body: errorMsg
+                });
+                
+                core.setFailed('GitHub Actions does not have permission to create pull requests. Please enable it in repository settings.');
+                throw error;
+              }
+              throw error;
+            }
 
       - name: Update issue status
         if: always()
