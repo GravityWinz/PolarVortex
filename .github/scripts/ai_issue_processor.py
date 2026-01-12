@@ -66,6 +66,83 @@ def get_anthropic_model():
     return "claude-3-5-sonnet-20241022"
 
 
+def parse_json_response(content: str) -> Dict[str, Any]:
+    """
+    Parse JSON from AI response, handling markdown code blocks and malformed JSON.
+    
+    Args:
+        content: Raw content from AI response
+        
+    Returns:
+        Parsed JSON dictionary
+        
+    Raises:
+        json.JSONDecodeError: If JSON cannot be parsed
+    """
+    if not content:
+        raise json.JSONDecodeError("Empty content", content, 0)
+    
+    # Remove markdown code blocks if present
+    content = content.strip()
+    
+    # Try to extract JSON from markdown code blocks
+    if content.startswith("```"):
+        # Find the first ``` and extract content between ``` and ```
+        lines = content.split("\n")
+        json_lines = []
+        in_code_block = False
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("```"):
+                if not in_code_block:
+                    # Starting code block, skip language identifier
+                    in_code_block = True
+                    continue
+                else:
+                    # Ending code block
+                    break
+            if in_code_block:
+                json_lines.append(line)
+        if json_lines:
+            content = "\n".join(json_lines).strip()
+        else:
+            # Try to extract JSON after the first ```
+            parts = content.split("```", 2)
+            if len(parts) >= 2:
+                potential_json = parts[1].strip()
+                # Remove language identifier if present (e.g., json)
+                if potential_json.startswith("json"):
+                    potential_json = potential_json[4:].strip()
+                # Remove trailing ``` if present
+                if potential_json.endswith("```"):
+                    potential_json = potential_json[:-3].strip()
+                content = potential_json
+    
+    # Try to find JSON object boundaries if content is malformed
+    # Look for first { and last }
+    first_brace = content.find("{")
+    last_brace = content.rfind("}")
+    
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        content = content[first_brace:last_brace + 1]
+    
+    # Try parsing
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError as e:
+        # Log the problematic content for debugging
+        print(f"JSON parsing error at position {e.pos}: {e.msg}")
+        error_start = max(0, e.pos - 200)
+        error_end = min(len(content), e.pos + 200)
+        print(f"Content around error (chars {error_start}-{error_end}):")
+        print(content[error_start:error_end])
+        print(f"\nFull content length: {len(content)}")
+        # Try to provide more context
+        if e.pos < len(content):
+            print(f"Character at error position: {repr(content[e.pos])}")
+        raise
+
+
 def get_repo_context() -> str:
     """Get repository context by reading key files."""
     context_parts = []
@@ -158,7 +235,8 @@ Respond in JSON format:
                         temperature=0.3,
                         response_format={"type": "json_object"}
                     )
-                    result = json.loads(response.choices[0].message.content)
+                    raw_content = response.choices[0].message.content
+                    result = parse_json_response(raw_content)
                     print(f"Successfully used model: {model_to_try}")
                     return result
                 except Exception as model_error:
@@ -191,7 +269,8 @@ Respond in JSON format:
                         system="You are an expert software developer. Always respond with valid JSON.",
                         messages=[{"role": "user", "content": prompt}]
                     )
-                    result = json.loads(response.content[0].text)
+                    raw_content = response.content[0].text
+                    result = parse_json_response(raw_content)
                     print(f"Successfully used model: {model_to_try}")
                     return result
                 except Exception as model_error:
@@ -283,15 +362,39 @@ Respond in JSON format:
                     response = client.chat.completions.create(
                         model=model_to_try,
                         messages=[
-                            {"role": "system", "content": "You are an expert software developer. Always respond with valid JSON. Provide complete file contents, not diffs."},
+                            {"role": "system", "content": "You are an expert software developer. Always respond with valid JSON. Provide complete file contents, not diffs. Ensure all strings are properly escaped for JSON."},
                             {"role": "user", "content": prompt}
                         ],
                         temperature=0.2,
                         response_format={"type": "json_object"}
                     )
-                    result = json.loads(response.choices[0].message.content)
-                    print(f"Successfully used model: {model_to_try}")
-                    break
+                    raw_content = response.choices[0].message.content
+                    try:
+                        result = parse_json_response(raw_content)
+                        print(f"Successfully used model: {model_to_try}")
+                        break
+                    except json.JSONDecodeError as json_error:
+                        # If JSON parsing fails, try to ask the AI to fix it
+                        print(f"JSON parsing failed, attempting to fix: {json_error}")
+                        try:
+                            fix_response = client.chat.completions.create(
+                                model=model_to_try,
+                                messages=[
+                                    {"role": "system", "content": "You are a JSON validator. Fix the JSON and return ONLY valid JSON, no explanations."},
+                                    {"role": "user", "content": f"Fix this JSON:\n\n{raw_content}"}
+                                ],
+                                temperature=0.1,
+                                response_format={"type": "json_object"}
+                            )
+                            fixed_content = fix_response.choices[0].message.content
+                            result = parse_json_response(fixed_content)
+                            print(f"Successfully fixed and parsed JSON with model: {model_to_try}")
+                            break
+                        except Exception as fix_error:
+                            print(f"Failed to fix JSON: {fix_error}")
+                            # Continue to next model
+                            last_error = json_error
+                            continue
                 except Exception as model_error:
                     last_error = model_error
                     if "model_not_found" in str(model_error) or "does not exist" in str(model_error):
@@ -319,12 +422,33 @@ Respond in JSON format:
                     response = client.messages.create(
                         model=model_to_try,
                         max_tokens=8000,
-                        system="You are an expert software developer. Always respond with valid JSON. Provide complete file contents, not diffs.",
+                        system="You are an expert software developer. Always respond with valid JSON. Provide complete file contents, not diffs. Ensure all strings are properly escaped for JSON.",
                         messages=[{"role": "user", "content": prompt}]
                     )
-                    result = json.loads(response.content[0].text)
-                    print(f"Successfully used model: {model_to_try}")
-                    break
+                    raw_content = response.content[0].text
+                    try:
+                        result = parse_json_response(raw_content)
+                        print(f"Successfully used model: {model_to_try}")
+                        break
+                    except json.JSONDecodeError as json_error:
+                        # If JSON parsing fails, try to ask the AI to fix it
+                        print(f"JSON parsing failed, attempting to fix: {json_error}")
+                        try:
+                            fix_response = client.messages.create(
+                                model=model_to_try,
+                                max_tokens=8000,
+                                system="You are a JSON validator. Fix the JSON and return ONLY valid JSON, no explanations.",
+                                messages=[{"role": "user", "content": f"Fix this JSON:\n\n{raw_content}"}]
+                            )
+                            fixed_content = fix_response.content[0].text
+                            result = parse_json_response(fixed_content)
+                            print(f"Successfully fixed and parsed JSON with model: {model_to_try}")
+                            break
+                        except Exception as fix_error:
+                            print(f"Failed to fix JSON: {fix_error}")
+                            # Continue to next model
+                            last_error = json_error
+                            continue
                 except Exception as model_error:
                     last_error = model_error
                     if "model_not_found" in str(model_error) or "does not exist" in str(model_error):
