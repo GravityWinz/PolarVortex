@@ -45,6 +45,27 @@ def get_ai_client():
     return None
 
 
+def get_openai_model():
+    """Get OpenAI model name with fallback to accessible models."""
+    # Try user-specified model first
+    user_model = os.getenv("OPENAI_MODEL")
+    if user_model:
+        return user_model
+    
+    # Default to more accessible models (in order of preference)
+    # gpt-4-turbo is more accessible than gpt-4
+    # gpt-3.5-turbo is the most accessible
+    return "gpt-4-turbo"
+
+
+def get_anthropic_model():
+    """Get Anthropic model name with fallback."""
+    user_model = os.getenv("ANTHROPIC_MODEL")
+    if user_model:
+        return user_model
+    return "claude-3-5-sonnet-20241022"
+
+
 def get_repo_context() -> str:
     """Get repository context by reading key files."""
     context_parts = []
@@ -111,29 +132,79 @@ Respond in JSON format:
 }}
 """
 
+    # Try models in order of preference with fallback
+    openai_models = ["gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"]
+    anthropic_models = ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229", "claude-3-sonnet-20240229"]
+    
     try:
         if isinstance(client, openai.OpenAI):
-            response = client.chat.completions.create(
-                model=os.getenv("OPENAI_MODEL", "gpt-4"),
-                messages=[
-                    {"role": "system", "content": "You are an expert software developer. Always respond with valid JSON."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3,
-                response_format={"type": "json_object"}
-            )
-            result = json.loads(response.choices[0].message.content)
-            return result
+            model = get_openai_model()
+            # If user specified a model, try it first, then fallback
+            if model not in openai_models:
+                models_to_try = [model] + openai_models
+            else:
+                models_to_try = openai_models
+            
+            last_error = None
+            for model_to_try in models_to_try:
+                try:
+                    print(f"Trying OpenAI model: {model_to_try}")
+                    response = client.chat.completions.create(
+                        model=model_to_try,
+                        messages=[
+                            {"role": "system", "content": "You are an expert software developer. Always respond with valid JSON."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=0.3,
+                        response_format={"type": "json_object"}
+                    )
+                    result = json.loads(response.choices[0].message.content)
+                    print(f"Successfully used model: {model_to_try}")
+                    return result
+                except Exception as model_error:
+                    last_error = model_error
+                    if "model_not_found" in str(model_error) or "does not exist" in str(model_error):
+                        print(f"Model {model_to_try} not available, trying next...")
+                        continue
+                    else:
+                        # Other error, don't try other models
+                        raise
+            
+            # If we get here, all models failed
+            raise last_error if last_error else Exception("All models failed")
         
         elif isinstance(client, anthropic.Anthropic):
-            response = client.messages.create(
-                model=os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022"),
-                max_tokens=2000,
-                system="You are an expert software developer. Always respond with valid JSON.",
-                messages=[{"role": "user", "content": prompt}]
-            )
-            result = json.loads(response.content[0].text)
-            return result
+            model = get_anthropic_model()
+            # If user specified a model, try it first, then fallback
+            if model not in anthropic_models:
+                models_to_try = [model] + anthropic_models
+            else:
+                models_to_try = anthropic_models
+            
+            last_error = None
+            for model_to_try in models_to_try:
+                try:
+                    print(f"Trying Anthropic model: {model_to_try}")
+                    response = client.messages.create(
+                        model=model_to_try,
+                        max_tokens=2000,
+                        system="You are an expert software developer. Always respond with valid JSON.",
+                        messages=[{"role": "user", "content": prompt}]
+                    )
+                    result = json.loads(response.content[0].text)
+                    print(f"Successfully used model: {model_to_try}")
+                    return result
+                except Exception as model_error:
+                    last_error = model_error
+                    if "model_not_found" in str(model_error) or "does not exist" in str(model_error):
+                        print(f"Model {model_to_try} not available, trying next...")
+                        continue
+                    else:
+                        # Other error, don't try other models
+                        raise
+            
+            # If we get here, all models failed
+            raise last_error if last_error else Exception("All models failed")
     
     except Exception as e:
         print(f"Error calling AI API: {e}")
@@ -190,28 +261,85 @@ Respond in JSON format:
 }}
 """
 
+    # Try models in order of preference with fallback
+    openai_models = ["gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"]
+    anthropic_models = ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229", "claude-3-sonnet-20240229"]
+    
+    result = None
+    
     try:
         if isinstance(client, openai.OpenAI):
-            response = client.chat.completions.create(
-                model=os.getenv("OPENAI_MODEL", "gpt-4"),
-                messages=[
-                    {"role": "system", "content": "You are an expert software developer. Always respond with valid JSON. Provide complete file contents, not diffs."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.2,
-                response_format={"type": "json_object"}
-            )
-            result = json.loads(response.choices[0].message.content)
+            model = get_openai_model()
+            # If user specified a model, try it first, then fallback
+            if model not in openai_models:
+                models_to_try = [model] + openai_models
+            else:
+                models_to_try = openai_models
+            
+            last_error = None
+            for model_to_try in models_to_try:
+                try:
+                    print(f"Trying OpenAI model: {model_to_try}")
+                    response = client.chat.completions.create(
+                        model=model_to_try,
+                        messages=[
+                            {"role": "system", "content": "You are an expert software developer. Always respond with valid JSON. Provide complete file contents, not diffs."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=0.2,
+                        response_format={"type": "json_object"}
+                    )
+                    result = json.loads(response.choices[0].message.content)
+                    print(f"Successfully used model: {model_to_try}")
+                    break
+                except Exception as model_error:
+                    last_error = model_error
+                    if "model_not_found" in str(model_error) or "does not exist" in str(model_error):
+                        print(f"Model {model_to_try} not available, trying next...")
+                        continue
+                    else:
+                        # Other error, don't try other models
+                        raise
+            
+            if result is None:
+                raise last_error if last_error else Exception("All OpenAI models failed")
         
         elif isinstance(client, anthropic.Anthropic):
-            response = client.messages.create(
-                model=os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022"),
-                max_tokens=8000,
-                system="You are an expert software developer. Always respond with valid JSON. Provide complete file contents, not diffs.",
-                messages=[{"role": "user", "content": prompt}]
-            )
-            result = json.loads(response.content[0].text)
+            model = get_anthropic_model()
+            # If user specified a model, try it first, then fallback
+            if model not in anthropic_models:
+                models_to_try = [model] + anthropic_models
+            else:
+                models_to_try = anthropic_models
+            
+            last_error = None
+            for model_to_try in models_to_try:
+                try:
+                    print(f"Trying Anthropic model: {model_to_try}")
+                    response = client.messages.create(
+                        model=model_to_try,
+                        max_tokens=8000,
+                        system="You are an expert software developer. Always respond with valid JSON. Provide complete file contents, not diffs.",
+                        messages=[{"role": "user", "content": prompt}]
+                    )
+                    result = json.loads(response.content[0].text)
+                    print(f"Successfully used model: {model_to_try}")
+                    break
+                except Exception as model_error:
+                    last_error = model_error
+                    if "model_not_found" in str(model_error) or "does not exist" in str(model_error):
+                        print(f"Model {model_to_try} not available, trying next...")
+                        continue
+                    else:
+                        # Other error, don't try other models
+                        raise
+            
+            if result is None:
+                raise last_error if last_error else Exception("All Anthropic models failed")
         else:
+            return False
+        
+        if result is None:
             return False
         
         # Write files
