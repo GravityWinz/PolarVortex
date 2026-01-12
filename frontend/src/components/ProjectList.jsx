@@ -1,12 +1,6 @@
 import {
-  Add as AddIcon,
-  CloudUpload as CloudUploadIcon,
   Delete as DeleteIcon,
-  Edit as EditIcon,
-  Folder as FolderIcon,
-  StarBorder as StarBorderIcon,
-  Star as StarIcon,
-  AutoGraph as VectorizeIcon,
+  Folder as FolderIcon
 } from "@mui/icons-material";
 import {
   Alert,
@@ -23,7 +17,6 @@ import {
   DialogTitle,
   Grid,
   IconButton,
-  LinearProgress,
   Paper,
   TextField,
   Typography,
@@ -34,11 +27,8 @@ import {
   createProject,
   deleteProject,
   getProjectThumbnailUrl,
-  getProjects,
-  uploadGcodeToProject,
-  uploadImageToProject,
+  getProjects
 } from "../services/apiService";
-import VectorizeDialog from "./VectorizeDialog";
 
 /**
  * ProjectList component for displaying and managing projects
@@ -56,15 +46,6 @@ export default function ProjectList({
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [creating, setCreating] = useState(false);
-  const [uploadingProjects, setUploadingProjects] = useState(new Set());
-  const [uploadProgress, setUploadProgress] = useState({});
-  const [gcodeUploadingProjects, setGcodeUploadingProjects] = useState(
-    new Set()
-  );
-  const [failedThumbnails, setFailedThumbnails] = useState(new Set());
-  const [vectorizeDialogOpen, setVectorizeDialogOpen] = useState(false);
-  const [selectedProjectForVectorize, setSelectedProjectForVectorize] =
-    useState(null);
 
   // Fetch projects from API
   useEffect(() => {
@@ -135,153 +116,8 @@ export default function ProjectList({
     }
   };
 
-  const handleFileUpload = async (project, file) => {
-    if (!file) return;
-
-    const isSvg = (file.name || "").toLowerCase().endsWith(".svg");
-    // Validate file
-    if (!file.type.startsWith("image/") && !isSvg) {
-      setError("Please select an image or SVG file");
-      return;
-    }
-
-    if (file.size > 10 * 1024 * 1024) {
-      setError("File size must be less than 10MB");
-      return;
-    }
-
-    try {
-      // Add project to uploading set
-      setUploadingProjects((prev) => new Set([...prev, project.id]));
-      setUploadProgress((prev) => ({ ...prev, [project.id]: 0 }));
-
-      // Create form data
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append(
-        "settings",
-        JSON.stringify({
-          threshold: 128,
-          invert: false,
-          dither: true,
-          resolution: "medium",
-        })
-      );
-
-      // Upload file
-      await uploadImageToProject(project.id, formData);
-
-      // Update progress
-      setUploadProgress((prev) => ({ ...prev, [project.id]: 100 }));
-
-      // Refresh projects list
-      await fetchProjects();
-
-      // Clear uploading state
-      setUploadingProjects((prev) => {
-        const newSet = new Set(prev);
-        newSet.delete(project.id);
-        return newSet;
-      });
-      setUploadProgress((prev) => {
-        const newProgress = { ...prev };
-        delete newProgress[project.id];
-        return newProgress;
-      });
-    } catch (err) {
-      setError("Failed to upload image/SVG");
-      console.error("Error uploading image:", err);
-
-      // Clear uploading state
-      setUploadingProjects((prev) => {
-        const newSet = new Set(prev);
-        newSet.delete(project.id);
-        return newSet;
-      });
-      setUploadProgress((prev) => {
-        const newProgress = { ...prev };
-        delete newProgress[project.id];
-        return newProgress;
-      });
-    }
-  };
-
-  const handleGcodeUpload = async (project, file) => {
-    if (!file) return;
-
-    const allowedExtensions = [".gcode", ".nc", ".txt"];
-    const ext = (file.name || "").toLowerCase().match(/\.[^.]+$/)?.[0] || "";
-    if (!allowedExtensions.includes(ext)) {
-      setError("Please select a .gcode, .nc, or .txt file");
-      return;
-    }
-
-    if (file.size > 10 * 1024 * 1024) {
-      setError("File size must be less than 10MB");
-      return;
-    }
-
-    try {
-      setGcodeUploadingProjects((prev) => new Set([...prev, project.id]));
-
-      const formData = new FormData();
-      formData.append("file", file);
-
-      await uploadGcodeToProject(project.id, formData);
-      await fetchProjects();
-    } catch (err) {
-      setError("Failed to upload G-code");
-      console.error("Error uploading G-code:", err);
-    } finally {
-      setGcodeUploadingProjects((prev) => {
-        const next = new Set(prev);
-        next.delete(project.id);
-        return next;
-      });
-    }
-  };
-
-  const handleUploadAny = async (project, file) => {
-    if (!file) return;
-    const name = (file.name || "").toLowerCase();
-    const ext = name.match(/\.[^.]+$/)?.[0] || "";
-    const allowedGcode = [".gcode", ".nc", ".txt"];
-
-    // Route gcode-like to gcode upload
-    if (allowedGcode.includes(ext)) {
-      await handleGcodeUpload(project, file);
-      return;
-    }
-
-    // Route SVG or images to image upload
-    const isSvg = ext === ".svg";
-    const isImage = file.type.startsWith("image/") || isSvg;
-    if (isImage) {
-      await handleFileUpload(project, file);
-      return;
-    }
-
-    setError(
-      "Unsupported file type. Use image/SVG or G-code (.gcode/.nc/.txt)."
-    );
-  };
-
   const formatDate = (dateString) => {
     return new Date(dateString).toLocaleDateString();
-  };
-
-  const handleThumbnailError = (projectId) => {
-    setFailedThumbnails((prev) => new Set([...prev, projectId]));
-  };
-
-  const handleVectorizeProject = (project) => {
-    setSelectedProjectForVectorize(project);
-    setVectorizeDialogOpen(true);
-  };
-
-  const handleCloseVectorizeDialog = () => {
-    setVectorizeDialogOpen(false);
-    setSelectedProjectForVectorize(null);
   };
 
   if (loading) {
@@ -328,7 +164,6 @@ export default function ProjectList({
         </Box>
         <Button
           variant="contained"
-          startIcon={<AddIcon />}
           onClick={() => setCreateDialogOpen(true)}
         >
           New Project
@@ -346,7 +181,6 @@ export default function ProjectList({
           </Typography>
           <Button
             variant="contained"
-            startIcon={<AddIcon />}
             onClick={() => setCreateDialogOpen(true)}
           >
             Create Project
@@ -405,172 +239,56 @@ export default function ProjectList({
                   }}
                   onClick={(e) => {
                     e.stopPropagation();
-                    // If project has a thumbnail, navigate to project instead of uploading
-                    if (project.thumbnail_image && !failedThumbnails.has(project.id)) {
+                    // If project has a thumbnail, navigate to project
+                    if (project.thumbnail_image) {
                       handleProjectSelect(project);
-                    } else if (!uploadingProjects.has(project.id)) {
-                      // No thumbnail - trigger upload
-                      document
-                        .getElementById(`file-input-${project.id}`)
-                        .click();
                     }
                   }}
                 >
-                  <input
-                    id={`file-input-${project.id}`}
-                    type="file"
-                    accept="image/*,.svg,.gcode,.nc,.txt"
-                    multiple
-                    onChange={async (e) => {
-                      const files = Array.from(e.target.files || []);
-                      for (const file of files) {
-                        await handleUploadAny(project, file);
-                      }
-                      e.target.value = "";
-                    }}
-                    style={{ display: "none" }}
-                    disabled={
-                      uploadingProjects.has(project.id) ||
-                      gcodeUploadingProjects.has(project.id)
-                    }
-                  />
-
-                  {uploadingProjects.has(project.id) ||
-                  gcodeUploadingProjects.has(project.id) ? (
-                    <Box
-                      sx={{
-                        textAlign: "center",
-                        width: "100%",
-                        position: "absolute",
-                        zIndex: 2,
-                      }}
-                    >
-                      <CircularProgress size={40} sx={{ mb: 1 }} />
-                      <Typography variant="body2" color="text.secondary">
-                        Uploading...
-                      </Typography>
-                      <LinearProgress
-                        variant="determinate"
-                        value={uploadProgress[project.id] || 0}
-                        sx={{ mt: 1, width: "80%" }}
-                      />
-                    </Box>
-                  ) : (
-                    <Box
-                      sx={{
-                        position: "relative",
+                  {project.thumbnail_image ? (
+                    // Show actual thumbnail if it exists and hasn't failed
+                    <img
+                      src={getProjectThumbnailUrl(project.id)}
+                      alt={`${project.name} thumbnail`}
+                      style={{
                         width: "100%",
                         height: "100%",
+                        objectFit: "cover",
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        cursor: "pointer",
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleProjectSelect(project);
+                      }}
+                    />
+                  ) : (
+                    // Show watermark for projects without thumbnails or failed thumbnails
+                    <Box
+                      sx={{
+                        width: "100%",
+                        height: "100%",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backgroundColor: "grey.100",
+                        position: "relative",
                       }}
                     >
-                      {project.thumbnail_image &&
-                      !failedThumbnails.has(project.id) ? (
-                        // Show actual thumbnail if it exists and hasn't failed
-                        <>
-                          <img
-                            src={getProjectThumbnailUrl(project.id)}
-                            alt={`${project.name} thumbnail`}
-                            style={{
-                              width: "100%",
-                              height: "100%",
-                              objectFit: "cover",
-                              position: "absolute",
-                              top: 0,
-                              left: 0,
-                              cursor: "pointer",
-                            }}
-                            onError={() => handleThumbnailError(project.id)}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleProjectSelect(project);
-                            }}
-                          />
-                          <Box
-                            sx={{
-                              position: "absolute",
-                              top: 0,
-                              left: 0,
-                              right: 0,
-                              bottom: 0,
-                              backgroundColor: "rgba(0, 0, 0, 0.3)",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              opacity: 0,
-                              transition: "opacity 0.2s",
-                              "&:hover": {
-                                opacity: 1,
-                              },
-                            }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              // Overlay click can still trigger upload if desired
-                              // For now, clicking overlay also navigates
-                              handleProjectSelect(project);
-                            }}
-                          >
-                            <CloudUploadIcon
-                              sx={{ fontSize: 32, color: "white" }}
-                            />
-                          </Box>
-                        </>
-                      ) : (
-                        // Show watermark for projects without thumbnails or failed thumbnails
-                        <Box
-                          sx={{
-                            width: "100%",
-                            height: "100%",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            backgroundColor: "grey.100",
-                            position: "relative",
-                          }}
-                        >
-                          {/* Watermark background */}
-                          <img
-                            src={logoImage}
-                            alt="PolarVortex Watermark"
-                            style={{
-                              width: "60%",
-                              height: "60%",
-                              objectFit: "contain",
-                              opacity: 0.3,
-                              filter: "grayscale(100%)",
-                            }}
-                          />
-
-                          {/* Upload placeholder overlay */}
-                          <Box
-                            sx={{
-                              position: "absolute",
-                              top: 0,
-                              left: 0,
-                              right: 0,
-                              bottom: 0,
-                              display: "flex",
-                              flexDirection: "column",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              backgroundColor: "rgba(255, 255, 255, 0.8)",
-                              backdropFilter: "blur(2px)",
-                              px: 1.5,
-                              textAlign: "center",
-                            }}
-                          >
-                            <CloudUploadIcon
-                              sx={{
-                                fontSize: 48,
-                                color: "text.secondary",
-                                mb: 1,
-                              }}
-                            />
-                            <Typography variant="body2" color="text.secondary">
-                              Click to upload image, SVG, or G-code
-                            </Typography>
-                          </Box>
-                        </Box>
-                      )}
+                      {/* Watermark background */}
+                      <img
+                        src={logoImage}
+                        alt="PolarVortex Watermark"
+                        style={{
+                          width: "60%",
+                          height: "60%",
+                          objectFit: "contain",
+                          opacity: 0.3,
+                          filter: "grayscale(100%)",
+                        }}
+                      />
                     </Box>
                   )}
                 </CardMedia>
@@ -629,78 +347,16 @@ export default function ProjectList({
                     }}
                   >
                     <Button
-                      variant={
-                        currentProject?.id === project.id
-                          ? "contained"
-                          : "outlined"
-                      }
+                      variant="outlined"
                       size="small"
-                      startIcon={
-                        currentProject?.id === project.id ? (
-                          <StarIcon />
-                        ) : (
-                          <StarBorderIcon />
-                        )
-                      }
                       onClick={(e) => {
                         e.stopPropagation();
                         handleProjectSelect(project);
                       }}
                       sx={{ textTransform: "none" }}
                     >
-                      {currentProject?.id === project.id
-                        ? "Current"
-                        : "Set Current"}
+                      Edit Project
                     </Button>
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      startIcon={<CloudUploadIcon />}
-                      component="label"
-                      disabled={gcodeUploadingProjects.has(project.id)}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {gcodeUploadingProjects.has(project.id)
-                        ? "Uploading..."
-                        : "Upload G-code"}
-                      <input
-                        type="file"
-                        hidden
-                        accept=".gcode,.nc,.txt"
-                        onChange={(e) => {
-                          const file = e.target.files[0];
-                          if (file) {
-                            handleGcodeUpload(project, file);
-                          }
-                          e.target.value = "";
-                        }}
-                      />
-                    </Button>
-
-                    <IconButton
-                      size="small"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleProjectSelect(project);
-                      }}
-                      sx={{ color: "primary.main" }}
-                    >
-                      <EditIcon />
-                    </IconButton>
-
-                    {project.source_image && (
-                      <IconButton
-                        size="small"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleVectorizeProject(project);
-                        }}
-                        sx={{ color: "secondary.main" }}
-                        title="Vectorize Image"
-                      >
-                        <VectorizeIcon />
-                      </IconButton>
-                    )}
 
                     <IconButton
                       size="small"
@@ -761,13 +417,6 @@ export default function ProjectList({
           </Button>
         </DialogActions>
       </Dialog>
-
-      {/* Vectorization Dialog */}
-      <VectorizeDialog
-        open={vectorizeDialogOpen}
-        onClose={handleCloseVectorizeDialog}
-        project={selectedProjectForVectorize}
-      />
     </Box>
   );
 }
