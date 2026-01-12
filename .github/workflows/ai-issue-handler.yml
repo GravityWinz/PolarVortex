@@ -29,16 +29,16 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo
             });
-            const defaultBranch = repo.data.default_branch;
+            const defaultBranch = repo.data.default_branch || 'dev';
             core.setOutput('default_branch', defaultBranch);
-            console.log(`Default branch: ${defaultBranch}`);
+            console.log(`Default branch detected: ${defaultBranch}`);
 
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          ref: ${{ steps.default_branch.outputs.default_branch }}
           fetch-depth: 0
+          persist-credentials: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -95,10 +95,40 @@ jobs:
           ISSUE_TITLE="${{ steps.issue_info.outputs.issue_title }}"
           DEFAULT_BRANCH="${{ steps.default_branch.outputs.default_branch }}"
 
-          # Fetch latest and checkout default branch
+          # Fallback to 'dev' if default branch is not set
+          if [ -z "$DEFAULT_BRANCH" ]; then
+            echo "Warning: Default branch output is empty, using 'dev' as fallback"
+            DEFAULT_BRANCH="dev"
+          fi
+
+          # Debug: Show what branch we're using
+          echo "Using default branch: $DEFAULT_BRANCH"
+          echo "Current branch: $(git branch --show-current || echo 'detached')"
+          echo "Available remote branches:"
+          git branch -r | head -10
+
+          # Fetch latest from all branches
           git fetch origin
-          git checkout "$DEFAULT_BRANCH"
-          git pull origin "$DEFAULT_BRANCH"
+
+          # Verify the default branch exists remotely
+          if ! git ls-remote --heads origin "$DEFAULT_BRANCH" | grep -q "$DEFAULT_BRANCH"; then
+            echo "Error: Default branch '$DEFAULT_BRANCH' does not exist on origin!"
+            echo "Available branches:"
+            git ls-remote --heads origin | sed 's@.*refs/heads/@@' | head -10
+            exit 1
+          fi
+
+          # Checkout default branch if not already on it
+          CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
+          if [ -z "$CURRENT_BRANCH" ] || [ "$CURRENT_BRANCH" != "$DEFAULT_BRANCH" ]; then
+            echo "Switching to default branch: $DEFAULT_BRANCH"
+            git checkout -b "$DEFAULT_BRANCH" "origin/$DEFAULT_BRANCH" || git checkout "$DEFAULT_BRANCH"
+          else
+            echo "Already on $DEFAULT_BRANCH"
+          fi
+
+          # Ensure we're up to date
+          git pull origin "$DEFAULT_BRANCH" || echo "Pull failed, continuing..."
 
           # Sanitize issue title for branch name
           BRANCH_NAME=$(echo "$ISSUE_TITLE" | \
