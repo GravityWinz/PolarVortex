@@ -19,10 +19,25 @@ jobs:
       pull-requests: write
 
     steps:
+      - name: Get default branch
+        id: default_branch
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const repo = await github.rest.repos.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo
+            });
+            const defaultBranch = repo.data.default_branch;
+            core.setOutput('default_branch', defaultBranch);
+            console.log(`Default branch: ${defaultBranch}`);
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ steps.default_branch.outputs.default_branch }}
           fetch-depth: 0
 
       - name: Set up Python
@@ -72,16 +87,6 @@ jobs:
             exit 0
           fi
           echo "AI will handle this issue"
-
-      - name: Get default branch
-        id: default_branch
-        run: |
-          DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@')
-          if [ -z "$DEFAULT_BRANCH" ]; then
-            DEFAULT_BRANCH="main"
-          fi
-          echo "default_branch=$DEFAULT_BRANCH" >> $GITHUB_OUTPUT
-          echo "Default branch: $DEFAULT_BRANCH"
 
       - name: Create feature branch
         id: create_branch
