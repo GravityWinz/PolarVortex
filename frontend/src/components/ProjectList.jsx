@@ -1,9 +1,6 @@
 import {
-  Add as AddIcon,
   Delete as DeleteIcon,
-  Folder as FolderIcon,
-  StarBorder as StarBorderIcon,
-  Star as StarIcon
+  Folder as FolderIcon
 } from "@mui/icons-material";
 import {
   Alert,
@@ -164,7 +161,6 @@ export default function ProjectList({
         </Box>
         <Button
           variant="contained"
-          startIcon={<AddIcon />}
           onClick={() => setCreateDialogOpen(true)}
         >
           New Project
@@ -182,7 +178,6 @@ export default function ProjectList({
           </Typography>
           <Button
             variant="contained"
-            startIcon={<AddIcon />}
             onClick={() => setCreateDialogOpen(true)}
           >
             Create Project
@@ -356,13 +351,6 @@ export default function ProjectList({
                           : "outlined"
                       }
                       size="small"
-                      startIcon={
-                        currentProject?.id === project.id ? (
-                          <StarIcon />
-                        ) : (
-                          <StarBorderIcon />
-                        )
-                      }
                       onClick={(e) => {
                         e.stopPropagation();
                         handleProjectSelect(project);
