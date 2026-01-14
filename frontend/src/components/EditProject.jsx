@@ -5,17 +5,10 @@ import {
   InsertDriveFile as FileIcon,
   Create as GenerateSvgIcon,
   Image as ImageIcon,
-  ArrowDownward as PanDownIcon,
-  ArrowBack as PanLeftIcon,
-  ArrowForward as PanRightIcon,
-  ArrowUpward as PanUpIcon,
   Refresh as RefreshIcon,
-  CenterFocusStrong as ResetPanIcon,
   RestartAlt as ResetZoomIcon,
   Article as SvgIcon,
   AutoGraph as VectorizeIcon,
-  ZoomIn as ZoomInIcon,
-  ZoomOut as ZoomOutIcon,
 } from "@mui/icons-material";
 import {
   Alert,
@@ -229,6 +222,10 @@ export default function EditProject({ currentProject }) {
   const [svgDragging, setSvgDragging] = useState(false);
   const [svgDragStart, setSvgDragStart] = useState({ x: 0, y: 0 });
   const svgContainerRef = useRef(null);
+  const gcodeCanvasRef = useRef(null);
+  const gcodeContainerRef = useRef(null);
+  const [gcodeDragging, setGcodeDragging] = useState(false);
+  const [gcodeDragStart, setGcodeDragStart] = useState({ x: 0, y: 0 });
   const [imageZoom, setImageZoom] = useState(1);
   const [imagePan, setImagePan] = useState({ x: 0, y: 0 });
   const [imageDragging, setImageDragging] = useState(false);
@@ -429,6 +426,38 @@ export default function EditProject({ currentProject }) {
     };
   }, [svgDragging, svgDragStart]);
 
+  // Handle global mouse events for G-code dragging
+  useEffect(() => {
+    if (!gcodeDragging || !gcodeContainerRef.current) return;
+
+    const container = gcodeContainerRef.current;
+
+    const handleMouseMove = (e) => {
+      const rect = container.getBoundingClientRect();
+      const cx = rect.width / 2;
+      const cy = rect.height / 2;
+      const mouseX = e.clientX - rect.left - cx;
+      const mouseY = e.clientY - rect.top - cy;
+
+      setGcodePan({
+        x: mouseX - gcodeDragStart.x,
+        y: mouseY - gcodeDragStart.y,
+      });
+    };
+
+    const handleMouseUp = () => {
+      setGcodeDragging(false);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [gcodeDragging, gcodeDragStart]);
+
   // Handle global mouse events for image dragging
   useEffect(() => {
     if (!imageDragging || !imageContainerRef.current) return;
@@ -605,6 +634,172 @@ export default function EditProject({ currentProject }) {
   const handlePan = (dx, dy) =>
     setGcodePan((p) => ({ x: p.x + dx, y: p.y + dy }));
   const handlePanReset = () => setGcodePan({ x: 0, y: 0 });
+
+  // G-code pan/zoom handlers (mouse)
+  const handleGcodeMouseDown = (e) => {
+    if (e.button !== 0) return; // Only left mouse button
+    if (!gcodeContainerRef.current) return;
+
+    const rect = gcodeContainerRef.current.getBoundingClientRect();
+    const cx = rect.width / 2;
+    const cy = rect.height / 2;
+    const mouseX = e.clientX - rect.left - cx;
+    const mouseY = e.clientY - rect.top - cy;
+
+    setGcodeDragging(true);
+    setGcodeDragStart({ x: mouseX - gcodePan.x, y: mouseY - gcodePan.y });
+    e.preventDefault();
+  };
+
+  const handleGcodeMouseMove = (e) => {
+    if (gcodeDragging) {
+      e.preventDefault();
+    }
+  };
+
+  const handleGcodeMouseUp = () => {
+    setGcodeDragging(false);
+  };
+
+  const handleGcodeWheel = (e) => {
+    e.preventDefault();
+    if (!gcodeContainerRef.current) return;
+
+    const rect = gcodeContainerRef.current.getBoundingClientRect();
+    const cx = rect.width / 2;
+    const cy = rect.height / 2;
+    const mouseX = e.clientX - rect.left - cx;
+    const mouseY = e.clientY - rect.top - cy;
+
+    const zoomFactor = e.deltaY > 0 ? 0.95 : 1.05;
+    const newZoom = clampZoom(gcodeZoom * zoomFactor);
+
+    const pointX = (mouseX - gcodePan.x) / gcodeZoom;
+    const pointY = (mouseY - gcodePan.y) / gcodeZoom;
+
+    const newPanX = mouseX - pointX * newZoom;
+    const newPanY = mouseY - pointY * newZoom;
+
+    setGcodeZoom(newZoom);
+    setGcodePan({ x: newPanX, y: newPanY });
+  };
+
+  const handleGcodeViewReset = () => {
+    setGcodeZoom(1);
+    setGcodePan({ x: 0, y: 0 });
+  };
+
+  // Draw G-code preview on canvas for performance
+  useEffect(() => {
+    const canvas = gcodeCanvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    const printableSegments = (gcodeGeometry.segments || []).filter(
+      (seg) => seg.penDown
+    );
+
+    const width = 640;
+    const height = 420;
+    canvas.width = width;
+    canvas.height = height;
+
+    const fillBackground = () => {
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = "#999999";
+      ctx.fillRect(0, 0, width, height);
+    };
+
+    if (!printableSegments.length) {
+      fillBackground();
+      return;
+    }
+
+    const calcBounds = (segments) => {
+      if (!segments.length) return null;
+      return segments.reduce(
+        (acc, seg) => ({
+          minX: Math.min(acc.minX, seg.from.x, seg.to.x),
+          maxX: Math.max(acc.maxX, seg.from.x, seg.to.x),
+          minY: Math.min(acc.minY, seg.from.y, seg.to.y),
+          maxY: Math.max(acc.maxY, seg.from.y, seg.to.y),
+        }),
+        {
+          minX: Infinity,
+          maxX: -Infinity,
+          minY: Infinity,
+          maxY: -Infinity,
+        }
+      );
+    };
+
+    const bounds = calcBounds(printableSegments);
+    const paperWidth = defaultPaper ? Number(defaultPaper.width) || 0 : 0;
+    const paperHeight = defaultPaper ? Number(defaultPaper.height) || 0 : 0;
+    const paperBox =
+      paperWidth > 0 && paperHeight > 0
+        ? {
+            minX: -paperWidth / 2,
+            maxX: paperWidth / 2,
+            minY: -paperHeight / 2,
+            maxY: paperHeight / 2,
+          }
+        : null;
+
+    const combinedBounds = bounds
+      ? {
+          minX: Math.min(bounds.minX, paperBox ? paperBox.minX : bounds.minX),
+          maxX: Math.max(bounds.maxX, paperBox ? paperBox.maxX : bounds.maxX),
+          minY: Math.min(bounds.minY, paperBox ? paperBox.minY : bounds.minY),
+          maxY: Math.max(bounds.maxY, paperBox ? paperBox.maxY : bounds.maxY),
+        }
+      : paperBox;
+
+    const { minX, maxX, minY, maxY } = combinedBounds || bounds;
+    const padding = 16;
+    const spanX = Math.max(maxX - minX, 1);
+    const spanY = Math.max(maxY - minY, 1);
+    const scaleX = (width - padding * 2) / spanX;
+    const scaleY = (height - padding * 2) / spanY;
+    const baseScale = Math.min(scaleX, scaleY);
+    const scale = baseScale * gcodeZoom;
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+
+    const mapPoint = (x, y) => ({
+      // Positive pan moves the drawing in the same direction as the mouse drag
+      x: width / 2 + (x - centerX + gcodePan.x) * scale,
+      y: height / 2 - (y - centerY - gcodePan.y) * scale,
+    });
+
+    fillBackground();
+
+    // Draw paper outline
+    if (paperBox) {
+      const tl = mapPoint(paperBox.minX, paperBox.minY);
+      const br = mapPoint(paperBox.maxX, paperBox.maxY);
+      ctx.save();
+      ctx.strokeStyle = "#8bc34a";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 4]);
+      ctx.strokeRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
+      ctx.restore();
+    }
+
+    // Draw segments in a single path for speed
+    ctx.save();
+    ctx.strokeStyle = "#1976d2";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (const seg of printableSegments) {
+      const from = mapPoint(seg.from.x, seg.from.y);
+      const to = mapPoint(seg.to.x, seg.to.y);
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(to.x, to.y);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }, [gcodeGeometry, gcodeZoom, gcodePan, defaultPaper]);
 
   // SVG pan/zoom handlers
   const handleSvgMouseDown = (e) => {
@@ -846,102 +1041,15 @@ export default function EditProject({ currentProject }) {
           <Typography variant="subtitle1">G-code Plot Preview</Typography>
           <Chip label={`${printableSegments.length} segments`} size="small" />
           <Box sx={{ flexGrow: 1 }} />
-          <Stack direction="row" spacing={0.5} alignItems="center">
-            <IconButton
-              size="small"
-              onClick={handleZoomOut}
-              aria-label="Zoom out"
-              disabled={gcodeZoom <= 0.25}
-            >
-              <ZoomOutIcon fontSize="small" />
-            </IconButton>
-            <Typography
-              variant="caption"
-              sx={{ minWidth: 46, textAlign: "center" }}
-            >
-              {Math.round(gcodeZoom * 100)}%
-            </Typography>
-            <IconButton
-              size="small"
-              onClick={handleZoomIn}
-              aria-label="Zoom in"
-              disabled={gcodeZoom >= 4}
-            >
-              <ZoomInIcon fontSize="small" />
-            </IconButton>
-            <Tooltip title="Reset zoom">
-              <span>
-                <IconButton
-                  size="small"
-                  onClick={handleZoomReset}
-                  aria-label="Reset zoom"
-                  disabled={gcodeZoom === 1}
-                >
-                  <ResetZoomIcon fontSize="small" />
-                </IconButton>
-              </span>
-            </Tooltip>
-          </Stack>
-          <Stack spacing={0.25} alignItems="center" sx={{ ml: 1 }}>
-            <Tooltip title="Pan up">
-              <span>
-                <IconButton
-                  size="small"
-                  onClick={() => handlePan(0, -PAN_STEP)}
-                  aria-label="Pan up"
-                >
-                  <PanUpIcon fontSize="small" />
-                </IconButton>
-              </span>
-            </Tooltip>
-            <Stack direction="row" spacing={0.25} alignItems="center">
-              <Tooltip title="Pan left">
-                <span>
-                  <IconButton
-                    size="small"
-                    onClick={() => handlePan(-PAN_STEP, 0)}
-                    aria-label="Pan left"
-                  >
-                    <PanLeftIcon fontSize="small" />
-                  </IconButton>
-                </span>
-              </Tooltip>
-              <Tooltip title="Reset pan">
-                <span>
-                  <IconButton
-                    size="small"
-                    onClick={handlePanReset}
-                    aria-label="Reset pan"
-                    disabled={gcodePan.x === 0 && gcodePan.y === 0}
-                  >
-                    <ResetPanIcon fontSize="small" />
-                  </IconButton>
-                </span>
-              </Tooltip>
-              <Tooltip title="Pan right">
-                <span>
-                  <IconButton
-                    size="small"
-                    onClick={() => handlePan(PAN_STEP, 0)}
-                    aria-label="Pan right"
-                  >
-                    <PanRightIcon fontSize="small" />
-                  </IconButton>
-                </span>
-              </Tooltip>
-            </Stack>
-            <Tooltip title="Pan down">
-              <span>
-                <IconButton
-                  size="small"
-                  onClick={() => handlePan(0, PAN_STEP)}
-                  aria-label="Pan down"
-                >
-                  <PanDownIcon fontSize="small" />
-                </IconButton>
-              </span>
-            </Tooltip>
-          </Stack>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<ResetZoomIcon fontSize="small" />}
+            onClick={handleGcodeViewReset}
+            disabled={gcodeZoom === 1 && gcodePan.x === 0 && gcodePan.y === 0}
+          >
+            Reset View
+          </Button>
         </Stack>
         <Paper
           variant="outlined"
@@ -954,62 +1062,30 @@ export default function EditProject({ currentProject }) {
           }}
         >
           <Box
-            component="svg"
-            width="100%"
-            height="100%"
-            viewBox={`0 0 ${width} ${height}`}
-            sx={{ maxHeight: 460 }}
+            ref={gcodeContainerRef}
+            onMouseDown={handleGcodeMouseDown}
+            onMouseMove={handleGcodeMouseMove}
+            onMouseUp={handleGcodeMouseUp}
+            onMouseLeave={handleGcodeMouseUp}
+            onWheel={handleGcodeWheel}
+            sx={{
+              width: "100%",
+              maxHeight: 460,
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              cursor: gcodeDragging ? "grabbing" : "grab",
+              userSelect: "none",
+              overflow: "hidden",
+            }}
           >
-            <rect
-              x={0}
-              y={0}
-              width={width}
-              height={height}
-              fill="#999999"
-              stroke="#e0e0e0"
+            <canvas
+              ref={gcodeCanvasRef}
+              style={{
+                width: "100%",
+                height: "100%",
+              }}
             />
-            {paperBox && (
-              <rect
-                x={Math.min(
-                  mapPoint(paperBox.minX, paperBox.minY).x,
-                  mapPoint(paperBox.maxX, paperBox.maxY).x
-                )}
-                y={Math.min(
-                  mapPoint(paperBox.minX, paperBox.minY).y,
-                  mapPoint(paperBox.maxX, paperBox.maxY).y
-                )}
-                width={Math.abs(
-                  mapPoint(paperBox.maxX, paperBox.minY).x -
-                    mapPoint(paperBox.minX, paperBox.minY).x
-                )}
-                height={Math.abs(
-                  mapPoint(paperBox.minX, paperBox.maxY).y -
-                    mapPoint(paperBox.minX, paperBox.minY).y
-                )}
-                fill="none"
-                stroke="#8bc34a"
-                strokeWidth={1.5}
-                strokeDasharray="6 4"
-                opacity={0.9}
-              />
-            )}
-            {printableSegments.map((seg, idx) => {
-              const from = mapPoint(seg.from.x, seg.from.y);
-              const to = mapPoint(seg.to.x, seg.to.y);
-              return (
-                <line
-                  key={`seg-${idx}`}
-                  x1={from.x}
-                  y1={from.y}
-                  x2={to.x}
-                  y2={to.y}
-                  stroke={seg.penDown ? "#1976d2" : "#9e9e9e"}
-                  strokeWidth={seg.penDown ? 1.5 : 1}
-                  strokeDasharray={seg.penDown ? "none" : "4 4"}
-                  opacity={seg.penDown ? 0.9 : 0.5}
-                />
-              );
-            })}
           </Box>
         </Paper>
       </Box>
