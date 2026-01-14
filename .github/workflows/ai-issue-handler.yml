@@ -54,11 +54,11 @@ jobs:
             // Get issue number from different event types
             // For both 'assigned' and 'labeled' events, issue number is in payload.issue.number
             const issueNumber = context.payload.issue?.number || '${{ github.event.inputs.issue_number }}';
-            
+
             // For labeled events, check if the ai-assigned label was added
             const isLabeledEvent = context.payload.action === 'labeled';
             const addedLabel = isLabeledEvent ? context.payload.label?.name : null;
-            
+
             // If this is a labeled event but not the ai-assigned label, skip early
             if (isLabeledEvent && addedLabel !== 'ai-assigned') {
               console.log(`Label event for '${addedLabel}', not 'ai-assigned'. Skipping.`);
@@ -70,7 +70,7 @@ jobs:
               core.setOutput('labels', '[]');
               return;
             }
-            
+
             // Get full issue details
             const issue = await github.rest.issues.get({
               owner: context.repo.owner,
@@ -191,6 +191,7 @@ jobs:
         id: ai_process
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: gpt-5-mini
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ steps.issue_info.outputs.issue_number }}
