@@ -385,10 +385,12 @@ def insert_m0_pen_changes(
     # Track collection starts
     # Collection starts (linecollection_start) are pen_up commands that appear:
     # - On their own line (not part of segment_last multiline block)
+    # - After we've seen at least one drawing command (G0/G1)
     # - segment_last has format: "G1 X... Y... F1500\n{pen_up}" (pen_up on next line)
-    # So we need to detect pen_up that is NOT immediately after a G1 command
+    # - document_start pen_up appears BEFORE any G0/G1 commands
     
     collection_count = 0
+    seen_drawing_commands = False  # Track if we've seen any G0/G1 commands yet
     i = 0
     
     while i < len(lines):
@@ -396,18 +398,23 @@ def insert_m0_pen_changes(
         line_stripped = line.strip()
         result_lines.append(line)
         
+        # Check if this is a drawing command (G0 or G1)
+        if line_stripped.startswith("G0") or line_stripped.startswith("G1"):
+            seen_drawing_commands = True
+        
         # Check if this line contains pen_up command
         # Collection start pen_up appears standalone (linecollection_start)
         # Path end pen_up appears after G1 in segment_last (G1 on previous line)
+        # document_start pen_up appears before any G0/G1 commands
         is_collection_start = False
         
         if pen_up_prefix in line_stripped or pen_up_normalized in line_stripped:
-            # Check if this is a collection start (standalone pen_up)
-            # vs path end (pen_up after G1)
-            if i == 0:
-                # Very first line - could be collection start
-                is_collection_start = True
+            # Skip pen_up commands that are part of document_start (before any drawing commands)
+            if not seen_drawing_commands:
+                # This is document_start pen_up - not a collection start
+                is_collection_start = False
             else:
+                # After drawing has started, check if this is a collection start
                 # Look at previous non-empty line
                 prev_idx = i - 1
                 while prev_idx >= 0 and not lines[prev_idx].strip():
