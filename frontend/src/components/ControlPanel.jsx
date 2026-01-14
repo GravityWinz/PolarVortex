@@ -71,17 +71,45 @@ export default function ControlPanel({ currentProject }) {
   const [expandedEntries, setExpandedEntries] = useState(new Set());
   const [selectedProjectGcode, setSelectedProjectGcode] = useState("");
   const [projects, setProjects] = useState([]);
-  const [selectedPrintProject, setSelectedPrintProject] = useState(null);
-  const [selectedPrintGcode, setSelectedPrintGcode] = useState("");
+  const [selectedPrintProject, setSelectedPrintProject] = useState(() => {
+    try {
+      const stored = localStorage.getItem("pv_selected_print_project");
+      return stored || null;
+    } catch {
+      return null;
+    }
+  });
+  const [selectedPrintGcode, setSelectedPrintGcode] = useState(() => {
+    try {
+      const stored = localStorage.getItem("pv_selected_print_gcode");
+      return stored || "";
+    } catch {
+      return "";
+    }
+  });
   const [printProjectGcodeFiles, setPrintProjectGcodeFiles] = useState([]);
   const [gcodeRunning, setGcodeRunning] = useState(false);
   const [gcodePaused, setGcodePaused] = useState(false);
-  const [gcodeProgress, setGcodeProgress] = useState({
-    jobId: null,
-    linesSent: 0,
-    linesTotal: 0,
-    progress: 0,
-    status: null,
+  const [gcodeProgress, setGcodeProgress] = useState(() => {
+    try {
+      const stored = localStorage.getItem("pv_gcode_progress");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        // Only restore if job_id exists and status is still active
+        if (parsed.jobId && parsed.status && !["completed", "failed", "canceled"].includes(parsed.status)) {
+          return parsed;
+        }
+      }
+    } catch {
+      // Ignore parse errors
+    }
+    return {
+      jobId: null,
+      linesSent: 0,
+      linesTotal: 0,
+      progress: 0,
+      status: null,
+    };
   });
   const logContainerRef = useRef(null);
   const wsRef = useRef(null);
@@ -98,6 +126,74 @@ export default function ControlPanel({ currentProject }) {
     loadDefaultPlotterPenCommands();
     loadProjects();
   }, []);
+
+  // Restore print state and check for active jobs after initial load
+  useEffect(() => {
+    const restorePrintState = async () => {
+      // Restore selected project and gcode file
+      if (selectedPrintProject) {
+        try {
+          const project = await getProject(selectedPrintProject);
+          if (project && project.gcode_files) {
+            setPrintProjectGcodeFiles(project.gcode_files);
+            // Restore selected gcode if it still exists in the project
+            if (selectedPrintGcode && project.gcode_files.includes(selectedPrintGcode)) {
+              setSelectedPrintGcode(selectedPrintGcode);
+            } else if (project.gcode_files.length > 0) {
+              setSelectedPrintGcode(project.gcode_files[0]);
+            }
+          }
+        } catch (err) {
+          console.error("Error restoring project state:", err);
+        }
+      }
+
+      // Restore progress if there's an active job
+      if (gcodeProgress.jobId) {
+        try {
+          const progress = await getJobProgress(gcodeProgress.jobId);
+          if (progress && progress.status && !["completed", "failed", "canceled"].includes(progress.status)) {
+            // Job is still active, restore state and resume polling
+            setGcodeRunning(true);
+            setGcodePaused(progress.paused || false);
+            setGcodeProgress({
+              jobId: progress.job_id,
+              linesSent: progress.lines_sent || 0,
+              linesTotal: progress.lines_total || 0,
+              progress: progress.progress || 0,
+              status: progress.status,
+            });
+            startProgressPolling(progress.job_id);
+          } else {
+            // Job is finished, clear it
+            setGcodeProgress({
+              jobId: null,
+              linesSent: 0,
+              linesTotal: 0,
+              progress: 0,
+              status: null,
+            });
+            localStorage.removeItem("pv_gcode_progress");
+          }
+        } catch (err) {
+          console.error("Error restoring job progress:", err);
+          // If job not found, clear it
+          setGcodeProgress({
+            jobId: null,
+            linesSent: 0,
+            linesTotal: 0,
+            progress: 0,
+            status: null,
+          });
+          localStorage.removeItem("pv_gcode_progress");
+        }
+      }
+    };
+
+    // Only restore on initial mount (when component first loads)
+    restorePrintState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty deps - only run once on mount
 
   useEffect(() => {
     if (currentProject?.gcode_files?.length) {
@@ -119,6 +215,45 @@ export default function ControlPanel({ currentProject }) {
     }
   };
 
+  // Persist selected print project to localStorage
+  useEffect(() => {
+    try {
+      if (selectedPrintProject) {
+        localStorage.setItem("pv_selected_print_project", selectedPrintProject);
+      } else {
+        localStorage.removeItem("pv_selected_print_project");
+      }
+    } catch (err) {
+      console.warn("Failed to persist selected print project", err);
+    }
+  }, [selectedPrintProject]);
+
+  // Persist selected print gcode to localStorage
+  useEffect(() => {
+    try {
+      if (selectedPrintGcode) {
+        localStorage.setItem("pv_selected_print_gcode", selectedPrintGcode);
+      } else {
+        localStorage.removeItem("pv_selected_print_gcode");
+      }
+    } catch (err) {
+      console.warn("Failed to persist selected print gcode", err);
+    }
+  }, [selectedPrintGcode]);
+
+  // Persist gcode progress to localStorage
+  useEffect(() => {
+    try {
+      if (gcodeProgress.jobId) {
+        localStorage.setItem("pv_gcode_progress", JSON.stringify(gcodeProgress));
+      } else {
+        localStorage.removeItem("pv_gcode_progress");
+      }
+    } catch (err) {
+      console.warn("Failed to persist gcode progress", err);
+    }
+  }, [gcodeProgress]);
+
   // Load gcode files when a project is selected for printing
   useEffect(() => {
     const loadProjectGcodeFiles = async () => {
@@ -132,7 +267,11 @@ export default function ControlPanel({ currentProject }) {
         const project = await getProject(selectedPrintProject);
         if (project && project.gcode_files) {
           setPrintProjectGcodeFiles(project.gcode_files);
-          if (project.gcode_files.length > 0) {
+          // Try to restore the previously selected gcode file, or use first one
+          if (selectedPrintGcode && project.gcode_files.includes(selectedPrintGcode)) {
+            // Keep the current selection if it's still valid
+            setSelectedPrintGcode(selectedPrintGcode);
+          } else if (project.gcode_files.length > 0) {
             setSelectedPrintGcode(project.gcode_files[0]);
           } else {
             setSelectedPrintGcode("");
@@ -499,6 +638,7 @@ export default function ControlPanel({ currentProject }) {
           progress: 0,
           status: null,
         });
+        localStorage.removeItem("pv_gcode_progress");
         alert("G-code job started but no job ID was returned. Unable to track progress.");
       }
     } catch (err) {
@@ -511,6 +651,7 @@ export default function ControlPanel({ currentProject }) {
         progress: 0,
         status: null,
       });
+      localStorage.removeItem("pv_gcode_progress");
     }
   };
 
@@ -537,6 +678,8 @@ export default function ControlPanel({ currentProject }) {
         if (["completed", "failed", "canceled"].includes(progress.status)) {
           stopProgressPolling();
           setGcodeRunning(false);
+          // Clear progress from localStorage when job finishes
+          localStorage.removeItem("pv_gcode_progress");
         } else if (progress.status === "paused") {
           setGcodePaused(true);
         } else if (progress.status === "running") {
@@ -825,6 +968,14 @@ export default function ControlPanel({ currentProject }) {
                           onClick={() => {
                             stopProgressPolling();
                             setGcodeRunning(false);
+                            setGcodeProgress({
+                              jobId: null,
+                              linesSent: 0,
+                              linesTotal: 0,
+                              progress: 0,
+                              status: null,
+                            });
+                            localStorage.removeItem("pv_gcode_progress");
                             stopPlotter().catch((err) =>
                               alert(`Stop error: ${err.message}`)
                             );
