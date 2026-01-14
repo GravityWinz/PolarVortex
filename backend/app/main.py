@@ -490,6 +490,13 @@ async def convert_svg_to_gcode(project_id: str, request: SvgToGcodeRequest):
             occult_ignore_layers=getattr(request, "occult_ignore_layers", False),
             occult_across_layers_only=getattr(request, "occult_across_layers_only", False),
             occult_keep_occulted=getattr(request, "occult_keep_occulted", False),
+            enable_optimization=getattr(request, "enable_optimization", False),
+            linemerge_tolerance=getattr(request, "linemerge_tolerance", 0.5),
+            linesimplify_tolerance=getattr(request, "linesimplify_tolerance", 0.1),
+            reloop_tolerance=getattr(request, "reloop_tolerance", 0.1),
+            linesort_enabled=getattr(request, "linesort_enabled", True),
+            linesort_two_opt=getattr(request, "linesort_two_opt", True),
+            linesort_passes=getattr(request, "linesort_passes", 250),
         )
 
         stored_name = str(Path("gcode") / gcode_filename)

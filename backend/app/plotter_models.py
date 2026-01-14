@@ -27,6 +27,13 @@ class SvgToGcodeRequest(BaseModel):
     occult_ignore_layers: bool = False  # If True, perform occlusion across all layers (-i flag)
     occult_across_layers_only: bool = False  # If True, only occlude across layers, not within (-a flag, overrides -i)
     occult_keep_occulted: bool = False  # If True, keep removed lines in separate layer (-k flag)
+    enable_optimization: bool = False  # If True, apply G-code optimization commands
+    linemerge_tolerance: float = 0.5  # Tolerance in mm for linemerge command
+    linesimplify_tolerance: float = 0.1  # Tolerance in mm for linesimplify command
+    reloop_tolerance: float = 0.1  # Tolerance in mm for reloop command
+    linesort_enabled: bool = True  # Enable linesort when optimization is enabled
+    linesort_two_opt: bool = True  # Use two-opt algorithm for linesort
+    linesort_passes: int = 250  # Number of passes for linesort
 
 
 class GcodeAnalysisResult(BaseModel):

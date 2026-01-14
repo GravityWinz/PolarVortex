@@ -34,6 +34,7 @@ import {
   MenuItem,
   Paper,
   Select,
+  Slider,
   Stack,
   Switch,
   Tooltip,
@@ -208,6 +209,13 @@ export default function EditProject({ currentProject }) {
     occultIgnoreLayers: false,
     occultAcrossLayersOnly: false,
     occultKeepOcculted: false,
+    enableOptimization: false,
+    linemergeTolerance: 0.5,
+    linesimplifyTolerance: 0.1,
+    reloopTolerance: 0.1,
+    linesortEnabled: true,
+    linesortTwoOpt: true,
+    linesortPasses: 250,
   });
   const [convertLoading, setConvertLoading] = useState(false);
   const [convertError, setConvertError] = useState("");
@@ -573,6 +581,13 @@ export default function EditProject({ currentProject }) {
         occult_ignore_layers: Boolean(convertOptions.occultIgnoreLayers),
         occult_across_layers_only: Boolean(convertOptions.occultAcrossLayersOnly),
         occult_keep_occulted: Boolean(convertOptions.occultKeepOcculted),
+        enable_optimization: Boolean(convertOptions.enableOptimization),
+        linemerge_tolerance: convertOptions.linemergeTolerance,
+        linesimplify_tolerance: convertOptions.linesimplifyTolerance,
+        reloop_tolerance: convertOptions.reloopTolerance,
+        linesort_enabled: Boolean(convertOptions.linesortEnabled),
+        linesort_two_opt: Boolean(convertOptions.linesortTwoOpt),
+        linesort_passes: convertOptions.linesortPasses,
       });
       await loadAssets();
       setConvertDialogOpen(false);
@@ -1970,6 +1985,147 @@ export default function EditProject({ currentProject }) {
                   }
                   label="Keep occulted lines (-k) - Keep removed lines in separate layer"
                 />
+              </Box>
+            )}
+
+            <Divider sx={{ my: 2 }} />
+
+            <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+              G-code Optimization
+            </Typography>
+
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={convertOptions.enableOptimization}
+                  onChange={(e) =>
+                    setConvertOptions((prev) => ({
+                      ...prev,
+                      enableOptimization: e.target.checked,
+                    }))
+                  }
+                  color="primary"
+                />
+              }
+              label="Enable G-code optimization"
+            />
+
+            {convertOptions.enableOptimization && (
+              <Box sx={{ pl: 3, mt: 1 }}>
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    Linemerge tolerance: {convertOptions.linemergeTolerance.toFixed(2)}mm
+                  </Typography>
+                  <Slider
+                    value={convertOptions.linemergeTolerance}
+                    onChange={(e, value) =>
+                      setConvertOptions((prev) => ({
+                        ...prev,
+                        linemergeTolerance: value,
+                      }))
+                    }
+                    min={0.01}
+                    max={2.0}
+                    step={0.01}
+                    valueLabelDisplay="auto"
+                    disabled={convertLoading}
+                  />
+                </Box>
+
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    Linesimplify tolerance: {convertOptions.linesimplifyTolerance.toFixed(2)}mm
+                  </Typography>
+                  <Slider
+                    value={convertOptions.linesimplifyTolerance}
+                    onChange={(e, value) =>
+                      setConvertOptions((prev) => ({
+                        ...prev,
+                        linesimplifyTolerance: value,
+                      }))
+                    }
+                    min={0.01}
+                    max={1.0}
+                    step={0.01}
+                    valueLabelDisplay="auto"
+                    disabled={convertLoading}
+                  />
+                </Box>
+
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    Reloop tolerance: {convertOptions.reloopTolerance.toFixed(2)}mm
+                  </Typography>
+                  <Slider
+                    value={convertOptions.reloopTolerance}
+                    onChange={(e, value) =>
+                      setConvertOptions((prev) => ({
+                        ...prev,
+                        reloopTolerance: value,
+                      }))
+                    }
+                    min={0.01}
+                    max={1.0}
+                    step={0.01}
+                    valueLabelDisplay="auto"
+                    disabled={convertLoading}
+                  />
+                </Box>
+
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={convertOptions.linesortEnabled}
+                      onChange={(e) =>
+                        setConvertOptions((prev) => ({
+                          ...prev,
+                          linesortEnabled: e.target.checked,
+                        }))
+                      }
+                      color="primary"
+                    />
+                  }
+                  label="Enable linesort"
+                />
+
+                <Box sx={{ pl: 3, mt: 1 }}>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={convertOptions.linesortTwoOpt}
+                        onChange={(e) =>
+                          setConvertOptions((prev) => ({
+                            ...prev,
+                            linesortTwoOpt: e.target.checked,
+                          }))
+                        }
+                        disabled={!convertOptions.linesortEnabled}
+                        color="primary"
+                      />
+                    }
+                    label="Use two-opt algorithm"
+                  />
+
+                  <Box sx={{ mb: 2, mt: 2 }}>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                      Linesort passes: {convertOptions.linesortPasses}
+                    </Typography>
+                    <Slider
+                      value={convertOptions.linesortPasses}
+                      onChange={(e, value) =>
+                        setConvertOptions((prev) => ({
+                          ...prev,
+                          linesortPasses: value,
+                        }))
+                      }
+                      min={1}
+                      max={1000}
+                      step={1}
+                      valueLabelDisplay="auto"
+                      disabled={convertLoading || !convertOptions.linesortEnabled}
+                    />
+                  </Box>
+                </Box>
               </Box>
             )}
 

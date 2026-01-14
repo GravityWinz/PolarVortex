@@ -633,6 +633,13 @@ def build_vpype_pipeline(
     occult_ignore_layers: bool = False,
     occult_across_layers_only: bool = False,
     occult_keep_occulted: bool = False,
+    enable_optimization: bool = False,
+    linemerge_tolerance: float = 0.5,
+    linesimplify_tolerance: float = 0.1,
+    reloop_tolerance: float = 0.1,
+    linesort_enabled: bool = True,
+    linesort_two_opt: bool = True,
+    linesort_passes: int = 250,
 ) -> str:
     """Build a vpype pipeline string for SVG->G-code conversion."""
     width, height = float(paper_width_mm), float(paper_height_mm)
@@ -679,10 +686,24 @@ def build_vpype_pipeline(
         occult_flag_str = " ".join(occult_flags)
         occult_cmd = f"occult {occult_flag_str}".strip()
 
+    # Build optimization commands if enabled
+    optimization_cmds = []
+    if enable_optimization:
+        optimization_cmds.append(f"linemerge --tolerance {linemerge_tolerance:.3f}mm")
+        optimization_cmds.append(f"linesimplify --tolerance {linesimplify_tolerance:.3f}mm")
+        optimization_cmds.append(f"reloop --tolerance {reloop_tolerance:.3f}mm")
+        if linesort_enabled:
+            if linesort_two_opt:
+                optimization_cmds.append(f"linesort --two-opt --passes {linesort_passes}")
+            else:
+                optimization_cmds.append(f"linesort --passes {linesort_passes}")
+    optimization_cmd_str = " ".join(optimization_cmds)
+
     pipeline_parts = [
         config_arg,
         f'read "{svg_path}"',
         occult_cmd,
+        optimization_cmd_str,
         "rotate -- -90deg" if rotate_90 else "",
         place_cmd,
         *flip_cmds,
@@ -729,6 +750,13 @@ async def convert_svg_to_gcode_file(
     occult_ignore_layers: bool = False,
     occult_across_layers_only: bool = False,
     occult_keep_occulted: bool = False,
+    enable_optimization: bool = False,
+    linemerge_tolerance: float = 0.5,
+    linesimplify_tolerance: float = 0.1,
+    reloop_tolerance: float = 0.1,
+    linesort_enabled: bool = True,
+    linesort_two_opt: bool = True,
+    linesort_passes: int = 250,
 ) -> None:
     """Convert SVG to G-code using vpype CLI."""
     # #region agent log
@@ -761,6 +789,13 @@ async def convert_svg_to_gcode_file(
             occult_ignore_layers=occult_ignore_layers,
             occult_across_layers_only=occult_across_layers_only,
             occult_keep_occulted=occult_keep_occulted,
+            enable_optimization=enable_optimization,
+            linemerge_tolerance=linemerge_tolerance,
+            linesimplify_tolerance=linesimplify_tolerance,
+            reloop_tolerance=reloop_tolerance,
+            linesort_enabled=linesort_enabled,
+            linesort_two_opt=linesort_two_opt,
+            linesort_passes=linesort_passes,
         )
         await run_vpype_pipeline(pipeline)
 
@@ -805,6 +840,22 @@ async def convert_svg_to_gcode_file(
                 if occult_flags:
                     occult_info += f" ({', '.join(occult_flags)})"
                 header_lines.append(f"; Hidden line removal: {occult_info}")
+            # Add optimization info if enabled
+            if enable_optimization:
+                opt_parts = []
+                opt_parts.append(f"linemerge={linemerge_tolerance:.3f}mm")
+                opt_parts.append(f"linesimplify={linesimplify_tolerance:.3f}mm")
+                opt_parts.append(f"reloop={reloop_tolerance:.3f}mm")
+                if linesort_enabled:
+                    sort_info = f"linesort(passes={linesort_passes}"
+                    if linesort_two_opt:
+                        sort_info += ",two-opt"
+                    sort_info += ")"
+                    opt_parts.append(sort_info)
+                opt_info = "optimization enabled"
+                if opt_parts:
+                    opt_info += f" ({', '.join(opt_parts)})"
+                header_lines.append(f"; G-code optimization: {opt_info}")
             header = "\n".join(header_lines) + "\n"
             original = output_path.read_text(encoding="utf-8", errors="ignore")
             output_path.write_text(header + original, encoding="utf-8")
