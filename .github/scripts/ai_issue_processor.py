@@ -55,7 +55,7 @@ def get_openai_model():
     # Default to more accessible models (in order of preference)
     # gpt-4-turbo is more accessible than gpt-4
     # gpt-3.5-turbo is the most accessible
-    return "gpt-4-turbo"
+    return "gpt-5-mini"
 
 
 def get_anthropic_model():
@@ -211,7 +211,7 @@ Respond in JSON format:
 """
 
     # Try models in order of preference with fallback
-    openai_models = ["gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"]
+    openai_models = ["gpt-5-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"]
     anthropic_models = ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229", "claude-3-sonnet-20240229"]
     
     try:
@@ -348,7 +348,7 @@ Respond in JSON format:
 """
 
     # Try models in order of preference with fallback
-    openai_models = ["gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"]
+    openai_models = ["gpt-5-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"]
     anthropic_models = ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229", "claude-3-sonnet-20240229"]
     
     result = None
