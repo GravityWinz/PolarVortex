@@ -209,22 +209,38 @@ def sort_svg_by_stroke(
             "ellipse",
         }
 
-        original_children = list(root)
+        def collect_drawable_elements(elem, drawable_list: list):
+            """Recursively collect all drawable elements from element tree."""
+            tag = elem.tag.rsplit("}", 1)[-1] if "}" in elem.tag else elem.tag
+            if tag in drawable_tags:
+                drawable_list.append(elem)
+            else:
+                # Recursively process children (for groups, etc.)
+                for child in elem:
+                    collect_drawable_elements(child, drawable_list)
+        
+        # Collect all drawable elements recursively
+        all_drawables = []
+        for child in root:
+            collect_drawable_elements(child, all_drawables)
+        
+        # Separate preserved elements (non-drawable top-level elements)
         preserved = []
+        for child in root:
+            tag = child.tag.rsplit("}", 1)[-1] if "}" in child.tag else child.tag
+            if tag not in drawable_tags:
+                preserved.append(child)
+        
         color_order = []
         color_groups: Dict[str, list] = {}
 
-        for child in original_children:
-            tag = child.tag.rsplit("}", 1)[-1] if "}" in child.tag else child.tag
-            if tag in drawable_tags:
-                stroke = _get_stroke_value(child)
-                if stroke not in color_order:
-                    color_order.append(stroke)
-                    # Generate descriptor for this color
-                    color_metadata["color_descriptors"][stroke] = _generate_color_descriptor(stroke)
-                color_groups.setdefault(stroke, []).append(child)
-            else:
-                preserved.append(child)
+        for elem in all_drawables:
+            stroke = _get_stroke_value(elem)
+            if stroke not in color_order:
+                color_order.append(stroke)
+                # Generate descriptor for this color
+                color_metadata["color_descriptors"][stroke] = _generate_color_descriptor(stroke)
+            color_groups.setdefault(stroke, []).append(elem)
 
         # If nothing to sort, return original with empty metadata
         if not color_order:
@@ -235,9 +251,26 @@ def sort_svg_by_stroke(
         color_metadata["color_count"] = len(color_order)
 
         # Rebuild child list: keep preserved elements, then grouped drawables by stroke order
-        new_children = preserved + [
-            elem for color in color_order for elem in color_groups.get(color, [])
-        ]
+        # When we add elements to root, ElementTree automatically removes them from their old parent
+        # So we need to clear groups first to avoid issues, or we can just rebuild the tree
+        new_children = []
+        
+        # Add preserved non-drawable elements (defs, namedview, etc.)
+        for elem in preserved:
+            tag = elem.tag.rsplit("}", 1)[-1] if "}" in elem.tag else elem.tag
+            if tag == "g":  # For groups, keep the group but clear its children
+                # Create a new group with same attributes but no children
+                import xml.etree.ElementTree as ET
+                new_g = ET.Element(elem.tag, elem.attrib)
+                new_children.append(new_g)
+            else:
+                new_children.append(elem)
+        
+        # Add all drawable elements grouped by color
+        for color in color_order:
+            for elem in color_groups.get(color, []):
+                new_children.append(elem)
+        
         root[:] = new_children
 
         # Persist the temp file in local storage tmp so it doesn't clutter projects.
@@ -415,20 +448,68 @@ def insert_m0_pen_changes(
                 is_collection_start = False
             else:
                 # After drawing has started, check if this is a collection start
+                # Pattern analysis:
+                # - segment_last: G1 ... F1500, then M280 (path end pen_up) - pen_up immediately after G1
+                # - linecollection_start: M280 (collection start pen_up), then G0 ... (first segment of next path)
+                # So: if previous line is G1, this is path end (segment_last)
+                #     if next line is G0, this is collection start (linecollection_start)
+                
                 # Look at previous non-empty line
                 prev_idx = i - 1
                 while prev_idx >= 0 and not lines[prev_idx].strip():
                     prev_idx -= 1
                 
+                # Look at next non-empty line
+                next_idx = i + 1
+                while next_idx < len(lines) and not lines[next_idx].strip():
+                    next_idx += 1
+                
                 if prev_idx >= 0:
                     prev_line = lines[prev_idx].strip()
-                    # If previous line starts with G1, this pen_up is part of segment_last (path end)
-                    # Otherwise, it's a collection start
-                    if not prev_line.startswith("G1"):
-                        is_collection_start = True
+                    if prev_line.startswith("G1"):
+                        # Previous line is G1, so this pen_up is part of segment_last (path end)
+                        # UNLESS the next line is G0, which means this is actually a collection start
+                        if next_idx < len(lines):
+                            next_line = lines[next_idx].strip()
+                            if next_line.startswith("G0"):
+                                # Next line is G0, so this is a collection start (linecollection_start)
+                                is_collection_start = True
+                            else:
+                                # Next line is not G0, so this is path end
+                                is_collection_start = False
+                        else:
+                            # No next line, treat as path end
+                            is_collection_start = False
+                    else:
+                        # Previous line is not G1, check if next line is G0
+                        if next_idx < len(lines):
+                            next_line = lines[next_idx].strip()
+                            if next_line.startswith("G0"):
+                                # Next line is G0, so this is a collection start
+                                is_collection_start = True
+                            else:
+                                # Next line is not G0, might be path end or something else
+                                # If previous was also pen_up, it's likely collection start
+                                if pen_up_prefix in prev_line or pen_up_normalized in prev_line:
+                                    is_collection_start = True
+                                else:
+                                    is_collection_start = False
+                        else:
+                            # No next line, if previous was pen_up, treat as collection start
+                            if pen_up_prefix in prev_line or pen_up_normalized in prev_line:
+                                is_collection_start = True
+                            else:
+                                is_collection_start = False
                 else:
-                    # No previous non-empty line - treat as collection start
-                    is_collection_start = True
+                    # No previous line, check if next is G0
+                    if next_idx < len(lines):
+                        next_line = lines[next_idx].strip()
+                        if next_line.startswith("G0"):
+                            is_collection_start = True
+                        else:
+                            is_collection_start = False
+                    else:
+                        is_collection_start = False
         
         # Insert M0 after collection start (except first collection)
         if is_collection_start:
