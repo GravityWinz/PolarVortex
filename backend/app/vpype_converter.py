@@ -425,6 +425,7 @@ def insert_m0_pen_changes(
     collection_count = 0
     seen_drawing_commands = False  # Track if we've seen any G0/G1 commands yet
     pending_collection_start = False  # Track if we just saw a collection start pen_up
+    in_collection = False  # Track if we're currently inside a color collection (to avoid M0 for subsequent paths)
     i = 0
     
     while i < len(lines):
@@ -436,8 +437,9 @@ def insert_m0_pen_changes(
             seen_drawing_commands = True
             
             # If this is a G0 and we have a pending collection start, insert M0 before it
-            if line_stripped.startswith("G0") and pending_collection_start:
-                # This G0 starts a new color collection
+            # Only insert M0 for the FIRST G0 of a new color collection, not for subsequent paths
+            if line_stripped.startswith("G0") and pending_collection_start and not in_collection:
+                # This is the first G0 of a new color collection
                 # collection_count = 0: first color (insert M0 for svg_color_order[0])
                 # collection_count = 1: second color (insert M0 for svg_color_order[1])
                 # collection_count = 2: third color (insert M0 for svg_color_order[2])
@@ -452,6 +454,7 @@ def insert_m0_pen_changes(
                 # Increment after using collection_count to index the color
                 collection_count += 1
                 pending_collection_start = False
+                in_collection = True  # Mark that we're now inside a color collection
         
         # Check if this line contains pen_up command
         # Collection start pen_up appears standalone (linecollection_start)
@@ -547,6 +550,7 @@ def insert_m0_pen_changes(
         # If this is a collection start pen_up, mark it as pending (M0 will be inserted before next G0)
         if is_collection_start:
             pending_collection_start = True
+            in_collection = False  # Reset - we're starting a new color collection
         
         # Add the current line to result
         result_lines.append(line)
