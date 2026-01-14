@@ -284,7 +284,10 @@ def sort_svg_by_stroke(
         return svg_path, color_metadata
 
 
-def build_vpype_config_content() -> str:
+def build_vpype_config_content(
+    servo_delay_ms: float = 100.0,
+    pen_debounce_steps: int = 7,
+) -> str:
     """Generate vpype config content using current plotter gcode settings."""
     gcode = _get_default_gcode_settings()
     pen_up = getattr(gcode, "pen_up_command", "M280 P0 S110")
@@ -293,6 +296,10 @@ def build_vpype_config_content() -> str:
     pen_down = getattr(gcode, "pen_down_command", "M280 P0 S130")
     if pen_down is None:
         pen_down = "M280 P0 S130"
+    if servo_delay_ms is None:
+        servo_delay_ms = 100.0
+    if pen_debounce_steps is None or pen_debounce_steps < 1:
+        pen_debounce_steps = 1
     
     # Extract servo angles from commands
     import re
@@ -924,6 +931,10 @@ async def convert_svg_to_gcode_file(
                 if occult_flags:
                     occult_info += f" ({', '.join(occult_flags)})"
                 header_lines.append(f"; Hidden line removal: {occult_info}")
+            # Add pen debounce info
+            header_lines.append(
+                f"; Pen debounce: steps={pen_debounce_steps}, delay_ms={servo_delay_ms:.0f}"
+            )
             # Add optimization info if enabled
             if enable_optimization:
                 opt_parts = []
