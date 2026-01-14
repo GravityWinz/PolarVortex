@@ -293,13 +293,81 @@ def build_vpype_config_content() -> str:
     pen_down = getattr(gcode, "pen_down_command", "M280 P0 S130")
     if pen_down is None:
         pen_down = "M280 P0 S130"
+    
+    # Extract servo angles from commands
+    import re
+    def extract_servo_angle(cmd: str) -> Optional[float]:
+        """Extract S value from M280 command (e.g., 'M280 P0 S110' -> 110.0)."""
+        match = re.search(r'S([\d.]+)', cmd)
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                return None
+        return None
+    
+    def generate_exponential_pen_down_sequence(pen_up_cmd: str, pen_down_cmd: str, num_steps: int = 7) -> str:
+        """
+        Generate multiple M280 commands that exponentially approach pen_down value.
+        This reduces bouncing by gradually lowering the pen instead of one sudden move.
+        
+        Args:
+            pen_up_cmd: Command for pen up (e.g., "M280 P0 S110")
+            pen_down_cmd: Command for pen down (e.g., "M280 P0 S130")
+            num_steps: Total number of moves (default 7)
+        
+        Returns:
+            Multi-line string with M280 commands and final delay
+        """
+        pen_up_angle = extract_servo_angle(pen_up_cmd)
+        pen_down_angle = extract_servo_angle(pen_down_cmd)
+        
+        if pen_up_angle is None or pen_down_angle is None:
+            # Fallback: if we can't parse angles, just use the original command with delay
+            return f"{pen_down_cmd}\nG4 P{int(servo_delay_ms)}"
+        
+        # Extract command prefix (e.g., "M280 P0" from "M280 P0 S110")
+        prefix_match = re.match(r'^([^S]+)', pen_down_cmd)
+        if prefix_match:
+            cmd_prefix = prefix_match.group(1).strip()
+        else:
+            cmd_prefix = "M280 P0"
+        
+        # Generate exponential approach: each step covers 50% of remaining distance
+        # Formula: angle = pen_up + (pen_down - pen_up) * (1 - 0.5^step)
+        # For num_steps=7: steps 1-6 are intermediate, step 7 is exact pen_down
+        commands = []
+        for step in range(1, num_steps):
+            # Exponential approach: step 1 covers 50%, step 2 covers 75%, etc.
+            progress = 1 - (0.5 ** step)
+            angle = pen_up_angle + (pen_down_angle - pen_up_angle) * progress
+            commands.append(f"{cmd_prefix} S{angle:.2f}")
+        
+        # Final step: exact pen_down value
+        commands.append(f"{cmd_prefix} S{pen_down_angle:.2f}")
+        
+        # Add delay after final command
+        commands.append(f"G4 P{int(servo_delay_ms)}")
+        return "\n".join(commands)
+    
+    pen_down_sequence = generate_exponential_pen_down_sequence(pen_up, pen_down, num_steps=pen_debounce_steps)
+    
     before_print = getattr(gcode, "before_print", None)
     if before_print is None:
         before_print = []
     # Ensure pen is up in document_start and include only pre-print sequence
-    doc_start_lines = [*before_print]
-    if pen_up not in doc_start_lines:
-        doc_start_lines.append(pen_up)
+    # Replace pen_down commands in before_print with exponential sequence
+    doc_start_lines = []
+    for line in before_print:
+        if line.strip() == pen_down.strip():
+            # Replace single pen_down with exponential sequence
+            doc_start_lines.append(pen_down_sequence)
+        else:
+            doc_start_lines.append(line)
+    # Check if pen_up is already in the lines
+    pen_up_in_lines = any(line.strip().startswith(pen_up.strip()) for line in doc_start_lines)
+    if not pen_up_in_lines:
+        doc_start_lines.append(pen_up)  # No delay for pen up
     document_start = "\n".join(doc_start_lines)
 
     return textwrap.dedent(
@@ -316,10 +384,10 @@ document_start = """
 # Ensure pen is raised between collections
 linecollection_start = "{pen_up}\\n"
 
-# First segment in a path: move then pen down
+# First segment in a path: move then pen down (exponential approach to reduce bouncing)
 segment_first = """
 G0 X{{x:.3f}} Y{{y:.3f}}
-{pen_down}
+{pen_down_sequence}
 """
 
 # Subsequent segments while drawing
@@ -340,11 +408,21 @@ M2 ; program end
     )
 
 
-def ensure_vpype_config(path: Path = DEFAULT_VPYPE_CONFIG) -> Path:
-    """Ensure vpype config exists and reflects current plotter G-code settings."""
+def ensure_vpype_config(
+    path: Path = DEFAULT_VPYPE_CONFIG,
+    servo_delay_ms: float = 100.0,
+    pen_debounce_steps: int = 7,
+) -> Path:
+    """Ensure vpype config exists and reflects current plotter G-code settings.
+    
+    Args:
+        path: Path to vpype config file
+        servo_delay_ms: Delay in milliseconds after pen down
+        pen_debounce_steps: Number of M280 commands for exponential pen down
+    """
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        content = build_vpype_config_content()
+        content = build_vpype_config_content(servo_delay_ms=servo_delay_ms, pen_debounce_steps=pen_debounce_steps)
         needs_write = True
         if path.exists():
             try:
@@ -640,6 +718,8 @@ def build_vpype_pipeline(
     linesort_enabled: bool = True,
     linesort_two_opt: bool = True,
     linesort_passes: int = 250,
+    servo_delay_ms: float = 100.0,
+    pen_debounce_steps: int = 7,
 ) -> str:
     """Build a vpype pipeline string for SVG->G-code conversion."""
     width, height = float(paper_width_mm), float(paper_height_mm)
@@ -665,7 +745,7 @@ def build_vpype_pipeline(
     # Prefer local stored vpype config/profile for consistent pen control
     config_arg = ""
     if config_path:
-        ensure_vpype_config(config_path)
+        ensure_vpype_config(config_path, servo_delay_ms=servo_delay_ms, pen_debounce_steps=pen_debounce_steps)
         if config_path.exists():
             config_arg = f'--config "{config_path}" '
         else:
@@ -757,6 +837,8 @@ async def convert_svg_to_gcode_file(
     linesort_enabled: bool = True,
     linesort_two_opt: bool = True,
     linesort_passes: int = 250,
+    servo_delay_ms: float = 100.0,
+    pen_debounce_steps: int = 7,
 ) -> None:
     """Convert SVG to G-code using vpype CLI."""
     # #region agent log
@@ -796,6 +878,8 @@ async def convert_svg_to_gcode_file(
             linesort_enabled=linesort_enabled,
             linesort_two_opt=linesort_two_opt,
             linesort_passes=linesort_passes,
+            servo_delay_ms=servo_delay_ms,
+            pen_debounce_steps=pen_debounce_steps,
         )
         await run_vpype_pipeline(pipeline)
 

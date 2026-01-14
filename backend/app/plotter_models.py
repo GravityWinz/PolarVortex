@@ -34,6 +34,8 @@ class SvgToGcodeRequest(BaseModel):
     linesort_enabled: bool = True  # Enable linesort when optimization is enabled
     linesort_two_opt: bool = True  # Use two-opt algorithm for linesort
     linesort_passes: int = 250  # Number of passes for linesort
+    servo_delay_ms: float = 100.0  # Delay in milliseconds after pen down to allow servo settling
+    pen_debounce_steps: int = 7  # Number of M280 commands for exponential pen down approach (reduces bouncing)
 
 
 class GcodeAnalysisResult(BaseModel):

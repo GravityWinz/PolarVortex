@@ -216,6 +216,8 @@ export default function EditProject({ currentProject }) {
     linesortEnabled: true,
     linesortTwoOpt: true,
     linesortPasses: 250,
+    servoDelayMs: 100.0,
+    penDebounceSteps: 7,
   });
   const [convertLoading, setConvertLoading] = useState(false);
   const [convertError, setConvertError] = useState("");
@@ -588,6 +590,8 @@ export default function EditProject({ currentProject }) {
         linesort_enabled: Boolean(convertOptions.linesortEnabled),
         linesort_two_opt: Boolean(convertOptions.linesortTwoOpt),
         linesort_passes: convertOptions.linesortPasses,
+        servo_delay_ms: convertOptions.servoDelayMs,
+        pen_debounce_steps: convertOptions.penDebounceSteps,
       });
       await loadAssets();
       setConvertDialogOpen(false);
@@ -2128,6 +2132,58 @@ export default function EditProject({ currentProject }) {
                 </Box>
               </Box>
             )}
+
+            <Divider sx={{ my: 2 }} />
+
+            <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+              Pen Control (Servo Debounce)
+            </Typography>
+
+            <Box sx={{ mb: 2 }}>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                Servo delay after pen down: {convertOptions.servoDelayMs.toFixed(0)}ms
+              </Typography>
+              <Slider
+                value={convertOptions.servoDelayMs}
+                onChange={(e, value) =>
+                  setConvertOptions((prev) => ({
+                    ...prev,
+                    servoDelayMs: value,
+                  }))
+                }
+                min={0}
+                max={500}
+                step={10}
+                valueLabelDisplay="auto"
+                disabled={convertLoading}
+              />
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
+                Delay after pen down to allow servo to settle (reduces bouncing)
+              </Typography>
+            </Box>
+
+            <Box sx={{ mb: 2 }}>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                Pen debounce steps: {convertOptions.penDebounceSteps}
+              </Typography>
+              <Slider
+                value={convertOptions.penDebounceSteps}
+                onChange={(e, value) =>
+                  setConvertOptions((prev) => ({
+                    ...prev,
+                    penDebounceSteps: value,
+                  }))
+                }
+                min={1}
+                max={15}
+                step={1}
+                valueLabelDisplay="auto"
+                disabled={convertLoading}
+              />
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
+                Number of M280 commands for exponential pen down approach (more steps = smoother but slower)
+              </Typography>
+            </Box>
 
             {/* Fit/center and pen mapping removed; we always center without pen mapping. */}
 

@@ -10,6 +10,7 @@ class GcodeSettings(BaseModel):
     before_print: List[str] = Field(default_factory=list, description="Commands to run just before starting a print job")
     pen_up_command: str = Field(default="M280 P0 S110", description="Command to raise pen")
     pen_down_command: str = Field(default="M280 P0 S130", description="Command to lower pen")
+    servo_delay_ms: float = Field(default=100.0, description="Delay in milliseconds after servo commands to allow settling (reduces bouncing)")
 
 
 class GcodeSettingsUpdate(BaseModel):
@@ -18,6 +19,7 @@ class GcodeSettingsUpdate(BaseModel):
     before_print: Optional[List[str]] = Field(None, description="Commands to run before print start")
     pen_up_command: Optional[str] = Field(None, description="Command to raise pen")
     pen_down_command: Optional[str] = Field(None, description="Command to lower pen")
+    servo_delay_ms: Optional[float] = Field(None, description="Delay in milliseconds after servo commands to allow settling")
 
 
 class PlotterType(str, Enum):

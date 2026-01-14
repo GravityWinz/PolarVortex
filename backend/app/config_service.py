@@ -338,7 +338,7 @@ class ConfigurationService:
             }
         ]
 
-    def _get_default_gcode_sequences(self) -> Dict[str, List[str]]:
+    def _get_default_gcode_sequences(self) -> Dict[str, Any]:
         """Get default G-code sequences for automation"""
         return {
             "on_connect": [
@@ -351,6 +351,7 @@ class ConfigurationService:
             ],
             "pen_up_command": "M280 P0 S110",
             "pen_down_command": "M280 P0 S130",
+            "servo_delay_ms": 100.0,
         }
     
     def _validate_and_repair_config(self):
@@ -622,6 +623,7 @@ class ConfigurationService:
             before_print=defaults.get("before_print", []),
             pen_up_command=defaults.get("pen_up_command", "M280 P0 S110"),
             pen_down_command=defaults.get("pen_down_command", "M280 P0 S130"),
+            servo_delay_ms=defaults.get("servo_delay_ms", 100.0),
         )
 
     def update_gcode_settings(self, gcode_data: GcodeSettingsUpdate) -> GcodeSettings:
@@ -677,6 +679,7 @@ class ConfigurationService:
                 before_print=gcode_data.get('before_print', []),
                 pen_up_command=gcode_data.get('pen_up_command', "M280 P0 S110"),
                 pen_down_command=gcode_data.get('pen_down_command', "M280 P0 S130"),
+                servo_delay_ms=gcode_data.get('servo_delay_ms', 100.0),
             ),
             home_position_x=plotter_dict['home_position_x'],
             home_position_y=plotter_dict['home_position_y'],

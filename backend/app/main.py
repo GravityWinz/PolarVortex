@@ -497,6 +497,8 @@ async def convert_svg_to_gcode(project_id: str, request: SvgToGcodeRequest):
             linesort_enabled=getattr(request, "linesort_enabled", True),
             linesort_two_opt=getattr(request, "linesort_two_opt", True),
             linesort_passes=getattr(request, "linesort_passes", 250),
+            servo_delay_ms=getattr(request, "servo_delay_ms", 100.0),
+            pen_debounce_steps=getattr(request, "pen_debounce_steps", 7),
         )
 
         stored_name = str(Path("gcode") / gcode_filename)
