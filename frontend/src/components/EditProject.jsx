@@ -3,6 +3,7 @@ import {
   AutoFixHigh as ConvertIcon,
   DeleteOutline as DeleteIcon,
   InsertDriveFile as FileIcon,
+  Create as GenerateSvgIcon,
   Image as ImageIcon,
   ArrowDownward as PanDownIcon,
   ArrowBack as PanLeftIcon,
@@ -13,7 +14,6 @@ import {
   RestartAlt as ResetZoomIcon,
   Article as SvgIcon,
   AutoGraph as VectorizeIcon,
-  Create as GenerateSvgIcon,
   ZoomIn as ZoomInIcon,
   ZoomOut as ZoomOutIcon,
 } from "@mui/icons-material";
@@ -60,8 +60,8 @@ import {
   uploadGcodeToProject,
   uploadImageToProject,
 } from "../services/apiService";
-import VectorizeDialog from "./VectorizeDialog";
 import GenerateSvgDialog from "./GenerateSvgDialog";
+import VectorizeDialog from "./VectorizeDialog";
 
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "bmp", "webp"];
 const SVG_EXTENSIONS = ["svg"];
@@ -108,7 +108,7 @@ function groupAssets(imageEntries = [], gcodeEntries = []) {
     if (entry.is_thumbnail) {
       return;
     }
-    
+
     const normalized = normalizeAsset(entry.filename, {
       is_thumbnail: entry.is_thumbnail,
       is_processed: entry.is_processed,
@@ -222,6 +222,18 @@ export default function EditProject({ currentProject }) {
   const fileInputRef = useRef(null);
   const [gcodeZoom, setGcodeZoom] = useState(1);
   const [gcodePan, setGcodePan] = useState({ x: 0, y: 0 });
+  const [svgContent, setSvgContent] = useState("");
+  const [svgContentLoading, setSvgContentLoading] = useState(false);
+  const [svgZoom, setSvgZoom] = useState(1);
+  const [svgPan, setSvgPan] = useState({ x: 0, y: 0 });
+  const [svgDragging, setSvgDragging] = useState(false);
+  const [svgDragStart, setSvgDragStart] = useState({ x: 0, y: 0 });
+  const svgContainerRef = useRef(null);
+  const [imageZoom, setImageZoom] = useState(1);
+  const [imagePan, setImagePan] = useState({ x: 0, y: 0 });
+  const [imageDragging, setImageDragging] = useState(false);
+  const [imageDragStart, setImageDragStart] = useState({ x: 0, y: 0 });
+  const imageContainerRef = useRef(null);
 
   const defaultPaper = useMemo(() => {
     if (!paperOptions.length) return null;
@@ -302,6 +314,38 @@ export default function EditProject({ currentProject }) {
   }, [convertOptions.paperSize]);
 
   useEffect(() => {
+    if (!selectedAsset || selectedAsset.type !== "svg" || !currentProject) {
+      setSvgContent("");
+      setSvgContentLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const loadSvg = async () => {
+      setSvgContentLoading(true);
+      try {
+        const content = await getProjectFileText(
+          currentProject.id,
+          selectedAsset.filename
+        );
+        if (!cancelled) {
+          setSvgContent(content);
+          setSvgContentLoading(false);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setSvgContent("");
+          setSvgContentLoading(false);
+        }
+      }
+    };
+    loadSvg();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedAsset, currentProject]);
+
+  useEffect(() => {
     if (!selectedAsset || selectedAsset.type !== "gcode" || !currentProject) {
       setGcodePreview({ loading: false, content: "", error: "" });
       setGcodeAnalysis({ loading: false, data: null, error: "" });
@@ -352,6 +396,70 @@ export default function EditProject({ currentProject }) {
       setSvgAnalysis({ loading: false, data: null, error: "" });
     }
   }, [selectedAsset]);
+
+  // Handle global mouse events for SVG dragging
+  useEffect(() => {
+    if (!svgDragging || !svgContainerRef.current) return;
+
+    const container = svgContainerRef.current;
+
+    const handleMouseMove = (e) => {
+      const rect = container.getBoundingClientRect();
+      const containerCenterX = rect.width / 2;
+      const containerCenterY = rect.height / 2;
+      const mouseX = e.clientX - rect.left - containerCenterX;
+      const mouseY = e.clientY - rect.top - containerCenterY;
+
+      setSvgPan({
+        x: mouseX - svgDragStart.x,
+        y: mouseY - svgDragStart.y,
+      });
+    };
+
+    const handleMouseUp = () => {
+      setSvgDragging(false);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [svgDragging, svgDragStart]);
+
+  // Handle global mouse events for image dragging
+  useEffect(() => {
+    if (!imageDragging || !imageContainerRef.current) return;
+
+    const container = imageContainerRef.current;
+
+    const handleMouseMove = (e) => {
+      const rect = container.getBoundingClientRect();
+      const containerCenterX = rect.width / 2;
+      const containerCenterY = rect.height / 2;
+      const mouseX = e.clientX - rect.left - containerCenterX;
+      const mouseY = e.clientY - rect.top - containerCenterY;
+
+      setImagePan({
+        x: mouseX - imageDragStart.x,
+        y: mouseY - imageDragStart.y,
+      });
+    };
+
+    const handleMouseUp = () => {
+      setImageDragging(false);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [imageDragging, imageDragStart]);
 
   const handleDeleteAsset = async (asset) => {
     if (!currentProject || !asset) return;
@@ -497,6 +605,131 @@ export default function EditProject({ currentProject }) {
   const handlePan = (dx, dy) =>
     setGcodePan((p) => ({ x: p.x + dx, y: p.y + dy }));
   const handlePanReset = () => setGcodePan({ x: 0, y: 0 });
+
+  // SVG pan/zoom handlers
+  const handleSvgMouseDown = (e) => {
+    if (e.button !== 0) return; // Only left mouse button
+    if (!svgContainerRef.current) return;
+
+    const container = svgContainerRef.current;
+    const rect = container.getBoundingClientRect();
+    const containerCenterX = rect.width / 2;
+    const containerCenterY = rect.height / 2;
+    const mouseX = e.clientX - rect.left - containerCenterX;
+    const mouseY = e.clientY - rect.top - containerCenterY;
+
+    setSvgDragging(true);
+    setSvgDragStart({ x: mouseX - svgPan.x, y: mouseY - svgPan.y });
+    e.preventDefault();
+  };
+
+  const handleSvgMouseMove = (e) => {
+    // This is handled by the global event listener in useEffect
+    if (svgDragging) {
+      e.preventDefault();
+    }
+  };
+
+  const handleSvgMouseUp = () => {
+    setSvgDragging(false);
+  };
+
+  const handleSvgWheel = (e) => {
+    e.preventDefault();
+    if (!svgContainerRef.current) return;
+
+    const container = svgContainerRef.current;
+    const rect = container.getBoundingClientRect();
+
+    // Mouse position relative to container center
+    const containerCenterX = rect.width / 2;
+    const containerCenterY = rect.height / 2;
+    const mouseX = e.clientX - rect.left - containerCenterX;
+    const mouseY = e.clientY - rect.top - containerCenterY;
+
+    // Calculate zoom factor (smaller steps for smoother zooming)
+    const zoomFactor = e.deltaY > 0 ? 0.95 : 1.05;
+    const newZoom = clampZoom(svgZoom * zoomFactor);
+
+    // Calculate the point in SVG space before zoom
+    // The SVG is centered, so we need to account for pan and current zoom
+    const pointX = (mouseX - svgPan.x) / svgZoom;
+    const pointY = (mouseY - svgPan.y) / svgZoom;
+
+    // Calculate new pan to keep the mouse position fixed
+    const newPanX = mouseX - pointX * newZoom;
+    const newPanY = mouseY - pointY * newZoom;
+
+    setSvgZoom(newZoom);
+    setSvgPan({ x: newPanX, y: newPanY });
+  };
+
+  const handleSvgZoomReset = () => {
+    setSvgZoom(1);
+    setSvgPan({ x: 0, y: 0 });
+  };
+
+  // Image pan/zoom handlers
+  const handleImageMouseDown = (e) => {
+    if (e.button !== 0) return; // Only left mouse button
+    if (!imageContainerRef.current) return;
+
+    const container = imageContainerRef.current;
+    const rect = container.getBoundingClientRect();
+    const containerCenterX = rect.width / 2;
+    const containerCenterY = rect.height / 2;
+    const mouseX = e.clientX - rect.left - containerCenterX;
+    const mouseY = e.clientY - rect.top - containerCenterY;
+
+    setImageDragging(true);
+    setImageDragStart({ x: mouseX - imagePan.x, y: mouseY - imagePan.y });
+    e.preventDefault();
+  };
+
+  const handleImageMouseMove = (e) => {
+    // This is handled by the global event listener in useEffect
+    if (imageDragging) {
+      e.preventDefault();
+    }
+  };
+
+  const handleImageMouseUp = () => {
+    setImageDragging(false);
+  };
+
+  const handleImageWheel = (e) => {
+    e.preventDefault();
+    if (!imageContainerRef.current) return;
+
+    const container = imageContainerRef.current;
+    const rect = container.getBoundingClientRect();
+
+    // Mouse position relative to container center
+    const containerCenterX = rect.width / 2;
+    const containerCenterY = rect.height / 2;
+    const mouseX = e.clientX - rect.left - containerCenterX;
+    const mouseY = e.clientY - rect.top - containerCenterY;
+
+    // Calculate zoom factor (smaller steps for smoother zooming)
+    const zoomFactor = e.deltaY > 0 ? 0.95 : 1.05;
+    const newZoom = clampZoom(imageZoom * zoomFactor);
+
+    // Calculate the point in image space before zoom
+    const pointX = (mouseX - imagePan.x) / imageZoom;
+    const pointY = (mouseY - imagePan.y) / imageZoom;
+
+    // Calculate new pan to keep the mouse position fixed
+    const newPanX = mouseX - pointX * newZoom;
+    const newPanY = mouseY - pointY * newZoom;
+
+    setImageZoom(newZoom);
+    setImagePan({ x: newPanX, y: newPanY });
+  };
+
+  const handleImageZoomReset = () => {
+    setImageZoom(1);
+    setImagePan({ x: 0, y: 0 });
+  };
 
   const isVectorizableAsset = (asset) => {
     if (!asset || asset.type !== "image") return false;
@@ -732,7 +965,7 @@ export default function EditProject({ currentProject }) {
               y={0}
               width={width}
               height={height}
-              fill="white"
+              fill="#999999"
               stroke="#e0e0e0"
             />
             {paperBox && (
@@ -1089,15 +1322,37 @@ export default function EditProject({ currentProject }) {
               Vectorize
             </Button>
           )}
-          {isSvg && (
+          {!isSvg && (
             <Button
               size="small"
               variant="outlined"
-              onClick={handleAnalyzeSvg}
-              disabled={svgAnalysis.loading}
+              startIcon={<ResetZoomIcon fontSize="small" />}
+              onClick={handleImageZoomReset}
+              disabled={imageZoom === 1 && imagePan.x === 0 && imagePan.y === 0}
             >
-              {svgAnalysis.loading ? "Analyzing…" : "Analyze SVG"}
+              Reset View
             </Button>
+          )}
+          {isSvg && (
+            <>
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={handleAnalyzeSvg}
+                disabled={svgAnalysis.loading}
+              >
+                {svgAnalysis.loading ? "Analyzing…" : "Analyze SVG"}
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<ResetZoomIcon fontSize="small" />}
+                onClick={handleSvgZoomReset}
+                disabled={svgZoom === 1 && svgPan.x === 0 && svgPan.y === 0}
+              >
+                Reset View
+              </Button>
+            </>
           )}
         </Stack>
         {isSvg && renderSvgAnalysis()}
@@ -1108,22 +1363,167 @@ export default function EditProject({ currentProject }) {
             display: "flex",
             justifyContent: "center",
             alignItems: "center",
-            bgcolor: "grey.50",
+            bgcolor: "grey.200",
             minHeight: 320,
           }}
         >
           <Box
-            component="img"
-            src={getProjectFileUrl(currentProject.id, selectedAsset.filename)}
-            alt={selectedAsset.displayName}
             sx={{
-              maxWidth: "100%",
-              maxHeight: 600,
+              bgcolor: "#bdbdbd",
+              p: 2,
               borderRadius: 1,
-              boxShadow: 1,
-              objectFit: "contain",
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              width: "100%",
+              maxWidth: "100%",
             }}
-          />
+          >
+            {isSvg ? (
+              svgContentLoading ? (
+                <CircularProgress />
+              ) : svgContent ? (
+                <Box
+                  ref={svgContainerRef}
+                  component="div"
+                  onMouseDown={handleSvgMouseDown}
+                  onMouseMove={handleSvgMouseMove}
+                  onMouseUp={handleSvgMouseUp}
+                  onMouseLeave={handleSvgMouseUp}
+                  onWheel={handleSvgWheel}
+                  sx={{
+                    maxWidth: "100%",
+                    maxHeight: 600,
+                    borderRadius: 1,
+                    boxShadow: 1,
+                    overflow: "hidden",
+                    bgcolor: "#bdbdbd",
+                    display: "flex",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    cursor: svgDragging ? "grabbing" : "grab",
+                    userSelect: "none",
+                    position: "relative",
+                    "& svg": {
+                      display: "block",
+                      maxWidth: "100%",
+                      maxHeight: "600px",
+                      width: "100%",
+                      height: "auto",
+                      backgroundColor: "#bdbdbd",
+                      objectFit: "contain",
+                      transform: `translate(${svgPan.x}px, ${svgPan.y}px) scale(${svgZoom})`,
+                      transformOrigin: "center center",
+                      transition: svgDragging
+                        ? "none"
+                        : "transform 0.1s ease-out",
+                    },
+                  }}
+                  dangerouslySetInnerHTML={{
+                    __html: svgContent.replace(
+                      /<svg([^>]*)>/i,
+                      (match, attrs) => {
+                        // Extract width and height from attributes if present
+                        const widthMatch = attrs.match(
+                          /width=["']([^"']+)["']/
+                        );
+                        const heightMatch = attrs.match(
+                          /height=["']([^"']+)["']/
+                        );
+                        const viewBoxMatch = attrs.match(
+                          /viewBox=["']([^"']+)["']/
+                        );
+
+                        let rectWidth = "100%";
+                        let rectHeight = "100%";
+
+                        // Use viewBox if available, otherwise use width/height
+                        if (viewBoxMatch) {
+                          const viewBox = viewBoxMatch[1].split(/\s+/);
+                          if (viewBox.length >= 4) {
+                            rectWidth = viewBox[2];
+                            rectHeight = viewBox[3];
+                          }
+                        } else if (widthMatch && heightMatch) {
+                          rectWidth = widthMatch[1];
+                          rectHeight = heightMatch[1];
+                        }
+
+                        // Add viewBox if it doesn't exist but width/height do
+                        let newAttrs = attrs;
+                        if (!viewBoxMatch && widthMatch && heightMatch) {
+                          newAttrs = `${attrs} viewBox="0 0 ${widthMatch[1]} ${heightMatch[1]}"`;
+                        }
+
+                        // Preserve original SVG attributes but add background
+                        return `<svg${newAttrs} style="background-color: #bdbdbd; max-width: 100%; max-height: 600px; width: 100%; height: auto;"><rect x="0" y="0" width="${rectWidth}" height="${rectHeight}" fill="#bdbdbd"/>`;
+                      }
+                    ),
+                  }}
+                />
+              ) : (
+                <Box
+                  component="object"
+                  data={getProjectFileUrl(
+                    currentProject.id,
+                    selectedAsset.filename
+                  )}
+                  type="image/svg+xml"
+                  sx={{
+                    maxWidth: "100%",
+                    maxHeight: 600,
+                    borderRadius: 1,
+                    boxShadow: 1,
+                    bgcolor: "#bdbdbd",
+                  }}
+                  aria-label={selectedAsset.displayName}
+                />
+              )
+            ) : (
+              <Box
+                ref={imageContainerRef}
+                onMouseDown={handleImageMouseDown}
+                onMouseMove={handleImageMouseMove}
+                onMouseUp={handleImageMouseUp}
+                onMouseLeave={handleImageMouseUp}
+                onWheel={handleImageWheel}
+                sx={{
+                  maxWidth: "100%",
+                  maxHeight: 600,
+                  borderRadius: 1,
+                  boxShadow: 1,
+                  overflow: "hidden",
+                  display: "flex",
+                  justifyContent: "center",
+                  alignItems: "center",
+                  cursor: imageDragging ? "grabbing" : "grab",
+                  userSelect: "none",
+                  position: "relative",
+                }}
+              >
+                <Box
+                  component="img"
+                  src={getProjectFileUrl(
+                    currentProject.id,
+                    selectedAsset.filename
+                  )}
+                  alt={selectedAsset.displayName}
+                  sx={{
+                    maxWidth: "100%",
+                    maxHeight: 600,
+                    borderRadius: 1,
+                    boxShadow: 1,
+                    objectFit: "contain",
+                    transform: `translate(${imagePan.x}px, ${imagePan.y}px) scale(${imageZoom})`,
+                    transformOrigin: "center center",
+                    transition: imageDragging
+                      ? "none"
+                      : "transform 0.1s ease-out",
+                  }}
+                />
+              </Box>
+            )}
+          </Box>
         </Paper>
       </Box>
     );
