@@ -40,6 +40,8 @@ import {
   getConnectionStatus,
   getDefaultPlotter,
   getJobProgress,
+  getProject,
+  getProjects,
   resolveApiBaseUrl,
   resolveWsBaseUrl,
   runProjectGcode,
@@ -68,14 +70,46 @@ export default function ControlPanel({ currentProject }) {
   const LOG_PAGE_SIZE = 25;
   const [expandedEntries, setExpandedEntries] = useState(new Set());
   const [selectedProjectGcode, setSelectedProjectGcode] = useState("");
+  const [projects, setProjects] = useState([]);
+  const [selectedPrintProject, setSelectedPrintProject] = useState(() => {
+    try {
+      const stored = localStorage.getItem("pv_selected_print_project");
+      return stored || null;
+    } catch {
+      return null;
+    }
+  });
+  const [selectedPrintGcode, setSelectedPrintGcode] = useState(() => {
+    try {
+      const stored = localStorage.getItem("pv_selected_print_gcode");
+      return stored || "";
+    } catch {
+      return "";
+    }
+  });
+  const [printProjectGcodeFiles, setPrintProjectGcodeFiles] = useState([]);
   const [gcodeRunning, setGcodeRunning] = useState(false);
   const [gcodePaused, setGcodePaused] = useState(false);
-  const [gcodeProgress, setGcodeProgress] = useState({
-    jobId: null,
-    linesSent: 0,
-    linesTotal: 0,
-    progress: 0,
-    status: null,
+  const [gcodeProgress, setGcodeProgress] = useState(() => {
+    try {
+      const stored = localStorage.getItem("pv_gcode_progress");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        // Only restore if job_id exists and status is still active
+        if (parsed.jobId && parsed.status && !["completed", "failed", "canceled"].includes(parsed.status)) {
+          return parsed;
+        }
+      }
+    } catch {
+      // Ignore parse errors
+    }
+    return {
+      jobId: null,
+      linesSent: 0,
+      linesTotal: 0,
+      progress: 0,
+      status: null,
+    };
   });
   const logContainerRef = useRef(null);
   const wsRef = useRef(null);
@@ -90,7 +124,76 @@ export default function ControlPanel({ currentProject }) {
     checkConnectionStatus();
     loadCommandLog();
     loadDefaultPlotterPenCommands();
+    loadProjects();
   }, []);
+
+  // Restore print state and check for active jobs after initial load
+  useEffect(() => {
+    const restorePrintState = async () => {
+      // Restore selected project and gcode file
+      if (selectedPrintProject) {
+        try {
+          const project = await getProject(selectedPrintProject);
+          if (project && project.gcode_files) {
+            setPrintProjectGcodeFiles(project.gcode_files);
+            // Restore selected gcode if it still exists in the project
+            if (selectedPrintGcode && project.gcode_files.includes(selectedPrintGcode)) {
+              setSelectedPrintGcode(selectedPrintGcode);
+            } else if (project.gcode_files.length > 0) {
+              setSelectedPrintGcode(project.gcode_files[0]);
+            }
+          }
+        } catch (err) {
+          console.error("Error restoring project state:", err);
+        }
+      }
+
+      // Restore progress if there's an active job
+      if (gcodeProgress.jobId) {
+        try {
+          const progress = await getJobProgress(gcodeProgress.jobId);
+          if (progress && progress.status && !["completed", "failed", "canceled"].includes(progress.status)) {
+            // Job is still active, restore state and resume polling
+            setGcodeRunning(true);
+            setGcodePaused(progress.paused || false);
+            setGcodeProgress({
+              jobId: progress.job_id,
+              linesSent: progress.lines_sent || 0,
+              linesTotal: progress.lines_total || 0,
+              progress: progress.progress || 0,
+              status: progress.status,
+            });
+            startProgressPolling(progress.job_id);
+          } else {
+            // Job is finished, clear it
+            setGcodeProgress({
+              jobId: null,
+              linesSent: 0,
+              linesTotal: 0,
+              progress: 0,
+              status: null,
+            });
+            localStorage.removeItem("pv_gcode_progress");
+          }
+        } catch (err) {
+          console.error("Error restoring job progress:", err);
+          // If job not found, clear it
+          setGcodeProgress({
+            jobId: null,
+            linesSent: 0,
+            linesTotal: 0,
+            progress: 0,
+            status: null,
+          });
+          localStorage.removeItem("pv_gcode_progress");
+        }
+      }
+    };
+
+    // Only restore on initial mount (when component first loads)
+    restorePrintState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty deps - only run once on mount
 
   useEffect(() => {
     if (currentProject?.gcode_files?.length) {
@@ -99,6 +202,93 @@ export default function ControlPanel({ currentProject }) {
       setSelectedProjectGcode("");
     }
   }, [currentProject]);
+
+  // Load projects for print selector
+  const loadProjects = async () => {
+    try {
+      const result = await getProjects();
+      if (result.projects) {
+        setProjects(result.projects);
+      }
+    } catch (err) {
+      console.error("Error loading projects:", err);
+    }
+  };
+
+  // Persist selected print project to localStorage
+  useEffect(() => {
+    try {
+      if (selectedPrintProject) {
+        localStorage.setItem("pv_selected_print_project", selectedPrintProject);
+      } else {
+        localStorage.removeItem("pv_selected_print_project");
+      }
+    } catch (err) {
+      console.warn("Failed to persist selected print project", err);
+    }
+  }, [selectedPrintProject]);
+
+  // Persist selected print gcode to localStorage
+  useEffect(() => {
+    try {
+      if (selectedPrintGcode) {
+        localStorage.setItem("pv_selected_print_gcode", selectedPrintGcode);
+      } else {
+        localStorage.removeItem("pv_selected_print_gcode");
+      }
+    } catch (err) {
+      console.warn("Failed to persist selected print gcode", err);
+    }
+  }, [selectedPrintGcode]);
+
+  // Persist gcode progress to localStorage
+  useEffect(() => {
+    try {
+      if (gcodeProgress.jobId) {
+        localStorage.setItem("pv_gcode_progress", JSON.stringify(gcodeProgress));
+      } else {
+        localStorage.removeItem("pv_gcode_progress");
+      }
+    } catch (err) {
+      console.warn("Failed to persist gcode progress", err);
+    }
+  }, [gcodeProgress]);
+
+  // Load gcode files when a project is selected for printing
+  useEffect(() => {
+    const loadProjectGcodeFiles = async () => {
+      if (!selectedPrintProject) {
+        setPrintProjectGcodeFiles([]);
+        setSelectedPrintGcode("");
+        return;
+      }
+
+      try {
+        const project = await getProject(selectedPrintProject);
+        if (project && project.gcode_files) {
+          setPrintProjectGcodeFiles(project.gcode_files);
+          // Try to restore the previously selected gcode file, or use first one
+          if (selectedPrintGcode && project.gcode_files.includes(selectedPrintGcode)) {
+            // Keep the current selection if it's still valid
+            setSelectedPrintGcode(selectedPrintGcode);
+          } else if (project.gcode_files.length > 0) {
+            setSelectedPrintGcode(project.gcode_files[0]);
+          } else {
+            setSelectedPrintGcode("");
+          }
+        } else {
+          setPrintProjectGcodeFiles([]);
+          setSelectedPrintGcode("");
+        }
+      } catch (err) {
+        console.error("Error loading project gcode files:", err);
+        setPrintProjectGcodeFiles([]);
+        setSelectedPrintGcode("");
+      }
+    };
+
+    loadProjectGcodeFiles();
+  }, [selectedPrintProject]);
 
   // Keep pagination on the newest page when new log entries arrive
   useEffect(() => {
@@ -402,12 +592,12 @@ export default function ControlPanel({ currentProject }) {
   };
 
   const handleRunProjectGcode = async () => {
-    if (!currentProject?.id) {
-      alert("Select a current project with G-code files first");
+    if (!selectedPrintProject) {
+      alert("Select a project to print G-code from");
       return;
     }
-    if (!selectedProjectGcode) {
-      alert("Select a G-code file to send");
+    if (!selectedPrintGcode) {
+      alert("Select a G-code file to print");
       return;
     }
     if (!connected) {
@@ -424,7 +614,7 @@ export default function ControlPanel({ currentProject }) {
         status: null,
       });
       
-      const result = await runProjectGcode(currentProject.id, selectedProjectGcode);
+      const result = await runProjectGcode(selectedPrintProject, selectedPrintGcode);
       
       // Start polling for progress if we got a job_id
       if (result.job_id) {
@@ -448,6 +638,7 @@ export default function ControlPanel({ currentProject }) {
           progress: 0,
           status: null,
         });
+        localStorage.removeItem("pv_gcode_progress");
         alert("G-code job started but no job ID was returned. Unable to track progress.");
       }
     } catch (err) {
@@ -460,6 +651,7 @@ export default function ControlPanel({ currentProject }) {
         progress: 0,
         status: null,
       });
+      localStorage.removeItem("pv_gcode_progress");
     }
   };
 
@@ -486,6 +678,8 @@ export default function ControlPanel({ currentProject }) {
         if (["completed", "failed", "canceled"].includes(progress.status)) {
           stopProgressPolling();
           setGcodeRunning(false);
+          // Clear progress from localStorage when job finishes
+          localStorage.removeItem("pv_gcode_progress");
         } else if (progress.status === "paused") {
           setGcodePaused(true);
         } else if (progress.status === "running") {
@@ -582,7 +776,6 @@ export default function ControlPanel({ currentProject }) {
   };
 
   const stepSizes = [1, 10, 100]; // 1mm, 10mm, 100mm
-  const projectGcodeFiles = currentProject?.gcode_files || [];
 
   return (
     <Box sx={{ p: 3 }}>
@@ -699,130 +892,153 @@ export default function ControlPanel({ currentProject }) {
               </Stack>
             </Paper>
 
-            {/* Project G-code Sender */}
+            {/* Print Gcode */}
             <Paper sx={{ p: 3 }}>
               <Typography variant="h6" gutterBottom>
-                Project G-code
+                Print Gcode
               </Typography>
-              {!currentProject ? (
-                <Typography variant="body2" color="text.secondary">
-                  Select a current project on the Projects tab to send its
-                  G-code.
-                </Typography>
-              ) : projectGcodeFiles.length === 0 ? (
-                <Typography variant="body2" color="text.secondary">
-                  No G-code files found in the current project.
-                </Typography>
-              ) : (
-                <Stack spacing={2}>
-                  <Typography variant="body2" color="text.secondary">
-                    Current project: {currentProject.name}
-                  </Typography>
-                  <FormControl fullWidth>
-                    <InputLabel>G-code File</InputLabel>
-                    <Select
-                      value={selectedProjectGcode}
-                      label="G-code File"
-                      onChange={(e) => setSelectedProjectGcode(e.target.value)}
-                      disabled={gcodeRunning}
-                    >
-                      {projectGcodeFiles.map((file) => {
-                        const friendly = file.split("/").pop();
-                        return (
-                          <MenuItem key={file} value={file}>
-                            {friendly}
-                          </MenuItem>
-                        );
-                      })}
-                    </Select>
-                  </FormControl>
-                  <Box
-                    sx={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 2,
-                      flexWrap: "wrap",
-                    }}
+              <Stack spacing={2}>
+                <FormControl fullWidth>
+                  <InputLabel>Project</InputLabel>
+                  <Select
+                    value={selectedPrintProject || ""}
+                    label="Project"
+                    onChange={(e) => setSelectedPrintProject(e.target.value)}
+                    disabled={gcodeRunning}
                   >
-                    <Chip
-                      icon={<Send />}
-                      label={gcodeRunning ? "Sending..." : "Send to Plotter"}
-                      color="primary"
-                      variant="filled"
-                      clickable
-                      disabled={
-                        !connected || gcodeRunning || !selectedProjectGcode
-                      }
-                      onClick={handleRunProjectGcode}
-                      sx={{ fontWeight: "bold", textTransform: "none" }}
-                    />
-                    <Chip
-                      icon={<Stop />}
-                      label="Stop"
-                      color="error"
-                      variant="outlined"
-                      clickable
-                      disabled={!connected}
-                      onClick={() => {
-                        stopProgressPolling();
-                        setGcodeRunning(false);
-                        stopPlotter().catch((err) =>
-                          alert(`Stop error: ${err.message}`)
-                        );
-                      }}
-                      sx={{ fontWeight: "bold", textTransform: "none" }}
-                    />
-                    <Chip
-                      label={gcodePaused ? "Resume" : "Pause"}
-                      color={gcodePaused ? "success" : "warning"}
-                      variant="filled"
-                      clickable
-                      disabled={!connected}
-                      onClick={handleTogglePause}
-                      sx={{ fontWeight: "bold", textTransform: "none" }}
-                    />
-                    {!connected && (
-                      <Typography variant="caption" color="text.secondary">
-                        Connect to the plotter to enable sending.
-                      </Typography>
-                    )}
-                  </Box>
-                  {gcodeRunning && gcodeProgress.jobId && (
-                    <Box sx={{ width: "100%", mt: 1 }}>
-                      <Stack spacing={1}>
-                        <Box
-                          sx={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                          }}
+                    {projects.map((project) => (
+                      <MenuItem key={project.id} value={project.id}>
+                        {project.name}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                {selectedPrintProject ? (
+                  printProjectGcodeFiles.length === 0 ? (
+                    <Typography variant="body2" color="text.secondary">
+                      No G-code files found in the selected project.
+                    </Typography>
+                  ) : (
+                    <>
+                      <FormControl fullWidth>
+                        <InputLabel>G-code File</InputLabel>
+                        <Select
+                          value={selectedPrintGcode}
+                          label="G-code File"
+                          onChange={(e) => setSelectedPrintGcode(e.target.value)}
+                          disabled={gcodeRunning}
                         >
-                          <Typography variant="body2" color="text.secondary">
-                            Progress: {gcodeProgress.linesSent} / {gcodeProgress.linesTotal} lines
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            {gcodeProgress.progress}%
-                          </Typography>
-                        </Box>
-                        <LinearProgress
-                          variant="determinate"
-                          value={gcodeProgress.progress}
-                          sx={{ height: 8, borderRadius: 1 }}
+                          {printProjectGcodeFiles.map((file) => {
+                            const friendly = file.split("/").pop();
+                            return (
+                              <MenuItem key={file} value={file}>
+                                {friendly}
+                              </MenuItem>
+                            );
+                          })}
+                        </Select>
+                      </FormControl>
+                      <Box
+                        sx={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 2,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <Button
+                          variant="contained"
+                          color="primary"
+                          startIcon={<Send />}
+                          disabled={
+                            !connected || gcodeRunning || !selectedPrintGcode
+                          }
+                          onClick={handleRunProjectGcode}
+                          sx={{ fontWeight: "bold", textTransform: "none" }}
+                        >
+                          {gcodeRunning ? "Printing..." : "Start Print"}
+                        </Button>
+                        <Chip
+                          icon={<Stop />}
+                          label="Stop"
+                          color="error"
+                          variant="outlined"
+                          clickable
+                          disabled={!connected}
+                          onClick={() => {
+                            stopProgressPolling();
+                            setGcodeRunning(false);
+                            setGcodeProgress({
+                              jobId: null,
+                              linesSent: 0,
+                              linesTotal: 0,
+                              progress: 0,
+                              status: null,
+                            });
+                            localStorage.removeItem("pv_gcode_progress");
+                            stopPlotter().catch((err) =>
+                              alert(`Stop error: ${err.message}`)
+                            );
+                          }}
+                          sx={{ fontWeight: "bold", textTransform: "none" }}
                         />
-                        {gcodeProgress.status && (
-                          <Typography
-                            variant="caption"
-                            color="text.secondary"
-                            sx={{ textTransform: "capitalize" }}
-                          >
-                            Status: {gcodeProgress.status}
+                        <Chip
+                          label={gcodePaused ? "Resume" : "Pause"}
+                          color={gcodePaused ? "success" : "warning"}
+                          variant="filled"
+                          clickable
+                          disabled={!connected}
+                          onClick={handleTogglePause}
+                          sx={{ fontWeight: "bold", textTransform: "none" }}
+                        />
+                        {!connected && (
+                          <Typography variant="caption" color="text.secondary">
+                            Connect to the plotter to enable printing.
                           </Typography>
                         )}
-                      </Stack>
-                    </Box>
-                  )}
-                </Stack>
-              )}
+                      </Box>
+                      {gcodeRunning && gcodeProgress.jobId && (
+                        <Box sx={{ width: "100%", mt: 1 }}>
+                          <Stack spacing={1}>
+                            <Box
+                              sx={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                              }}
+                            >
+                              <Typography variant="body2" color="text.secondary">
+                                Progress: {gcodeProgress.linesSent} / {gcodeProgress.linesTotal} lines
+                              </Typography>
+                              <Typography variant="body2" color="text.secondary">
+                                {gcodeProgress.progress}%
+                              </Typography>
+                            </Box>
+                            <LinearProgress
+                              variant="determinate"
+                              value={gcodeProgress.progress}
+                              sx={{ height: 8, borderRadius: 1 }}
+                            />
+                            {gcodeProgress.status && (
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                                sx={{ textTransform: "capitalize" }}
+                              >
+                                Status: {gcodeProgress.status}
+                              </Typography>
+                            )}
+                          </Stack>
+                        </Box>
+                      )}
+                    </>
+                  )
+                ) : (
+                  <Typography variant="body2" color="text.secondary">
+                    Select a project to print G-code from.
+                  </Typography>
+                )}
+              </Stack>
             </Paper>
 
             {/* Movement Controls - Cross Layout */}
