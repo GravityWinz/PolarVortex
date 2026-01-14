@@ -424,16 +424,34 @@ def insert_m0_pen_changes(
     
     collection_count = 0
     seen_drawing_commands = False  # Track if we've seen any G0/G1 commands yet
+    pending_collection_start = False  # Track if we just saw a collection start pen_up
     i = 0
     
     while i < len(lines):
         line = lines[i]
         line_stripped = line.strip()
-        result_lines.append(line)
         
         # Check if this is a drawing command (G0 or G1)
         if line_stripped.startswith("G0") or line_stripped.startswith("G1"):
             seen_drawing_commands = True
+            
+            # If this is a G0 and we have a pending collection start, insert M0 before it
+            if line_stripped.startswith("G0") and pending_collection_start:
+                # This G0 starts a new color collection
+                # collection_count = 0: first color (insert M0 for svg_color_order[0])
+                # collection_count = 1: second color (insert M0 for svg_color_order[1])
+                # collection_count = 2: third color (insert M0 for svg_color_order[2])
+                # Insert M0 for all colors including the first (to ensure proper pen is loaded)
+                if collection_count < len(svg_color_order):
+                    # Insert M0 with color descriptor before the G0
+                    # collection_count indexes the color we're starting
+                    color_value = svg_color_order[collection_count]
+                    color_desc = color_descriptors.get(color_value, _generate_color_descriptor(color_value))
+                    m0_command = f"M0 {color_desc} ; Pen change for new color"
+                    result_lines.append(m0_command)
+                # Increment after using collection_count to index the color
+                collection_count += 1
+                pending_collection_start = False
         
         # Check if this line contains pen_up command
         # Collection start pen_up appears standalone (linecollection_start)
@@ -442,10 +460,25 @@ def insert_m0_pen_changes(
         is_collection_start = False
         
         if pen_up_prefix in line_stripped or pen_up_normalized in line_stripped:
-            # Skip pen_up commands that are part of document_start (before any drawing commands)
+            # Check if this is document_start pen_up vs first linecollection_start pen_up
+            # Both appear before G0/G1, but we need to distinguish them
             if not seen_drawing_commands:
-                # This is document_start pen_up - not a collection start
-                is_collection_start = False
+                # Look ahead to see if next non-empty line is G0
+                next_idx = i + 1
+                while next_idx < len(lines) and not lines[next_idx].strip():
+                    next_idx += 1
+                
+                if next_idx < len(lines):
+                    next_line = lines[next_idx].strip()
+                    if next_line.startswith("G0"):
+                        # Next line is G0, so this is the first linecollection_start (collection start)
+                        is_collection_start = True
+                    else:
+                        # Next line is not G0 (probably G90, G21, etc.), so this is document_start pen_up
+                        is_collection_start = False
+                else:
+                    # No next line, treat as document_start
+                    is_collection_start = False
             else:
                 # After drawing has started, check if this is a collection start
                 # Pattern analysis:
@@ -511,18 +544,12 @@ def insert_m0_pen_changes(
                     else:
                         is_collection_start = False
         
-        # Insert M0 after collection start (except first collection)
+        # If this is a collection start pen_up, mark it as pending (M0 will be inserted before next G0)
         if is_collection_start:
-            if collection_count > 0 and collection_count < len(svg_color_order):
-                # This is a color change - insert M0
-                color_value = svg_color_order[collection_count]
-                color_desc = color_descriptors.get(color_value, _generate_color_descriptor(color_value))
-                
-                # Generate M0 command with color descriptor
-                m0_command = f"M0 {color_desc} ; Pen change for new color"
-                result_lines.append(m0_command)
-            
-            collection_count += 1
+            pending_collection_start = True
+        
+        # Add the current line to result
+        result_lines.append(line)
         
         i += 1
     
