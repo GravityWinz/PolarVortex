@@ -629,6 +629,10 @@ def build_vpype_pipeline(
     origin_mode: OriginMode = "lower_left",
     rotate_90: bool = False,
     generation_tag: Optional[str] = None,  # not used here; kept for signature parity
+    enable_occult: bool = False,
+    occult_ignore_layers: bool = False,
+    occult_across_layers_only: bool = False,
+    occult_keep_occulted: bool = False,
 ) -> str:
     """Build a vpype pipeline string for SVG->G-code conversion."""
     width, height = float(paper_width_mm), float(paper_height_mm)
@@ -660,9 +664,25 @@ def build_vpype_pipeline(
         else:
             logger.warning("vpype config not found at %s, falling back to defaults", config_path)
 
+    # Build occult command if enabled
+    occult_cmd = ""
+    if enable_occult:
+        occult_flags = []
+        # -a flag overrides -i flag (per occult documentation)
+        if occult_across_layers_only:
+            occult_flags.append("-a")
+        elif occult_ignore_layers:
+            occult_flags.append("-i")
+        if occult_keep_occulted:
+            occult_flags.append("-k")
+        
+        occult_flag_str = " ".join(occult_flags)
+        occult_cmd = f"occult {occult_flag_str}".strip()
+
     pipeline_parts = [
         config_arg,
         f'read "{svg_path}"',
+        occult_cmd,
         "rotate -- -90deg" if rotate_90 else "",
         place_cmd,
         *flip_cmds,
@@ -705,6 +725,10 @@ async def convert_svg_to_gcode_file(
     rotate_90: bool = False,
     generation_tag: Optional[str] = None,
     suppress_m0: bool = False,
+    enable_occult: bool = False,
+    occult_ignore_layers: bool = False,
+    occult_across_layers_only: bool = False,
+    occult_keep_occulted: bool = False,
 ) -> None:
     """Convert SVG to G-code using vpype CLI."""
     # #region agent log
@@ -716,6 +740,7 @@ async def convert_svg_to_gcode_file(
         "pen_mapping": pen_mapping,
         "origin_mode": origin_mode,
         "rotate_90": rotate_90,
+        "enable_occult": enable_occult,
     })
     # #endregion
     sorted_svg_path, color_metadata = sort_svg_by_stroke(svg_path, generation_tag=generation_tag)
@@ -732,6 +757,10 @@ async def convert_svg_to_gcode_file(
             origin_mode=origin_mode,
             rotate_90=rotate_90,
             generation_tag=generation_tag,
+            enable_occult=enable_occult,
+            occult_ignore_layers=occult_ignore_layers,
+            occult_across_layers_only=occult_across_layers_only,
+            occult_keep_occulted=occult_keep_occulted,
         )
         await run_vpype_pipeline(pipeline)
 
@@ -763,6 +792,19 @@ async def convert_svg_to_gcode_file(
             # Add note if M0 color changes are suppressed
             if suppress_m0:
                 header_lines.append(f"; M0 color change commands disabled - printing in one color")
+            # Add occult info if enabled
+            if enable_occult:
+                occult_flags = []
+                if occult_across_layers_only:
+                    occult_flags.append("across-layers-only")
+                elif occult_ignore_layers:
+                    occult_flags.append("ignore-layers")
+                if occult_keep_occulted:
+                    occult_flags.append("keep-occulted")
+                occult_info = "occult enabled"
+                if occult_flags:
+                    occult_info += f" ({', '.join(occult_flags)})"
+                header_lines.append(f"; Hidden line removal: {occult_info}")
             header = "\n".join(header_lines) + "\n"
             original = output_path.read_text(encoding="utf-8", errors="ignore")
             output_path.write_text(header + original, encoding="utf-8")
