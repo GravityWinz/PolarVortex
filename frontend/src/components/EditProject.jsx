@@ -203,6 +203,7 @@ export default function EditProject({ currentProject }) {
   const [convertOptions, setConvertOptions] = useState({
     paperSize: "",
     rotate90: false,
+    suppressM0: false,
   });
   const [convertLoading, setConvertLoading] = useState(false);
   const [convertError, setConvertError] = useState("");
@@ -563,6 +564,7 @@ export default function EditProject({ currentProject }) {
         pen_mapping: null,
         origin_mode: "center",
         rotate_90: Boolean(convertOptions.rotate90),
+        suppress_m0: Boolean(convertOptions.suppressM0),
       });
       await loadAssets();
       setConvertDialogOpen(false);
@@ -1866,6 +1868,22 @@ export default function EditProject({ currentProject }) {
                 />
               }
               label="Rotate 90° clockwise (landscape)"
+            />
+
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={convertOptions.suppressM0}
+                  onChange={(e) =>
+                    setConvertOptions((prev) => ({
+                      ...prev,
+                      suppressM0: e.target.checked,
+                    }))
+                  }
+                  color="primary"
+                />
+              }
+              label="Suppress M0 pen changes (print in one color)"
             />
 
             {/* Fit/center and pen mapping removed; we always center without pen mapping. */}

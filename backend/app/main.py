@@ -484,6 +484,7 @@ async def convert_svg_to_gcode(project_id: str, request: SvgToGcodeRequest):
             origin_mode=getattr(request, "origin_mode", "lower_left"),
             rotate_90=getattr(request, "rotate_90", False),
             generation_tag=timecode,
+            suppress_m0=getattr(request, "suppress_m0", False),
         )
 
         stored_name = str(Path("gcode") / gcode_filename)

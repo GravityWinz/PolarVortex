@@ -704,6 +704,7 @@ async def convert_svg_to_gcode_file(
     origin_mode: OriginMode = "lower_left",
     rotate_90: bool = False,
     generation_tag: Optional[str] = None,
+    suppress_m0: bool = False,
 ) -> None:
     """Convert SVG to G-code using vpype CLI."""
     # #region agent log
@@ -734,13 +735,14 @@ async def convert_svg_to_gcode_file(
         )
         await run_vpype_pipeline(pipeline)
 
-        # Post-process G-code to insert M0 pen change commands
-        try:
-            gcode_content = output_path.read_text(encoding="utf-8", errors="ignore")
-            gcode_content = insert_m0_pen_changes(gcode_content, sorted_svg_path, color_metadata)
-            output_path.write_text(gcode_content, encoding="utf-8")
-        except Exception:
-            logger.debug("Failed to insert M0 pen changes", exc_info=True)
+        # Post-process G-code to insert M0 pen change commands (unless suppressed)
+        if not suppress_m0:
+            try:
+                gcode_content = output_path.read_text(encoding="utf-8", errors="ignore")
+                gcode_content = insert_m0_pen_changes(gcode_content, sorted_svg_path, color_metadata)
+                output_path.write_text(gcode_content, encoding="utf-8")
+            except Exception:
+                logger.debug("Failed to insert M0 pen changes", exc_info=True)
 
         # Prepend metadata comments to the generated G-code file.
         try:

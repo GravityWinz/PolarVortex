@@ -22,6 +22,7 @@ class SvgToGcodeRequest(BaseModel):
     pen_mapping: Optional[Dict[str, Any]] = None
     origin_mode: Literal["lower_left", "center"] = "lower_left"
     rotate_90: bool = False
+    suppress_m0: bool = False  # If True, skip M0 pen change commands (print in one color)
 
 
 class GcodeAnalysisResult(BaseModel):
