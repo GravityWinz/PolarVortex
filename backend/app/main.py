@@ -437,6 +437,7 @@ async def convert_svg_to_gcode(project_id: str, request: SvgToGcodeRequest):
             "pen_mapping": request.pen_mapping,
             "origin_mode": getattr(request, "origin_mode", "lower_left"),
             "rotate_90": getattr(request, "rotate_90", False),
+            "enable_occult": getattr(request, "enable_occult", False),
         })
         # #endregion
         project = project_service.get_project(project_id)
@@ -485,6 +486,10 @@ async def convert_svg_to_gcode(project_id: str, request: SvgToGcodeRequest):
             rotate_90=getattr(request, "rotate_90", False),
             generation_tag=timecode,
             suppress_m0=getattr(request, "suppress_m0", False),
+            enable_occult=getattr(request, "enable_occult", False),
+            occult_ignore_layers=getattr(request, "occult_ignore_layers", False),
+            occult_across_layers_only=getattr(request, "occult_across_layers_only", False),
+            occult_keep_occulted=getattr(request, "occult_keep_occulted", False),
         )
 
         stored_name = str(Path("gcode") / gcode_filename)

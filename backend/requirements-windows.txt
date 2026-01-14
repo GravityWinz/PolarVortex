@@ -15,6 +15,8 @@ aiofiles==23.2.1
 vpype[all]==1.15.0
 # Adds gcode export command for vpype
 vpype-gcode>=0.10.0
+# Adds hidden line removal (occult) command for vpype
+vpype-occult>=0.4.0
 
 # Alternative packages for Windows (uncomment if needed)
 # opencv-python==4.8.1.78

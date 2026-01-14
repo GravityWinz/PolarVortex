@@ -204,6 +204,10 @@ export default function EditProject({ currentProject }) {
     paperSize: "",
     rotate90: false,
     suppressM0: false,
+    enableOccult: false,
+    occultIgnoreLayers: false,
+    occultAcrossLayersOnly: false,
+    occultKeepOcculted: false,
   });
   const [convertLoading, setConvertLoading] = useState(false);
   const [convertError, setConvertError] = useState("");
@@ -565,6 +569,10 @@ export default function EditProject({ currentProject }) {
         origin_mode: "center",
         rotate_90: Boolean(convertOptions.rotate90),
         suppress_m0: Boolean(convertOptions.suppressM0),
+        enable_occult: Boolean(convertOptions.enableOccult),
+        occult_ignore_layers: Boolean(convertOptions.occultIgnoreLayers),
+        occult_across_layers_only: Boolean(convertOptions.occultAcrossLayersOnly),
+        occult_keep_occulted: Boolean(convertOptions.occultKeepOcculted),
       });
       await loadAssets();
       setConvertDialogOpen(false);
@@ -1885,6 +1893,85 @@ export default function EditProject({ currentProject }) {
               }
               label="Suppress M0 pen changes (print in one color)"
             />
+
+            <Divider sx={{ my: 2 }} />
+
+            <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+              Hidden Line Removal (Occult)
+            </Typography>
+
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={convertOptions.enableOccult}
+                  onChange={(e) =>
+                    setConvertOptions((prev) => ({
+                      ...prev,
+                      enableOccult: e.target.checked,
+                    }))
+                  }
+                  color="primary"
+                />
+              }
+              label="Enable hidden line removal (occult)"
+            />
+
+            {convertOptions.enableOccult && (
+              <Box sx={{ pl: 3, mt: 1 }}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={convertOptions.occultIgnoreLayers}
+                      onChange={(e) =>
+                        setConvertOptions((prev) => ({
+                          ...prev,
+                          occultIgnoreLayers: e.target.checked,
+                          occultAcrossLayersOnly: e.target.checked
+                            ? false
+                            : prev.occultAcrossLayersOnly,
+                        }))
+                      }
+                      disabled={convertOptions.occultAcrossLayersOnly}
+                      color="primary"
+                    />
+                  }
+                  label="Ignore layers (-i) - Perform occlusion across all layers"
+                />
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={convertOptions.occultAcrossLayersOnly}
+                      onChange={(e) =>
+                        setConvertOptions((prev) => ({
+                          ...prev,
+                          occultAcrossLayersOnly: e.target.checked,
+                          occultIgnoreLayers: e.target.checked
+                            ? false
+                            : prev.occultIgnoreLayers,
+                        }))
+                      }
+                      color="primary"
+                    />
+                  }
+                  label="Across layers only (-a) - Only occlude across layers, not within"
+                />
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={convertOptions.occultKeepOcculted}
+                      onChange={(e) =>
+                        setConvertOptions((prev) => ({
+                          ...prev,
+                          occultKeepOcculted: e.target.checked,
+                        }))
+                      }
+                      color="primary"
+                    />
+                  }
+                  label="Keep occulted lines (-k) - Keep removed lines in separate layer"
+                />
+              </Box>
+            )}
 
             {/* Fit/center and pen mapping removed; we always center without pen mapping. */}
 

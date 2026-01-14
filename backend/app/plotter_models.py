@@ -23,6 +23,10 @@ class SvgToGcodeRequest(BaseModel):
     origin_mode: Literal["lower_left", "center"] = "lower_left"
     rotate_90: bool = False
     suppress_m0: bool = False  # If True, skip M0 pen change commands (print in one color)
+    enable_occult: bool = False  # If True, remove hidden/occluded lines using vpype-occult
+    occult_ignore_layers: bool = False  # If True, perform occlusion across all layers (-i flag)
+    occult_across_layers_only: bool = False  # If True, only occlude across layers, not within (-a flag, overrides -i)
+    occult_keep_occulted: bool = False  # If True, keep removed lines in separate layer (-k flag)
 
 
 class GcodeAnalysisResult(BaseModel):
