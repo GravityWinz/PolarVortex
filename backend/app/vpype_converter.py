@@ -760,6 +760,9 @@ async def convert_svg_to_gcode_file(
             color_count = color_metadata.get("color_count", 0)
             if color_count > 1:
                 header_lines.append(f"; Colors: {color_count} unique colors detected")
+            # Add note if M0 color changes are suppressed
+            if suppress_m0:
+                header_lines.append(f"; M0 color change commands disabled - printing in one color")
             header = "\n".join(header_lines) + "\n"
             original = output_path.read_text(encoding="utf-8", errors="ignore")
             output_path.write_text(header + original, encoding="utf-8")
