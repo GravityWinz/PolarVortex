@@ -1,11 +1,12 @@
 import asyncio
 import json
 import logging
+import re
 import shlex
 import time
 import textwrap
 from pathlib import Path
-from typing import Dict, Literal, Optional
+from typing import Any, Dict, Literal, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 # Write debug logs inside the repo so paths work in containers and on host
@@ -48,16 +49,150 @@ def _get_stroke_value(elem) -> str:
     return "none"
 
 
+# Color name mapping for common hex values
+_COLOR_NAME_MAP: Dict[str, str] = {
+    "#000000": "Black",
+    "#FFFFFF": "White",
+    "#FF0000": "Red",
+    "#00FF00": "Green",
+    "#0000FF": "Blue",
+    "#FFFF00": "Yellow",
+    "#FF00FF": "Magenta",
+    "#00FFFF": "Cyan",
+    "#800000": "Maroon",
+    "#008000": "Green",
+    "#000080": "Navy",
+    "#808000": "Olive",
+    "#800080": "Purple",
+    "#008080": "Teal",
+    "#C0C0C0": "Silver",
+    "#808080": "Gray",
+    "#FFA500": "Orange",
+    "#A52A2A": "Brown",
+    "#FFC0CB": "Pink",
+    "#FFD700": "Gold",
+    "#4B0082": "Indigo",
+    "#FF1493": "Deep Pink",
+    "#00CED1": "Dark Turquoise",
+    "#32CD32": "Lime Green",
+    "#FF4500": "Orange Red",
+    "#8B0000": "Dark Red",
+    "#006400": "Dark Green",
+    "#00008B": "Dark Blue",
+}
+
+
+def _normalize_color_value(color: str) -> str:
+    """
+    Normalize various color formats to hex format.
+    
+    Handles:
+    - Hex colors: #FF0000, #F00
+    - rgb()/rgba() functions: rgb(255, 0, 0)
+    - Named colors: red, blue, etc.
+    
+    Returns normalized hex format (e.g., "#FF0000") or original if parsing fails.
+    """
+    if not color or color.lower() == "none":
+        return "none"
+    
+    color = color.strip()
+    
+    # Already hex format
+    if color.startswith("#"):
+        # Expand short hex (#F00 -> #FF0000)
+        if len(color) == 4:
+            return f"#{color[1]}{color[1]}{color[2]}{color[2]}{color[3]}{color[3]}".upper()
+        return color.upper()
+    
+    # rgb() or rgba() format
+    rgb_match = re.match(r"rgba?\(([^)]+)\)", color, re.IGNORECASE)
+    if rgb_match:
+        values = [v.strip() for v in rgb_match.group(1).split(",")]
+        try:
+            r = int(float(values[0]))
+            g = int(float(values[1]))
+            b = int(float(values[2]))
+            return f"#{r:02X}{g:02X}{b:02X}"
+        except (ValueError, IndexError):
+            pass
+    
+    # Named colors (basic set)
+    named_colors = {
+        "black": "#000000",
+        "white": "#FFFFFF",
+        "red": "#FF0000",
+        "green": "#00FF00",
+        "blue": "#0000FF",
+        "yellow": "#FFFF00",
+        "magenta": "#FF00FF",
+        "cyan": "#00FFFF",
+        "orange": "#FFA500",
+        "purple": "#800080",
+        "pink": "#FFC0CB",
+        "brown": "#A52A2A",
+        "gray": "#808080",
+        "grey": "#808080",
+    }
+    normalized = color.lower().strip()
+    if normalized in named_colors:
+        return named_colors[normalized]
+    
+    # Return original if we can't parse it
+    return color
+
+
+def _generate_color_descriptor(stroke_value: str) -> str:
+    """
+    Generate a color descriptor string in format: "#FF0000 (Red)" or "#FF0000".
+    
+    Args:
+        stroke_value: Raw stroke color value from SVG
+        
+    Returns:
+        Formatted color descriptor string
+    """
+    if not stroke_value or stroke_value.lower() == "none":
+        return "none"
+    
+    normalized = _normalize_color_value(stroke_value)
+    
+    # If normalization failed, return original
+    if normalized == stroke_value and not normalized.startswith("#"):
+        return stroke_value
+    
+    # Look up color name
+    color_name = _COLOR_NAME_MAP.get(normalized)
+    
+    if color_name:
+        return f"{normalized} ({color_name})"
+    else:
+        return normalized
+
+
 def sort_svg_by_stroke(
     svg_path: Path,
     tmp_dir: Path = Path("/app/local_storage/tmp"),
     generation_tag: Optional[str] = None,
-) -> Path:
+) -> Tuple[Path, Dict[str, Any]]:
     """
     Reorder drawable SVG elements so they are grouped by stroke color.
 
     This ensures plotting is done one color at a time before switching pens.
+    
+    Returns:
+        Tuple of (sorted_svg_path, color_metadata)
+        color_metadata contains:
+        - color_order: List of stroke values in order they appear
+        - color_count: Number of unique colors
+        - color_descriptors: Dict mapping stroke value to descriptor string
     """
+    color_metadata = {
+        "color_order": [],
+        "color_count": 0,
+        "color_descriptors": {},
+    }
+    
     try:
         import xml.etree.ElementTree as ET
 
@@ -85,13 +220,19 @@ def sort_svg_by_stroke(
                 stroke = _get_stroke_value(child)
                 if stroke not in color_order:
                     color_order.append(stroke)
+                    # Generate descriptor for this color
+                    color_metadata["color_descriptors"][stroke] = _generate_color_descriptor(stroke)
                 color_groups.setdefault(stroke, []).append(child)
             else:
                 preserved.append(child)
 
-        # If nothing to sort, return original
+        # If nothing to sort, return original with empty metadata
         if not color_order:
-            return svg_path
+            return svg_path, color_metadata
+
+        # Update metadata
+        color_metadata["color_order"] = color_order
+        color_metadata["color_count"] = len(color_order)
 
         # Rebuild child list: keep preserved elements, then grouped drawables by stroke order
         new_children = preserved + [
@@ -104,10 +245,10 @@ def sort_svg_by_stroke(
         tag = generation_tag or str(int(time.time()))
         sorted_path = tmp_dir / f"{svg_path.stem}_{tag}.svg"
         tree.write(sorted_path, encoding="utf-8", xml_declaration=True)
-        return sorted_path
+        return sorted_path, color_metadata
     except Exception:
         logger.warning("SVG color sort failed, using original file", exc_info=True)
-        return svg_path
+        return svg_path, color_metadata
 
 
 def build_vpype_config_content() -> str:
@@ -186,6 +327,157 @@ def ensure_vpype_config(path: Path = DEFAULT_VPYPE_CONFIG) -> Path:
 
 
 OriginMode = Literal["lower_left", "center"]
+
+
+def insert_m0_pen_changes(
+    gcode_content: str,
+    sorted_svg_path: Path,
+    color_metadata: Dict[str, Any],
+) -> str:
+    """
+    Insert M0 pause commands with color descriptors at color change boundaries.
+    
+    Args:
+        gcode_content: Generated G-code content from vpype
+        sorted_svg_path: Path to the sorted SVG file
+        color_metadata: Metadata dict with color_order, color_count, color_descriptors
+        
+    Returns:
+        Modified G-code content with M0 commands inserted
+    """
+    # If single color or no colors, no M0 needed
+    color_order = color_metadata.get("color_order", [])
+    color_count = color_metadata.get("color_count", 0)
+    color_descriptors = color_metadata.get("color_descriptors", {})
+    
+    if color_count <= 1:
+        return gcode_content
+    
+    # Filter out "none" colors from the order (they don't need pen changes)
+    valid_colors = [c for c in color_order if c.lower() != "none"]
+    if len(valid_colors) <= 1:
+        return gcode_content
+    
+    # Parse sorted SVG to get exact color order as paths appear
+    svg_color_order = _parse_sorted_svg_colors(sorted_svg_path)
+    if not svg_color_order:
+        # Fallback to metadata color order
+        svg_color_order = valid_colors
+    
+    # Filter SVG color order to remove "none"
+    svg_color_order = [c for c in svg_color_order if c.lower() != "none"]
+    if len(svg_color_order) <= 1:
+        return gcode_content
+    
+    lines = gcode_content.split("\n")
+    result_lines = []
+    
+    # Get pen_up command to identify collection starts
+    gcode_settings = _get_default_gcode_settings()
+    pen_up = getattr(gcode_settings, "pen_up_command", "M280 P0 S110")
+    if pen_up is None:
+        pen_up = "M280 P0 S110"
+    
+    # Extract pen_up command prefix (e.g., "M280" from "M280 P0 S110")
+    pen_up_prefix = pen_up.split()[0] if pen_up.split() else pen_up
+    pen_up_normalized = pen_up.strip()
+    
+    # Track collection starts
+    # Collection starts (linecollection_start) are pen_up commands that appear:
+    # - On their own line (not part of segment_last multiline block)
+    # - segment_last has format: "G1 X... Y... F1500\n{pen_up}" (pen_up on next line)
+    # So we need to detect pen_up that is NOT immediately after a G1 command
+    
+    collection_count = 0
+    i = 0
+    
+    while i < len(lines):
+        line = lines[i]
+        line_stripped = line.strip()
+        result_lines.append(line)
+        
+        # Check if this line contains pen_up command
+        # Collection start pen_up appears standalone (linecollection_start)
+        # Path end pen_up appears after G1 in segment_last (G1 on previous line)
+        is_collection_start = False
+        
+        if pen_up_prefix in line_stripped or pen_up_normalized in line_stripped:
+            # Check if this is a collection start (standalone pen_up)
+            # vs path end (pen_up after G1)
+            if i == 0:
+                # Very first line - could be collection start
+                is_collection_start = True
+            else:
+                # Look at previous non-empty line
+                prev_idx = i - 1
+                while prev_idx >= 0 and not lines[prev_idx].strip():
+                    prev_idx -= 1
+                
+                if prev_idx >= 0:
+                    prev_line = lines[prev_idx].strip()
+                    # If previous line starts with G1, this pen_up is part of segment_last (path end)
+                    # Otherwise, it's a collection start
+                    if not prev_line.startswith("G1"):
+                        is_collection_start = True
+                else:
+                    # No previous non-empty line - treat as collection start
+                    is_collection_start = True
+        
+        # Insert M0 after collection start (except first collection)
+        if is_collection_start:
+            if collection_count > 0 and collection_count < len(svg_color_order):
+                # This is a color change - insert M0
+                color_value = svg_color_order[collection_count]
+                color_desc = color_descriptors.get(color_value, _generate_color_descriptor(color_value))
+                
+                # Generate M0 command with color descriptor
+                m0_command = f"M0 {color_desc} ; Pen change for new color"
+                result_lines.append(m0_command)
+            
+            collection_count += 1
+        
+        i += 1
+    
+    return "\n".join(result_lines)
+
+
+def _parse_sorted_svg_colors(sorted_svg_path: Path) -> list:
+    """
+    Parse sorted SVG to extract color order of drawable elements.
+    
+    Returns list of stroke values in order they appear in the sorted SVG.
+    """
+    try:
+        import xml.etree.ElementTree as ET
+        
+        tree = ET.parse(sorted_svg_path)
+        root = tree.getroot()
+        
+        drawable_tags = {
+            "path",
+            "line",
+            "polyline",
+            "polygon",
+            "rect",
+            "circle",
+            "ellipse",
+        }
+        
+        color_order = []
+        last_color = None
+        
+        for child in root:
+            tag = child.tag.rsplit("}", 1)[-1] if "}" in child.tag else child.tag
+            if tag in drawable_tags:
+                stroke = _get_stroke_value(child)
+                if stroke != last_color:
+                    color_order.append(stroke)
+                    last_color = stroke
+                    
+        return color_order
+    except Exception:
+        logger.warning("Failed to parse sorted SVG colors", exc_info=True)
+        return []
 
 
 def _dbg_log(hypothesis: str, location: str, message: str, data: Optional[dict] = None, run_id: str = "pre-fix"):
@@ -306,7 +598,7 @@ async def convert_svg_to_gcode_file(
         "rotate_90": rotate_90,
     })
     # #endregion
-    sorted_svg_path = sort_svg_by_stroke(svg_path, generation_tag=generation_tag)
+    sorted_svg_path, color_metadata = sort_svg_by_stroke(svg_path, generation_tag=generation_tag)
     cleanup_sorted = sorted_svg_path != svg_path
 
     try:
@@ -323,6 +615,14 @@ async def convert_svg_to_gcode_file(
         )
         await run_vpype_pipeline(pipeline)
 
+        # Post-process G-code to insert M0 pen change commands
+        try:
+            gcode_content = output_path.read_text(encoding="utf-8", errors="ignore")
+            gcode_content = insert_m0_pen_changes(gcode_content, sorted_svg_path, color_metadata)
+            output_path.write_text(gcode_content, encoding="utf-8")
+        except Exception:
+            logger.debug("Failed to insert M0 pen changes", exc_info=True)
+
         # Prepend metadata comments to the generated G-code file.
         try:
             header_lines = [
@@ -335,6 +635,10 @@ async def convert_svg_to_gcode_file(
             ]
             if pen_mapping:
                 header_lines.append(f"; Pen mapping: {pen_mapping}")
+            # Add color count info if multicolor
+            color_count = color_metadata.get("color_count", 0)
+            if color_count > 1:
+                header_lines.append(f"; Colors: {color_count} unique colors detected")
             header = "\n".join(header_lines) + "\n"
             original = output_path.read_text(encoding="utf-8", errors="ignore")
             output_path.write_text(header + original, encoding="utf-8")
