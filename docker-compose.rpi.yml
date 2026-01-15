@@ -58,6 +58,7 @@ services:
       - env.example
     devices:
       - /dev/ttyACM0:/dev/ttyACM0  # Alternative Linux Arduino port
+      - /dev/serial/by-id/usb-marlinfw.org_Marlin_USB_Device_18FF601AAE299828528F78F9F5001E87-if00:/dev/serial/by-id/usb-marlinfw.org_Marlin_USB_Device_18FF601AAE299828528F78F9F5001E87-if00
     privileged: true
     group_add:
       - dialout
