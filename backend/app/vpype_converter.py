@@ -34,6 +34,68 @@ def _get_default_gcode_settings():
     return _Fallback()
 
 
+def _extract_servo_angle(cmd: str) -> Optional[float]:
+    """Extract S value from M280 command (e.g., 'M280 P0 S110' -> 110.0)."""
+    match = re.search(r'S([\d.]+)', cmd)
+    if match:
+        try:
+            return float(match.group(1))
+        except ValueError:
+            return None
+    return None
+
+
+def generate_exponential_pen_down_sequence(
+    pen_up_cmd: str, 
+    pen_down_cmd: str, 
+    num_steps: int = 7,
+    servo_delay_ms: float = 100.0
+) -> str:
+    """
+    Generate multiple M280 commands that exponentially approach pen_down value.
+    This reduces bouncing by gradually lowering the pen instead of one sudden move.
+    
+    Args:
+        pen_up_cmd: Command for pen up (e.g., "M280 P0 S110")
+        pen_down_cmd: Command for pen down (e.g., "M280 P0 S130")
+        num_steps: Total number of moves (default 7)
+        servo_delay_ms: Delay in milliseconds after final command (default 100.0)
+    
+    Returns:
+        Multi-line string with M280 commands and final delay
+    """
+    pen_up_angle = _extract_servo_angle(pen_up_cmd)
+    pen_down_angle = _extract_servo_angle(pen_down_cmd)
+    
+    if pen_up_angle is None or pen_down_angle is None:
+        # Fallback: if we can't parse angles, just use the original command with delay
+        return f"{pen_down_cmd}\nG4 P{int(servo_delay_ms)}"
+    
+    # Extract command prefix (e.g., "M280 P0" from "M280 P0 S110")
+    prefix_match = re.match(r'^([^S]+)', pen_down_cmd)
+    if prefix_match:
+        cmd_prefix = prefix_match.group(1).strip()
+    else:
+        cmd_prefix = "M280 P0"
+    
+    # Generate exponential approach: each step covers 50% of remaining distance
+    # Formula: angle = pen_up + (pen_down - pen_up) * (1 - 0.5^step)
+    # For num_steps=7: steps 1-6 are intermediate, step 7 is exact pen_down
+    commands = []
+    for step in range(1, num_steps):
+        # Exponential approach: step 1 covers 50%, step 2 covers 75%, etc.
+        progress = 1 - (0.5 ** step)
+        angle = pen_up_angle + (pen_down_angle - pen_up_angle) * progress
+        commands.append(f"{cmd_prefix} S{angle:.2f}")
+    
+    # Final step: exact pen_down value
+    commands.append(f"{cmd_prefix} S{pen_down_angle:.2f}")
+    
+    # Add delay after final command
+    commands.append(f"G4 P{int(servo_delay_ms)}")
+    return "\n".join(commands)
+
+
 def _get_stroke_value(elem) -> str:
     """Return the stroke color for an SVG element, falling back to style attr."""
     stroke = elem.get("stroke")
@@ -284,7 +346,10 @@ def sort_svg_by_stroke(
         return svg_path, color_metadata
 
 
-def build_vpype_config_content() -> str:
+def build_vpype_config_content(
+    servo_delay_ms: float = 100.0,
+    pen_debounce_steps: int = 7,
+) -> str:
     """Generate vpype config content using current plotter gcode settings."""
     gcode = _get_default_gcode_settings()
     pen_up = getattr(gcode, "pen_up_command", "M280 P0 S110")
@@ -293,13 +358,31 @@ def build_vpype_config_content() -> str:
     pen_down = getattr(gcode, "pen_down_command", "M280 P0 S130")
     if pen_down is None:
         pen_down = "M280 P0 S130"
+    if servo_delay_ms is None:
+        servo_delay_ms = 100.0
+    if pen_debounce_steps is None or pen_debounce_steps < 1:
+        pen_debounce_steps = 1
+    
+    pen_down_sequence = generate_exponential_pen_down_sequence(
+        pen_up, pen_down, num_steps=pen_debounce_steps, servo_delay_ms=servo_delay_ms
+    )
+    
     before_print = getattr(gcode, "before_print", None)
     if before_print is None:
         before_print = []
     # Ensure pen is up in document_start and include only pre-print sequence
-    doc_start_lines = [*before_print]
-    if pen_up not in doc_start_lines:
-        doc_start_lines.append(pen_up)
+    # Replace pen_down commands in before_print with exponential sequence
+    doc_start_lines = []
+    for line in before_print:
+        if line.strip() == pen_down.strip():
+            # Replace single pen_down with exponential sequence
+            doc_start_lines.append(pen_down_sequence)
+        else:
+            doc_start_lines.append(line)
+    # Check if pen_up is already in the lines
+    pen_up_in_lines = any(line.strip().startswith(pen_up.strip()) for line in doc_start_lines)
+    if not pen_up_in_lines:
+        doc_start_lines.append(pen_up)  # No delay for pen up
     document_start = "\n".join(doc_start_lines)
 
     return textwrap.dedent(
@@ -316,10 +399,10 @@ document_start = """
 # Ensure pen is raised between collections
 linecollection_start = "{pen_up}\\n"
 
-# First segment in a path: move then pen down
+# First segment in a path: move then pen down (exponential approach to reduce bouncing)
 segment_first = """
 G0 X{{x:.3f}} Y{{y:.3f}}
-{pen_down}
+{pen_down_sequence}
 """
 
 # Subsequent segments while drawing
@@ -340,11 +423,21 @@ M2 ; program end
     )
 
 
-def ensure_vpype_config(path: Path = DEFAULT_VPYPE_CONFIG) -> Path:
-    """Ensure vpype config exists and reflects current plotter G-code settings."""
+def ensure_vpype_config(
+    path: Path = DEFAULT_VPYPE_CONFIG,
+    servo_delay_ms: float = 100.0,
+    pen_debounce_steps: int = 7,
+) -> Path:
+    """Ensure vpype config exists and reflects current plotter G-code settings.
+    
+    Args:
+        path: Path to vpype config file
+        servo_delay_ms: Delay in milliseconds after pen down
+        pen_debounce_steps: Number of M280 commands for exponential pen down
+    """
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        content = build_vpype_config_content()
+        content = build_vpype_config_content(servo_delay_ms=servo_delay_ms, pen_debounce_steps=pen_debounce_steps)
         needs_write = True
         if path.exists():
             try:
@@ -633,6 +726,15 @@ def build_vpype_pipeline(
     occult_ignore_layers: bool = False,
     occult_across_layers_only: bool = False,
     occult_keep_occulted: bool = False,
+    enable_optimization: bool = False,
+    linemerge_tolerance: float = 0.5,
+    linesimplify_tolerance: float = 0.1,
+    reloop_tolerance: float = 0.1,
+    linesort_enabled: bool = True,
+    linesort_two_opt: bool = True,
+    linesort_passes: int = 250,
+    servo_delay_ms: float = 100.0,
+    pen_debounce_steps: int = 7,
 ) -> str:
     """Build a vpype pipeline string for SVG->G-code conversion."""
     width, height = float(paper_width_mm), float(paper_height_mm)
@@ -658,7 +760,7 @@ def build_vpype_pipeline(
     # Prefer local stored vpype config/profile for consistent pen control
     config_arg = ""
     if config_path:
-        ensure_vpype_config(config_path)
+        ensure_vpype_config(config_path, servo_delay_ms=servo_delay_ms, pen_debounce_steps=pen_debounce_steps)
         if config_path.exists():
             config_arg = f'--config "{config_path}" '
         else:
@@ -679,10 +781,24 @@ def build_vpype_pipeline(
         occult_flag_str = " ".join(occult_flags)
         occult_cmd = f"occult {occult_flag_str}".strip()
 
+    # Build optimization commands if enabled
+    optimization_cmds = []
+    if enable_optimization:
+        optimization_cmds.append(f"linemerge --tolerance {linemerge_tolerance:.3f}mm")
+        optimization_cmds.append(f"linesimplify --tolerance {linesimplify_tolerance:.3f}mm")
+        optimization_cmds.append(f"reloop --tolerance {reloop_tolerance:.3f}mm")
+        if linesort_enabled:
+            if linesort_two_opt:
+                optimization_cmds.append(f"linesort --two-opt --passes {linesort_passes}")
+            else:
+                optimization_cmds.append(f"linesort --passes {linesort_passes}")
+    optimization_cmd_str = " ".join(optimization_cmds)
+
     pipeline_parts = [
         config_arg,
         f'read "{svg_path}"',
         occult_cmd,
+        optimization_cmd_str,
         "rotate -- -90deg" if rotate_90 else "",
         place_cmd,
         *flip_cmds,
@@ -729,6 +845,15 @@ async def convert_svg_to_gcode_file(
     occult_ignore_layers: bool = False,
     occult_across_layers_only: bool = False,
     occult_keep_occulted: bool = False,
+    enable_optimization: bool = False,
+    linemerge_tolerance: float = 0.5,
+    linesimplify_tolerance: float = 0.1,
+    reloop_tolerance: float = 0.1,
+    linesort_enabled: bool = True,
+    linesort_two_opt: bool = True,
+    linesort_passes: int = 250,
+    servo_delay_ms: float = 100.0,
+    pen_debounce_steps: int = 7,
 ) -> None:
     """Convert SVG to G-code using vpype CLI."""
     # #region agent log
@@ -761,6 +886,15 @@ async def convert_svg_to_gcode_file(
             occult_ignore_layers=occult_ignore_layers,
             occult_across_layers_only=occult_across_layers_only,
             occult_keep_occulted=occult_keep_occulted,
+            enable_optimization=enable_optimization,
+            linemerge_tolerance=linemerge_tolerance,
+            linesimplify_tolerance=linesimplify_tolerance,
+            reloop_tolerance=reloop_tolerance,
+            linesort_enabled=linesort_enabled,
+            linesort_two_opt=linesort_two_opt,
+            linesort_passes=linesort_passes,
+            servo_delay_ms=servo_delay_ms,
+            pen_debounce_steps=pen_debounce_steps,
         )
         await run_vpype_pipeline(pipeline)
 
@@ -805,6 +939,40 @@ async def convert_svg_to_gcode_file(
                 if occult_flags:
                     occult_info += f" ({', '.join(occult_flags)})"
                 header_lines.append(f"; Hidden line removal: {occult_info}")
+            # Add pen debounce info (including sequence for verification)
+            header_lines.append(
+                f"; Pen debounce: steps={pen_debounce_steps}, delay_ms={servo_delay_ms:.0f}"
+            )
+            # Generate pen_down_sequence for header metadata
+            gcode = _get_default_gcode_settings()
+            pen_up = getattr(gcode, "pen_up_command", "M280 P0 S110")
+            if pen_up is None:
+                pen_up = "M280 P0 S110"
+            pen_down = getattr(gcode, "pen_down_command", "M280 P0 S130")
+            if pen_down is None:
+                pen_down = "M280 P0 S130"
+            pen_down_sequence = generate_exponential_pen_down_sequence(
+                pen_up, pen_down, num_steps=pen_debounce_steps, servo_delay_ms=servo_delay_ms
+            )
+            pen_sequence_lines = pen_down_sequence.split("\n")
+            for line in pen_sequence_lines:
+                header_lines.append(f"; Pen debounce cmd: {line}")
+            # Add optimization info if enabled
+            if enable_optimization:
+                opt_parts = []
+                opt_parts.append(f"linemerge={linemerge_tolerance:.3f}mm")
+                opt_parts.append(f"linesimplify={linesimplify_tolerance:.3f}mm")
+                opt_parts.append(f"reloop={reloop_tolerance:.3f}mm")
+                if linesort_enabled:
+                    sort_info = f"linesort(passes={linesort_passes}"
+                    if linesort_two_opt:
+                        sort_info += ",two-opt"
+                    sort_info += ")"
+                    opt_parts.append(sort_info)
+                opt_info = "optimization enabled"
+                if opt_parts:
+                    opt_info += f" ({', '.join(opt_parts)})"
+                header_lines.append(f"; G-code optimization: {opt_info}")
             header = "\n".join(header_lines) + "\n"
             original = output_path.read_text(encoding="utf-8", errors="ignore")
             output_path.write_text(header + original, encoding="utf-8")
