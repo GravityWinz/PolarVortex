@@ -34,6 +34,68 @@ def _get_default_gcode_settings():
     return _Fallback()
 
 
+def _extract_servo_angle(cmd: str) -> Optional[float]:
+    """Extract S value from M280 command (e.g., 'M280 P0 S110' -> 110.0)."""
+    match = re.search(r'S([\d.]+)', cmd)
+    if match:
+        try:
+            return float(match.group(1))
+        except ValueError:
+            return None
+    return None
+
+
+def generate_exponential_pen_down_sequence(
+    pen_up_cmd: str, 
+    pen_down_cmd: str, 
+    num_steps: int = 7,
+    servo_delay_ms: float = 100.0
+) -> str:
+    """
+    Generate multiple M280 commands that exponentially approach pen_down value.
+    This reduces bouncing by gradually lowering the pen instead of one sudden move.
+    
+    Args:
+        pen_up_cmd: Command for pen up (e.g., "M280 P0 S110")
+        pen_down_cmd: Command for pen down (e.g., "M280 P0 S130")
+        num_steps: Total number of moves (default 7)
+        servo_delay_ms: Delay in milliseconds after final command (default 100.0)
+    
+    Returns:
+        Multi-line string with M280 commands and final delay
+    """
+    pen_up_angle = _extract_servo_angle(pen_up_cmd)
+    pen_down_angle = _extract_servo_angle(pen_down_cmd)
+    
+    if pen_up_angle is None or pen_down_angle is None:
+        # Fallback: if we can't parse angles, just use the original command with delay
+        return f"{pen_down_cmd}\nG4 P{int(servo_delay_ms)}"
+    
+    # Extract command prefix (e.g., "M280 P0" from "M280 P0 S110")
+    prefix_match = re.match(r'^([^S]+)', pen_down_cmd)
+    if prefix_match:
+        cmd_prefix = prefix_match.group(1).strip()
+    else:
+        cmd_prefix = "M280 P0"
+    
+    # Generate exponential approach: each step covers 50% of remaining distance
+    # Formula: angle = pen_up + (pen_down - pen_up) * (1 - 0.5^step)
+    # For num_steps=7: steps 1-6 are intermediate, step 7 is exact pen_down
+    commands = []
+    for step in range(1, num_steps):
+        # Exponential approach: step 1 covers 50%, step 2 covers 75%, etc.
+        progress = 1 - (0.5 ** step)
+        angle = pen_up_angle + (pen_down_angle - pen_up_angle) * progress
+        commands.append(f"{cmd_prefix} S{angle:.2f}")
+    
+    # Final step: exact pen_down value
+    commands.append(f"{cmd_prefix} S{pen_down_angle:.2f}")
+    
+    # Add delay after final command
+    commands.append(f"G4 P{int(servo_delay_ms)}")
+    return "\n".join(commands)
+
+
 def _get_stroke_value(elem) -> str:
     """Return the stroke color for an SVG element, falling back to style attr."""
     stroke = elem.get("stroke")
@@ -301,63 +363,9 @@ def build_vpype_config_content(
     if pen_debounce_steps is None or pen_debounce_steps < 1:
         pen_debounce_steps = 1
     
-    # Extract servo angles from commands
-    import re
-    def extract_servo_angle(cmd: str) -> Optional[float]:
-        """Extract S value from M280 command (e.g., 'M280 P0 S110' -> 110.0)."""
-        match = re.search(r'S([\d.]+)', cmd)
-        if match:
-            try:
-                return float(match.group(1))
-            except ValueError:
-                return None
-        return None
-    
-    def generate_exponential_pen_down_sequence(pen_up_cmd: str, pen_down_cmd: str, num_steps: int = 7) -> str:
-        """
-        Generate multiple M280 commands that exponentially approach pen_down value.
-        This reduces bouncing by gradually lowering the pen instead of one sudden move.
-        
-        Args:
-            pen_up_cmd: Command for pen up (e.g., "M280 P0 S110")
-            pen_down_cmd: Command for pen down (e.g., "M280 P0 S130")
-            num_steps: Total number of moves (default 7)
-        
-        Returns:
-            Multi-line string with M280 commands and final delay
-        """
-        pen_up_angle = extract_servo_angle(pen_up_cmd)
-        pen_down_angle = extract_servo_angle(pen_down_cmd)
-        
-        if pen_up_angle is None or pen_down_angle is None:
-            # Fallback: if we can't parse angles, just use the original command with delay
-            return f"{pen_down_cmd}\nG4 P{int(servo_delay_ms)}"
-        
-        # Extract command prefix (e.g., "M280 P0" from "M280 P0 S110")
-        prefix_match = re.match(r'^([^S]+)', pen_down_cmd)
-        if prefix_match:
-            cmd_prefix = prefix_match.group(1).strip()
-        else:
-            cmd_prefix = "M280 P0"
-        
-        # Generate exponential approach: each step covers 50% of remaining distance
-        # Formula: angle = pen_up + (pen_down - pen_up) * (1 - 0.5^step)
-        # For num_steps=7: steps 1-6 are intermediate, step 7 is exact pen_down
-        commands = []
-        for step in range(1, num_steps):
-            # Exponential approach: step 1 covers 50%, step 2 covers 75%, etc.
-            progress = 1 - (0.5 ** step)
-            angle = pen_up_angle + (pen_down_angle - pen_up_angle) * progress
-            commands.append(f"{cmd_prefix} S{angle:.2f}")
-        
-        # Final step: exact pen_down value
-        commands.append(f"{cmd_prefix} S{pen_down_angle:.2f}")
-        
-        # Add delay after final command
-        commands.append(f"G4 P{int(servo_delay_ms)}")
-        return "\n".join(commands)
-    
-    pen_down_sequence = generate_exponential_pen_down_sequence(pen_up, pen_down, num_steps=pen_debounce_steps)
+    pen_down_sequence = generate_exponential_pen_down_sequence(
+        pen_up, pen_down, num_steps=pen_debounce_steps, servo_delay_ms=servo_delay_ms
+    )
     
     before_print = getattr(gcode, "before_print", None)
     if before_print is None:
@@ -934,6 +942,17 @@ async def convert_svg_to_gcode_file(
             # Add pen debounce info (including sequence for verification)
             header_lines.append(
                 f"; Pen debounce: steps={pen_debounce_steps}, delay_ms={servo_delay_ms:.0f}"
+            )
+            # Generate pen_down_sequence for header metadata
+            gcode = _get_default_gcode_settings()
+            pen_up = getattr(gcode, "pen_up_command", "M280 P0 S110")
+            if pen_up is None:
+                pen_up = "M280 P0 S110"
+            pen_down = getattr(gcode, "pen_down_command", "M280 P0 S130")
+            if pen_down is None:
+                pen_down = "M280 P0 S130"
+            pen_down_sequence = generate_exponential_pen_down_sequence(
+                pen_up, pen_down, num_steps=pen_debounce_steps, servo_delay_ms=servo_delay_ms
             )
             pen_sequence_lines = pen_down_sequence.split("\n")
             for line in pen_sequence_lines:

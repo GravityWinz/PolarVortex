@@ -719,6 +719,7 @@ class ConfigurationService:
                     before_print=gcode_data.get('before_print', []),
                     pen_up_command=pen_up,
                     pen_down_command=pen_down,
+                    servo_delay_ms=gcode_data.get('servo_delay_ms', 100.0),
                 )
         return None
 

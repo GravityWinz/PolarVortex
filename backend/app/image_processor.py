@@ -48,8 +48,11 @@ class ImageHelper:
         return file_content_type == "image/svg+xml" or ext == ".svg"
     
     def get_project_directory(self, project_id: str) -> Path:
-        """Get the project directory path for a given project ID"""
-        return self.project_storage_path / project_id
+        """Get the project directory path for a given project ID
+        Uses project_service to handle name-prefixed directories correctly
+        """
+        from .project_service import project_service
+        return project_service._get_project_directory(project_id)
     
     def save_original_image(self, image_data: bytes, image_name: str, project_id: str) -> str:
         """Save original image to the project directory"""

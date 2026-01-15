@@ -535,7 +535,7 @@ const GenerateSvgDialog = ({ open, onClose, project }) => {
           onClick={handleClose} 
           disabled={isGenerating || isSaving}
         >
-          Cancel
+          Close
         </Button>
         <Button
           onClick={handleSave}
