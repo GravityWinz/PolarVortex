@@ -33,16 +33,35 @@ class ProjectService:
         """Generate a unique project ID"""
         return str(uuid.uuid4())
     
-    def _get_project_directory(self, project_id: str) -> Path:
+    def _find_project_directory(self, project_id: str) -> Optional[Path]:
+        """Locate an existing project directory by id, supporting name-prefixed folders."""
+        if not self.project_storage_path.exists():
+            return None
+
+        exact_dir = self.project_storage_path / project_id
+        if exact_dir.exists():
+            return exact_dir
+
+        suffix = f"-{project_id}"
+        for candidate in self.project_storage_path.iterdir():
+            if candidate.is_dir() and candidate.name.endswith(suffix):
+                return candidate
+        return None
+
+    def _get_project_directory(self, project_id: str, project_name: Optional[str] = None) -> Path:
         """Get the project directory path for a given project ID"""
-        project_dir = self.project_storage_path / project_id
+        existing = self._find_project_directory(project_id)
+        if existing:
+            return existing
+
+        if project_name:
+            safe_name = self._sanitize_project_name(project_name)
+            project_dir = self.project_storage_path / f"{safe_name}-{project_id}"
+        else:
+            project_dir = self.project_storage_path / project_id
+
         try:
             project_dir.mkdir(parents=True, exist_ok=True)
-            # Seed a placeholder png if none exist to satisfy downstream operations
-            if not any(project_dir.glob("*.png")):
-                placeholder = project_dir / "placeholder.png"
-                if not placeholder.exists():
-                    placeholder.write_bytes(b"placeholder")
         except Exception:
             # Directory creation failures will be surfaced later when accessed
             pass
@@ -66,13 +85,9 @@ class ProjectService:
             # Generate unique project ID
             project_id = self._generate_project_id()
             
-            # Create project directory
-            project_dir = self._get_project_directory(project_id)
+            # Create project directory (name-prefixed)
+            project_dir = self._get_project_directory(project_id, project_data.name)
             project_dir.mkdir(parents=True, exist_ok=True)
-            # Seed with a placeholder image so downstream operations have a file to work with
-            placeholder = project_dir / "placeholder.png"
-            if not placeholder.exists():
-                placeholder.write_bytes(b"placeholder")
             
             # Create project object
             now = datetime.now()
@@ -145,11 +160,29 @@ class ProjectService:
             
             if not self.project_storage_path.exists():
                 return projects
+
+            def extract_project_id(dir_name: str) -> Optional[str]:
+                # New format: <name>-<uuid>
+                if len(dir_name) >= 36:
+                    possible_id = dir_name[-36:]
+                    try:
+                        uuid.UUID(possible_id)
+                        return possible_id
+                    except ValueError:
+                        pass
+                # Legacy format: directory is the UUID
+                try:
+                    uuid.UUID(dir_name)
+                    return dir_name
+                except ValueError:
+                    return None
             
             # Iterate through all project directories
             for project_dir in self.project_storage_path.iterdir():
                 if project_dir.is_dir():
-                    project_id = project_dir.name
+                    project_id = extract_project_id(project_dir.name)
+                    if not project_id:
+                        continue
                     project = self.get_project(project_id)
                     if project:
                         projects.append(project)
@@ -408,6 +441,66 @@ class ProjectService:
             return ProjectResponse(**updated_project.dict())
         except Exception as e:
             logger.error(f"Failed to update project after file removal {project_id}: {e}")
+            return None
+
+    def rename_project_file(
+        self,
+        project_id: str,
+        old_filename: str,
+        new_filename: str,
+    ) -> Optional[ProjectResponse]:
+        """Update project metadata after a file has been renamed"""
+        try:
+            existing_project = self.get_project(project_id)
+            if not existing_project:
+                return None
+
+            def matches(name: Optional[str]) -> bool:
+                if not name:
+                    return False
+                return name == old_filename or Path(name).name == Path(old_filename).name
+
+            thumbnail_image = existing_project.thumbnail_image
+            if matches(thumbnail_image):
+                thumbnail_image = new_filename
+
+            source_image = existing_project.source_image
+            if matches(source_image):
+                source_image = new_filename
+
+            vectorization = existing_project.vectorization
+            if vectorization and matches(vectorization.svg_filename):
+                vectorization = VectorizationInfo(
+                    svg_filename=new_filename,
+                    vectorized_at=vectorization.vectorized_at,
+                    parameters=vectorization.parameters,
+                    total_paths=vectorization.total_paths,
+                    colors_detected=vectorization.colors_detected,
+                    processing_time=vectorization.processing_time,
+                )
+
+            gcode_files = existing_project.gcode_files or []
+            gcode_files = [
+                new_filename if matches(f) else f
+                for f in gcode_files
+            ]
+
+            updated_project = Project(
+                id=project_id,
+                name=existing_project.name,
+                created_at=existing_project.created_at,
+                updated_at=datetime.now(),
+                thumbnail_image=thumbnail_image,
+                source_image=source_image,
+                vectorization=vectorization,
+                gcode_files=gcode_files,
+            )
+
+            self._save_project_yaml(updated_project)
+            logger.info(f"Renamed project file for {project_id}: {old_filename} -> {new_filename}")
+            return ProjectResponse(**updated_project.dict())
+        except Exception as e:
+            logger.error(f"Failed to rename project file for {project_id}: {e}")
             return None
 
 

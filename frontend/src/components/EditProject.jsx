@@ -2,6 +2,7 @@ import {
   Code as CodeIcon,
   AutoFixHigh as ConvertIcon,
   DeleteOutline as DeleteIcon,
+  DriveFileRenameOutline as RenameIcon,
   InsertDriveFile as FileIcon,
   Create as GenerateSvgIcon,
   Image as ImageIcon,
@@ -29,14 +30,17 @@ import {
   List,
   ListItem,
   ListItemButton,
+  ListItemIcon,
   ListItemText,
   ListSubheader,
+  Menu,
   MenuItem,
   Paper,
   Select,
   Slider,
   Stack,
   Switch,
+  TextField,
   Tooltip,
   Typography,
 } from "@mui/material";
@@ -51,6 +55,8 @@ import {
   getProjectFileUrl,
   getProjectGcodeAnalysis,
   getProjectSvgAnalysis,
+  createProjectThumbnail,
+  renameProjectFile,
   uploadGcodeToProject,
   uploadImageToProject,
 } from "../services/apiService";
@@ -80,20 +86,34 @@ function normalizeAsset(filename, meta = {}, typeOverride) {
       ? "gcode"
       : "other");
 
+  const label = meta.is_thumbnail
+    ? "Thumbnail"
+    : meta.is_processed
+    ? "Processed"
+    : meta.is_original
+    ? "Original"
+    : "";
+
   return {
     filename,
     type,
-    label: meta.is_thumbnail
-      ? `Thumbnail (${filename})`
-      : meta.is_processed
-      ? `Processed (${filename})`
-      : filename,
-    meta,
+    label,
+    meta: {
+      ...meta,
+      size: meta.size ?? null,
+      created: meta.created ?? null,
+      modified: meta.modified ?? null,
+    },
     displayName: filename?.split("/").pop() || filename,
   };
 }
 
 function groupAssets(imageEntries = [], gcodeEntries = []) {
+  const metaByFilename = new Map(
+    (imageEntries || [])
+      .filter((entry) => entry?.filename)
+      .map((entry) => [entry.filename, entry])
+  );
   const images = [];
   const svgs = [];
 
@@ -107,6 +127,9 @@ function groupAssets(imageEntries = [], gcodeEntries = []) {
       is_thumbnail: entry.is_thumbnail,
       is_processed: entry.is_processed,
       is_original: entry.is_original,
+      size: entry.size,
+      created: entry.created,
+      modified: entry.modified,
     });
     if (normalized.type === "svg") {
       svgs.push(normalized);
@@ -115,11 +138,56 @@ function groupAssets(imageEntries = [], gcodeEntries = []) {
     }
   });
 
-  const gcode = (gcodeEntries || []).map((file) =>
-    normalizeAsset(file, {}, "gcode")
-  );
+  const gcode = (gcodeEntries || []).map((file) => {
+    const filename = file || "";
+    const meta =
+      metaByFilename.get(filename) ||
+      metaByFilename.get(filename.split("/").pop()) ||
+      {};
+    return normalizeAsset(filename, {
+      size: meta.size,
+      created: meta.created,
+      modified: meta.modified,
+    }, "gcode");
+  });
 
   return { images, svgs, gcode };
+}
+
+function formatFileSize(bytes) {
+  if (bytes === null || bytes === undefined || Number.isNaN(Number(bytes))) {
+    return "";
+  }
+  const size = Number(bytes);
+  if (size < 1024) return `${size} B`;
+  const kb = size / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  const mb = kb / 1024;
+  if (mb < 1024) return `${mb.toFixed(1)} MB`;
+  const gb = mb / 1024;
+  return `${gb.toFixed(1)} GB`;
+}
+
+function formatFileDate(isoString) {
+  if (!isoString) return "";
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+  });
+}
+
+function buildAssetSecondaryText(asset) {
+  if (!asset) return undefined;
+  const parts = [];
+  if (asset.label) parts.push(asset.label);
+  const sizeText = formatFileSize(asset.meta?.size);
+  if (sizeText) parts.push(sizeText);
+  const dateText = formatFileDate(asset.meta?.modified || asset.meta?.created);
+  if (dateText) parts.push(dateText);
+  return parts.length ? parts.join(" • ") : undefined;
 }
 
 function parseGcodeForPreview(content) {
@@ -178,6 +246,14 @@ export default function EditProject({ currentProject }) {
   const [loadingAssets, setLoadingAssets] = useState(false);
   const [assetError, setAssetError] = useState("");
   const [selectedAsset, setSelectedAsset] = useState(null);
+  const [contextMenu, setContextMenu] = useState(null);
+  const [contextAsset, setContextAsset] = useState(null);
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
+  const [renameError, setRenameError] = useState("");
+  const [renaming, setRenaming] = useState(false);
+  const [thumbnailLoading, setThumbnailLoading] = useState(false);
+  const [isDragActive, setIsDragActive] = useState(false);
   const [projectDetails, setProjectDetails] = useState(null);
   const [gcodePreview, setGcodePreview] = useState({
     loading: false,
@@ -260,7 +336,7 @@ export default function EditProject({ currentProject }) {
     [assets]
   );
 
-  const loadAssets = async () => {
+  const loadAssets = async (preferFilename = "") => {
     if (!currentProject?.id) {
       setProjectDetails(null);
       setAssets({ images: [], svgs: [], gcode: [] });
@@ -286,10 +362,16 @@ export default function EditProject({ currentProject }) {
       );
       setAssets(grouped);
       setProjectDetails(projectResponse || null);
-
-      const first =
-        grouped.images[0] || grouped.svgs[0] || grouped.gcode[0] || null;
-      setSelectedAsset(first);
+      const allAssets = [...grouped.images, ...grouped.svgs, ...grouped.gcode];
+      const preferred = preferFilename
+        ? allAssets.find(
+            (asset) =>
+              asset.filename === preferFilename ||
+              asset.displayName === preferFilename
+          )
+        : null;
+      const first = allAssets[0] || null;
+      setSelectedAsset(preferred || first);
     } catch (err) {
       setAssetError(err.message || "Failed to load project assets");
     } finally {
@@ -525,6 +607,85 @@ export default function EditProject({ currentProject }) {
     }
   };
 
+  const handleOpenContextMenu = (event, asset) => {
+    event.preventDefault();
+    setSelectedAsset(asset);
+    setContextAsset(asset);
+    setContextMenu({
+      mouseX: event.clientX + 2,
+      mouseY: event.clientY - 6,
+    });
+  };
+
+  const handleCloseContextMenu = () => {
+    setContextMenu(null);
+  };
+
+  const openRenameDialog = (asset) => {
+    if (!asset) return;
+    setRenameValue(asset.displayName || "");
+    setRenameError("");
+    setRenameDialogOpen(true);
+    handleCloseContextMenu();
+  };
+
+  const closeRenameDialog = () => {
+    if (renaming) return;
+    setRenameDialogOpen(false);
+    setRenameError("");
+  };
+
+  const handleRename = async () => {
+    if (!currentProject || !contextAsset) return;
+    const trimmed = renameValue.trim();
+    if (!trimmed) {
+      setRenameError("File name is required.");
+      return;
+    }
+    if (/[\\/]/.test(trimmed)) {
+      setRenameError("File name cannot include path separators.");
+      return;
+    }
+    if (trimmed === contextAsset.displayName) {
+      setRenameDialogOpen(false);
+      return;
+    }
+
+    setRenaming(true);
+    setRenameError("");
+    try {
+      const result = await renameProjectFile(
+        currentProject.id,
+        contextAsset.filename,
+        trimmed
+      );
+      const newFilename = result.new_filename || trimmed;
+      await loadAssets(newFilename);
+      setContextAsset((prev) =>
+        prev ? { ...prev, filename: newFilename, displayName: trimmed } : prev
+      );
+      setRenameDialogOpen(false);
+    } catch (err) {
+      setRenameError(err.message || "Failed to rename file");
+    } finally {
+      setRenaming(false);
+    }
+  };
+
+  const handleCreateThumbnail = async (asset) => {
+    if (!currentProject || !asset) return;
+    setThumbnailLoading(true);
+    setAssetError("");
+    try {
+      await createProjectThumbnail(currentProject.id, asset.filename);
+      await loadAssets(asset.filename);
+    } catch (err) {
+      setAssetError(err.message || "Failed to create thumbnail");
+    } finally {
+      setThumbnailLoading(false);
+    }
+  };
+
   const handleAnalyzeGcode = async () => {
     if (!currentProject || !selectedAsset) return;
     setGcodeAnalysis({ loading: true, data: null, error: "" });
@@ -603,8 +764,10 @@ export default function EditProject({ currentProject }) {
     }
   };
 
-  const handleUploadFile = async (file) => {
-    if (!file || !currentProject) return;
+  const validateUploadFile = (file) => {
+    if (!file) {
+      throw new Error("No file selected.");
+    }
     const name = (file.name || "").toLowerCase();
     const ext = name.match(/\.[^.]+$/)?.[0]?.slice(1) || "";
     const isSvg = ext === "svg";
@@ -612,37 +775,78 @@ export default function EditProject({ currentProject }) {
     const isImage = file.type.startsWith("image/") || isSvg;
 
     if (!isImage && !isGcode) {
-      setAssetError(
+      throw new Error(
         "Unsupported file type. Use image/SVG or G-code (.gcode/.nc/.txt)."
       );
-      return;
     }
 
     if (file.size > 10 * 1024 * 1024) {
-      setAssetError("File size must be less than 10MB");
-      return;
+      throw new Error("File size must be less than 10MB");
     }
 
+    return { isGcode };
+  };
+
+  const uploadSingleFile = async (file) => {
+    if (!currentProject) return;
+    const { isGcode } = validateUploadFile(file);
+    if (isGcode) {
+      const formData = new FormData();
+      formData.append("file", file);
+      await uploadGcodeToProject(currentProject.id, formData);
+    } else {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("settings", JSON.stringify(DEFAULT_UPLOAD_SETTINGS));
+      await uploadImageToProject(currentProject.id, formData);
+    }
+  };
+
+  const handleUploadFiles = async (files = []) => {
+    if (!currentProject || !files.length) return;
     setAssetError("");
     setUploading(true);
     try {
-      if (isGcode) {
-        const formData = new FormData();
-        formData.append("file", file);
-        await uploadGcodeToProject(currentProject.id, formData);
-      } else {
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("settings", JSON.stringify(DEFAULT_UPLOAD_SETTINGS));
-        await uploadImageToProject(currentProject.id, formData);
+      for (const file of files) {
+        await uploadSingleFile(file);
       }
-
       await loadAssets();
     } catch (err) {
       setAssetError(err.message || "Upload failed");
     } finally {
       setUploading(false);
     }
+  };
+
+  const handleUploadFile = async (file) => {
+    await handleUploadFiles(file ? [file] : []);
+  };
+
+  const handleDragOver = (event) => {
+    if (!currentProject) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setIsDragActive(true);
+  };
+
+  const handleDragEnter = (event) => {
+    if (!currentProject) return;
+    event.preventDefault();
+    setIsDragActive(true);
+  };
+
+  const handleDragLeave = (event) => {
+    if (!event.currentTarget.contains(event.relatedTarget)) {
+      setIsDragActive(false);
+    }
+  };
+
+  const handleDrop = async (event) => {
+    if (!currentProject) return;
+    event.preventDefault();
+    setIsDragActive(false);
+    const files = Array.from(event.dataTransfer.files || []);
+    await handleUploadFiles(files);
   };
 
   const handleFileInputChange = async (event) => {
@@ -972,7 +1176,7 @@ export default function EditProject({ currentProject }) {
     setVectorizeProject(null);
     // Refresh assets after vectorization
     if (currentProject) {
-      loadProjectAssets();
+      loadAssets();
     }
   };
 
@@ -985,7 +1189,7 @@ export default function EditProject({ currentProject }) {
     setGenerateSvgDialogOpen(false);
     // Refresh assets after generation
     if (currentProject) {
-      loadProjectAssets();
+      loadAssets();
     }
   };
 
@@ -1654,60 +1858,17 @@ export default function EditProject({ currentProject }) {
           <ListItem
             key={`${title}-${item.filename}`}
             disablePadding
-            secondaryAction={
-              <Stack direction="row" spacing={0.5}>
-                {isVectorizableAsset(item) && (
-                  <Tooltip title="Vectorize image">
-                    <span>
-                      <IconButton
-                        edge="end"
-                        aria-label={`vectorize ${item.displayName}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openVectorizeDialog(item);
-                        }}
-                        size="small"
-                      >
-                        <VectorizeIcon fontSize="small" />
-                      </IconButton>
-                    </span>
-                  </Tooltip>
-                )}
-                {item.type === "svg" && (
-                  <IconButton
-                    edge="end"
-                    aria-label={`convert ${item.displayName}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openConvertDialog(item);
-                    }}
-                    size="small"
-                    color="primary"
-                    disabled={convertLoading}
-                  >
-                    <ConvertIcon fontSize="small" />
-                  </IconButton>
-                )}
-                <IconButton
-                  edge="end"
-                  aria-label={`delete ${item.displayName}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDeleteAsset(item);
-                  }}
-                  disabled={deletingFile === item.filename}
-                  size="small"
-                >
-                  <DeleteIcon fontSize="small" />
-                </IconButton>
-              </Stack>
-            }
+            secondaryAction={null}
           >
             <ListItemButton
               selected={selectedAsset?.filename === item.filename}
               onClick={() => setSelectedAsset(item)}
+              onContextMenu={(event) => handleOpenContextMenu(event, item)}
             >
-              <ListItemText primary={item.displayName} secondary={item.label} />
+            <ListItemText
+              primary={item.displayName}
+              secondary={buildAssetSecondaryText(item)}
+            />
             </ListItemButton>
           </ListItem>
         ))}
@@ -1771,7 +1932,43 @@ export default function EditProject({ currentProject }) {
 
       <Grid container spacing={3}>
         <Grid item xs={12} md={4}>
-          <Paper sx={{ p: 2, height: "100%", minHeight: 420 }}>
+          <Paper
+            sx={{
+              p: 2,
+              height: "100%",
+              minHeight: 420,
+              border: isDragActive ? "2px dashed" : undefined,
+              borderColor: isDragActive ? "primary.main" : undefined,
+              bgcolor: isDragActive ? "action.hover" : undefined,
+              position: "relative",
+            }}
+            onDragOver={handleDragOver}
+            onDragEnter={handleDragEnter}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
+            {isDragActive && (
+              <Box
+                sx={{
+                  position: "absolute",
+                  inset: 0,
+                  zIndex: 1,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  pointerEvents: "none",
+                }}
+              >
+                <Paper
+                  elevation={2}
+                  sx={{ px: 2, py: 1, bgcolor: "background.paper" }}
+                >
+                  <Typography variant="body2" color="text.secondary">
+                    Drop files to upload
+                  </Typography>
+                </Paper>
+              </Box>
+            )}
             <Stack
               direction="row"
               spacing={1}
@@ -2203,6 +2400,109 @@ export default function EditProject({ currentProject }) {
             disabled={convertLoading || !currentProject || !convertTarget}
           >
             {convertLoading ? "Converting..." : "Convert"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Menu
+        open={contextMenu !== null}
+        onClose={handleCloseContextMenu}
+        anchorReference="anchorPosition"
+        anchorPosition={
+          contextMenu !== null
+            ? { top: contextMenu.mouseY, left: contextMenu.mouseX }
+            : undefined
+        }
+      >
+        {contextAsset &&
+          (contextAsset.type === "image" || contextAsset.type === "svg") &&
+          !contextAsset.meta?.is_thumbnail && (
+            <MenuItem
+              onClick={() => {
+                handleCloseContextMenu();
+                handleCreateThumbnail(contextAsset);
+              }}
+              disabled={thumbnailLoading}
+            >
+              <ListItemIcon>
+                <ImageIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText>Set as Project Thumbnail</ListItemText>
+            </MenuItem>
+          )}
+        <MenuItem onClick={() => openRenameDialog(contextAsset)} disabled={!contextAsset}>
+          <ListItemIcon>
+            <RenameIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Rename</ListItemText>
+        </MenuItem>
+        {contextAsset && isVectorizableAsset(contextAsset) && (
+          <MenuItem
+            onClick={() => {
+              handleCloseContextMenu();
+              openVectorizeDialog(contextAsset);
+            }}
+          >
+            <ListItemIcon>
+              <VectorizeIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Vectorize</ListItemText>
+          </MenuItem>
+        )}
+        {contextAsset?.type === "svg" && (
+          <MenuItem
+            onClick={() => {
+              handleCloseContextMenu();
+              openConvertDialog(contextAsset);
+            }}
+          >
+            <ListItemIcon>
+              <ConvertIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Convert to G-code</ListItemText>
+          </MenuItem>
+        )}
+        <MenuItem
+          onClick={() => {
+            handleCloseContextMenu();
+            handleDeleteAsset(contextAsset);
+          }}
+          disabled={!contextAsset}
+        >
+          <ListItemIcon>
+            <DeleteIcon fontSize="small" color="error" />
+          </ListItemIcon>
+          <ListItemText>Delete</ListItemText>
+        </MenuItem>
+      </Menu>
+
+      <Dialog open={renameDialogOpen} onClose={closeRenameDialog} maxWidth="xs" fullWidth>
+        <DialogTitle>Rename File</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            fullWidth
+            margin="dense"
+            label="File name"
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            error={Boolean(renameError)}
+            helperText={renameError || " "}
+            disabled={renaming}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                handleRename();
+              }
+            }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeRenameDialog} disabled={renaming}>
+            Cancel
+          </Button>
+          <Button variant="contained" onClick={handleRename} disabled={renaming}>
+            {renaming ? "Renaming..." : "Rename"}
           </Button>
         </DialogActions>
       </Dialog>

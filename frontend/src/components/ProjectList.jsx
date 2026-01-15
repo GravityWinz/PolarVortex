@@ -17,6 +17,10 @@ import {
   DialogTitle,
   Grid,
   IconButton,
+  ListItemIcon,
+  ListItemText,
+  Menu,
+  MenuItem,
   Paper,
   TextField,
   Typography,
@@ -27,7 +31,8 @@ import {
   createProject,
   deleteProject,
   getProjectThumbnailUrl,
-  getProjects
+  getProjects,
+  updateProject
 } from "../services/apiService";
 
 /**
@@ -46,6 +51,12 @@ export default function ProjectList({
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [creating, setCreating] = useState(false);
+  const [contextMenu, setContextMenu] = useState(null);
+  const [contextProject, setContextProject] = useState(null);
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
+  const [renameError, setRenameError] = useState("");
+  const [renaming, setRenaming] = useState(false);
 
   // Fetch projects from API
   useEffect(() => {
@@ -113,6 +124,64 @@ export default function ProjectList({
     }
     if (onNavigate) {
       onNavigate("edit");
+    }
+  };
+
+  const handleOpenContextMenu = (event, project) => {
+    event.preventDefault();
+    setContextProject(project);
+    setContextMenu({
+      mouseX: event.clientX + 2,
+      mouseY: event.clientY - 6,
+    });
+  };
+
+  const handleCloseContextMenu = () => {
+    setContextMenu(null);
+  };
+
+  const openRenameDialog = (project) => {
+    if (!project) return;
+    setRenameValue(project.name || "");
+    setRenameError("");
+    setRenameDialogOpen(true);
+    handleCloseContextMenu();
+  };
+
+  const closeRenameDialog = () => {
+    if (renaming) return;
+    setRenameDialogOpen(false);
+    setRenameError("");
+  };
+
+  const handleRenameProject = async () => {
+    if (!contextProject) return;
+    const trimmed = renameValue.trim();
+    if (!trimmed) {
+      setRenameError("Project name is required.");
+      return;
+    }
+    if (trimmed === contextProject.name) {
+      setRenameDialogOpen(false);
+      return;
+    }
+    try {
+      setRenaming(true);
+      const updated = await updateProject(contextProject.id, { name: trimmed });
+      setProjects((prev) =>
+        prev.map((project) =>
+          project.id === updated.id ? updated : project
+        )
+      );
+      if (currentProject?.id === updated.id && onSetCurrentProject) {
+        onSetCurrentProject(updated);
+      }
+      setRenameDialogOpen(false);
+    } catch (err) {
+      setRenameError("Failed to rename project");
+      console.error("Error renaming project:", err);
+    } finally {
+      setRenaming(false);
     }
   };
 
@@ -212,19 +281,27 @@ export default function ProjectList({
                     boxShadow: 4,
                   },
                 }}
-                onClick={(e) => {
-                  // Only handle project selection if not clicking on the upload area
-                  if (e.target.closest("[data-upload-area]")) {
-                    return;
-                  }
+                onClick={() => {
                   handleProjectSelect(project);
                 }}
+                onContextMenu={(event) => handleOpenContextMenu(event, project)}
               >
+                <Box
+                  sx={{
+                    px: 2,
+                    pt: 2,
+                    pb: 1,
+                    textAlign: "center",
+                  }}
+                >
+                  <Typography variant="subtitle1" component="div" noWrap>
+                    {project.name}
+                  </Typography>
+                </Box>
                 <CardMedia
                   component="div"
-                  data-upload-area
                   sx={{
-                    height: 200,
+                    height: 170,
                     backgroundColor: "grey.100",
                     display: "flex",
                     alignItems: "center",
@@ -236,13 +313,6 @@ export default function ProjectList({
                     "&:hover": {
                       backgroundColor: "grey.200",
                     },
-                  }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    // If project has a thumbnail, navigate to project
-                    if (project.thumbnail_image) {
-                      handleProjectSelect(project);
-                    }
                   }}
                 >
                   {project.thumbnail_image ? (
@@ -257,11 +327,6 @@ export default function ProjectList({
                         position: "absolute",
                         top: 0,
                         left: 0,
-                        cursor: "pointer",
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleProjectSelect(project);
                       }}
                     />
                   ) : (
@@ -302,14 +367,6 @@ export default function ProjectList({
                       mb: 1,
                     }}
                   >
-                    <Typography
-                      variant="subtitle2"
-                      component="div"
-                      noWrap
-                      sx={{ maxWidth: "70%" }}
-                    >
-                      {project.name}
-                    </Typography>
                     <Box sx={{ display: "flex", gap: 0.5 }}>
                       <Chip
                         label={project.thumbnail_image ? "Has Image" : "Empty"}
@@ -339,25 +396,11 @@ export default function ProjectList({
                   <Box
                     sx={{
                       display: "flex",
-                      justifyContent: "space-between",
+                      justifyContent: "flex-end",
                       alignItems: "center",
                       mt: 2,
-                      gap: 1,
-                      flexWrap: "wrap",
                     }}
                   >
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleProjectSelect(project);
-                      }}
-                      sx={{ textTransform: "none" }}
-                    >
-                      Edit Project
-                    </Button>
-
                     <IconButton
                       size="small"
                       onClick={(e) => {
@@ -414,6 +457,69 @@ export default function ProjectList({
             disabled={!newProjectName.trim() || creating}
           >
             {creating ? "Creating..." : "Create"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Menu
+        open={contextMenu !== null}
+        onClose={handleCloseContextMenu}
+        anchorReference="anchorPosition"
+        anchorPosition={
+          contextMenu !== null
+            ? { top: contextMenu.mouseY, left: contextMenu.mouseX }
+            : undefined
+        }
+      >
+        <MenuItem onClick={() => openRenameDialog(contextProject)} disabled={!contextProject}>
+          <ListItemIcon>
+            <FolderIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Rename</ListItemText>
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            handleCloseContextMenu();
+            if (contextProject) {
+              handleDeleteProject(contextProject.id);
+            }
+          }}
+          disabled={!contextProject}
+        >
+          <ListItemIcon>
+            <DeleteIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Delete</ListItemText>
+        </MenuItem>
+      </Menu>
+
+      <Dialog open={renameDialogOpen} onClose={closeRenameDialog} maxWidth="xs" fullWidth>
+        <DialogTitle>Rename Project</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Project Name"
+            fullWidth
+            variant="outlined"
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            error={Boolean(renameError)}
+            helperText={renameError || " "}
+            disabled={renaming}
+            onKeyPress={(e) => {
+              if (e.key === "Enter") {
+                handleRenameProject();
+              }
+            }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeRenameDialog} disabled={renaming}>
+            Cancel
+          </Button>
+          <Button onClick={handleRenameProject} variant="contained" disabled={renaming}>
+            {renaming ? "Renaming..." : "Rename"}
           </Button>
         </DialogActions>
       </Dialog>

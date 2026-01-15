@@ -19,7 +19,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from .image_processor import ImageHelper
 from .config import Config, Settings
-from .project_models import ProjectCreate, ProjectResponse, ProjectListResponse
+from .project_models import ProjectCreate, ProjectResponse, ProjectListResponse, FileRenameRequest
 from .project_service import project_service
 from .vectorizer import PolargraphVectorizer, VectorizationSettings
 from .vectorizers import get_vectorizer, get_available_vectorizers, get_vectorizer_info
@@ -580,6 +580,106 @@ async def delete_project_file(project_id: str, filename: str):
         raise
     except Exception as e:
         logger.error(f"Delete project file error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/projects/{project_id}/images/{filename:path}/thumbnail")
+async def create_project_thumbnail(project_id: str, filename: str):
+    """Create a thumbnail for a stored image/SVG and set as project thumbnail"""
+    try:
+        _ensure_valid_project_id(project_id)
+        project = project_service.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        project_dir = project_service._get_project_directory(project_id).resolve()
+        file_path = (project_dir / filename).resolve()
+
+        # Prevent path traversal outside project directory
+        if project_dir not in file_path.parents and project_dir != file_path:
+            raise HTTPException(status_code=400, detail="Invalid file path")
+
+        if not file_path.exists() or not file_path.is_file():
+            raise HTTPException(status_code=404, detail="File not found")
+
+        ext = file_path.suffix.lower()
+        if ext not in {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg"}:
+            raise HTTPException(status_code=400, detail="Unsupported file type for thumbnail")
+
+        thumb_path = image_helper.create_thumbnail_from_project_file(project_id, filename)
+        if not thumb_path:
+            raise HTTPException(status_code=500, detail="Failed to create thumbnail")
+
+        thumb_filename = Path(thumb_path).name
+        project_service.update_project_thumbnail(project_id, thumb_filename)
+
+        return {
+            "success": True,
+            "thumbnail_filename": thumb_filename,
+            "thumbnail_path": thumb_path,
+            "message": f"Thumbnail created from {filename}",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Create thumbnail error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/projects/{project_id}/images/{filename:path}/rename")
+async def rename_project_file(project_id: str, filename: str, payload: FileRenameRequest):
+    """Rename a specific file (image/SVG/G-code) within a project"""
+    try:
+        project = project_service.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        new_filename = payload.new_filename.strip()
+        if not new_filename:
+            raise HTTPException(status_code=400, detail="New filename is required")
+
+        if "/" in new_filename or "\\" in new_filename:
+            raise HTTPException(status_code=400, detail="New filename must not include path separators")
+
+        if new_filename == "project.yaml":
+            raise HTTPException(status_code=400, detail="Invalid filename")
+
+        new_candidate = Path(new_filename)
+        if new_candidate.is_absolute() or ".." in new_candidate.parts:
+            raise HTTPException(status_code=400, detail="Invalid filename")
+
+        project_dir = project_service._get_project_directory(project_id).resolve()
+        file_path = (project_dir / filename).resolve()
+
+        # Prevent path traversal outside project directory
+        if project_dir not in file_path.parents and project_dir != file_path:
+            raise HTTPException(status_code=400, detail="Invalid file path")
+
+        if not file_path.exists() or not file_path.is_file():
+            raise HTTPException(status_code=404, detail="File not found")
+
+        new_path = (project_dir / new_filename).resolve()
+        if project_dir not in new_path.parents and project_dir != new_path:
+            raise HTTPException(status_code=400, detail="Invalid target path")
+
+        if new_path.exists():
+            raise HTTPException(status_code=409, detail="A file with that name already exists")
+
+        file_path.rename(new_path)
+
+        project_service.rename_project_file(project_id, filename, new_filename)
+
+        return {
+            "success": True,
+            "old_filename": filename,
+            "new_filename": new_filename,
+            "message": f"Renamed {filename} to {new_filename}",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Rename project file error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/projects/{project_id}/image_upload")
@@ -1257,6 +1357,22 @@ async def delete_project(project_id: str):
         raise
     except Exception as e:
         logger.error(f"Delete project error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/projects/{project_id}")
+async def update_project(project_id: str, project_data: ProjectCreate):
+    """Update project name"""
+    try:
+        _ensure_valid_project_id(project_id)
+        updated = project_service.update_project(project_id, project_data)
+        if not updated:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return updated
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Update project error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
