@@ -931,10 +931,13 @@ async def convert_svg_to_gcode_file(
                 if occult_flags:
                     occult_info += f" ({', '.join(occult_flags)})"
                 header_lines.append(f"; Hidden line removal: {occult_info}")
-            # Add pen debounce info
+            # Add pen debounce info (including sequence for verification)
             header_lines.append(
                 f"; Pen debounce: steps={pen_debounce_steps}, delay_ms={servo_delay_ms:.0f}"
             )
+            pen_sequence_lines = pen_down_sequence.split("\n")
+            for line in pen_sequence_lines:
+                header_lines.append(f"; Pen debounce cmd: {line}")
             # Add optimization info if enabled
             if enable_optimization:
                 opt_parts = []
