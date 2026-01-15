@@ -160,6 +160,32 @@ If running Docker on a Raspberry Pi:
    sudo usermod -a -G dialout $USER
    ```
 
+### Raspberry Pi: Marlin Not Detected (Quick Triage)
+
+If the Marlin controller is not showing up as a USB serial device:
+
+1. **Confirm USB enumeration:**
+   ```bash
+   lsusb
+   dmesg | tail -n 50
+   ```
+   If nothing appears, check the cable, power, and USB port on the Pi.
+
+2. **Check serial device nodes:**
+   ```bash
+   ls -l /dev/ttyUSB* /dev/ttyACM* /dev/serial/by-id/*
+   ```
+   Many Marlin boards appear as `/dev/ttyACM0`.
+
+3. **Check for conflicts:**
+   ```bash
+   sudo lsof /dev/ttyACM0
+   ```
+   Stop any process that has the port open.
+
+4. **Docker-specific checks:**
+   Ensure the device is mapped in `docker-compose.yml` or use `privileged: true`.
+
 ## Troubleshooting
 
 ### Device Not Found
