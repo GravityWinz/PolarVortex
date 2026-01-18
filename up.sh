@@ -1,1 +1,1 @@
-up.sh sudo
+sudo
