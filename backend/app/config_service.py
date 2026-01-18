@@ -807,6 +807,9 @@ class ConfigurationService:
                 if 'pen_down_command' in update_payload:
                     if update_payload['pen_down_command'] is not None:
                         existing['pen_down_command'] = update_payload['pen_down_command']
+                if 'servo_delay_ms' in update_payload:
+                    if update_payload['servo_delay_ms'] is not None:
+                        existing['servo_delay_ms'] = update_payload['servo_delay_ms']
 
                 plotter['gcode_sequences'] = existing
                 self._save_configurations()

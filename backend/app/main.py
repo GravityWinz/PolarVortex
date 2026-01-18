@@ -748,7 +748,9 @@ async def rename_project_file(project_id: str, filename: str, payload: FileRenam
         if not file_path.exists() or not file_path.is_file():
             raise HTTPException(status_code=404, detail="File not found")
 
-        new_path = (project_dir / new_filename).resolve()
+        original_parent = Path(filename).parent
+        new_relative = original_parent / new_filename if str(original_parent) != "." else Path(new_filename)
+        new_path = (project_dir / new_relative).resolve()
         if project_dir not in new_path.parents and project_dir != new_path:
             raise HTTPException(status_code=400, detail="Invalid target path")
 
@@ -757,13 +759,13 @@ async def rename_project_file(project_id: str, filename: str, payload: FileRenam
 
         file_path.rename(new_path)
 
-        project_service.rename_project_file(project_id, filename, new_filename)
+        project_service.rename_project_file(project_id, filename, str(new_relative))
 
         return {
             "success": True,
             "old_filename": filename,
-            "new_filename": new_filename,
-            "message": f"Renamed {filename} to {new_filename}",
+            "new_filename": str(new_relative),
+            "message": f"Renamed {filename} to {new_relative}",
         }
 
     except HTTPException:
