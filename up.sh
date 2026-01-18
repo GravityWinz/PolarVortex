@@ -1,1 +1,1 @@
-sudo
+sudo docker compose -f docker-compose.rpi.prod.yml up -d    
