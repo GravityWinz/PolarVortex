@@ -49,11 +49,14 @@ services:
       - BACKEND_PORT=8000
       - DEBUG=false
       - LOG_LEVEL=INFO
+      # Prefer stable by-id path; fallback to ttyACM0
+      - ARDUINO_PORTS=/dev/serial/by-id/usb-marlinfw.org_Marlin_USB_Device_18FF601AAE299828528F78F9F5001E87-if00,/dev/ttyACM0
       - CORS_ORIGINS=http://192.168.11.205,http://192.168.11.205:80
     env_file:
       - .env.production
     devices:
       - /dev/ttyACM0:/dev/ttyACM0
+      - /dev/serial/by-id/usb-marlinfw.org_Marlin_USB_Device_18FF601AAE299828528F78F9F5001E87-if00:/dev/serial/by-id/usb-marlinfw.org_Marlin_USB_Device_18FF601AAE299828528F78F9F5001E87-if00
     privileged: true
     group_add:
       - dialout
