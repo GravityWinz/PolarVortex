@@ -2191,6 +2191,21 @@ async def list_plotters():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/config/plotters/default", response_model=PlotterResponse)
+async def get_default_plotter():
+    """Get the default plotter configuration"""
+    try:
+        plotter = config_service.get_default_plotter()
+        if not plotter:
+            raise HTTPException(status_code=404, detail="No default plotter found")
+        return plotter
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get default plotter error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/config/plotters/{plotter_id}", response_model=PlotterResponse)
 async def get_plotter(plotter_id: str):
     """Get a plotter configuration by ID"""
@@ -2248,21 +2263,6 @@ async def delete_plotter(plotter_id: str):
         raise
     except Exception as e:
         logger.error(f"Delete plotter error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/config/plotters/default", response_model=PlotterResponse)
-async def get_default_plotter():
-    """Get the default plotter configuration"""
-    try:
-        plotter = config_service.get_default_plotter()
-        if not plotter:
-            raise HTTPException(status_code=404, detail="No default plotter found")
-        return plotter
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Get default plotter error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

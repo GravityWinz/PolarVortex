@@ -173,7 +173,7 @@ If the Marlin controller is not showing up as a USB serial device:
 
 2. **Check serial device nodes:**
    ```bash
-   ls -l /dev/ttyUSB* /dev/ttyACM* /dev/serial/by-id/*
+   ls -l /dev/ttyACM* /dev/serial/by-id/*
    ```
    Many Marlin boards appear as `/dev/ttyACM0`.
 

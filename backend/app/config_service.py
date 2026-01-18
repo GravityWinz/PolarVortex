@@ -21,6 +21,7 @@ class ConfigurationService:
         """Initialize the configuration service"""
         self.config = Config()
         self.config_file_path = self._get_config_file_path()
+        self._config_mtime = None
         self._ensure_config_directory()
         self._load_configurations()
     
@@ -47,6 +48,9 @@ class ConfigurationService:
             raise ValueError(f"Invalid YAML configuration file: {e}")
         except Exception as e:
             raise RuntimeError(f"Error loading configuration file: {e}")
+
+        if self.config_file_path.exists():
+            self._config_mtime = self.config_file_path.stat().st_mtime
         
         # Check if essential sections exist, if not create them
         needs_update = False
@@ -80,6 +84,19 @@ class ConfigurationService:
         
         # Validate and repair configuration if needed
         self._validate_and_repair_config()
+
+    def _refresh_if_changed(self):
+        """Reload configuration from disk if updated elsewhere."""
+        try:
+            if not self.config_file_path.exists():
+                self._load_configurations()
+                return
+            current_mtime = self.config_file_path.stat().st_mtime
+            if self._config_mtime is None or current_mtime > self._config_mtime:
+                self._load_configurations()
+        except Exception:
+            # Best-effort refresh; keep current config_data on errors.
+            return
     
     def _create_default_config_file(self):
         """Create default configuration file with default plotters and papers"""
@@ -370,6 +387,20 @@ class ConfigurationService:
                 self.config_data['plotters'] = self._get_default_plotters()
                 needs_repair = True
         
+        # Enforce a single default plotter if multiple are set
+        if len(default_plotters) > 1:
+            def _plotter_updated_at(plotter: Dict[str, Any]) -> float:
+                updated_at = plotter.get('updated_at') or plotter.get('created_at')
+                try:
+                    return datetime.fromisoformat(updated_at).timestamp()
+                except Exception:
+                    return 0.0
+
+            latest_default = max(default_plotters, key=_plotter_updated_at)
+            for plotter in self.config_data.get('plotters', []):
+                plotter['is_default'] = plotter['id'] == latest_default.get('id')
+            needs_repair = True
+
         # Check if we have at least one default paper
         default_papers = [p for p in self.config_data.get('papers', []) if p.get('is_default', False)]
         if not default_papers:
@@ -428,6 +459,8 @@ class ConfigurationService:
         try:
             with open(self.config_file_path, 'w', encoding='utf-8') as file:
                 yaml.dump(self.config_data, file, default_flow_style=False, indent=2, sort_keys=False)
+            if self.config_file_path.exists():
+                self._config_mtime = self.config_file_path.stat().st_mtime
         except Exception as e:
             raise RuntimeError(f"Error saving configuration file: {e}")
     
@@ -442,6 +475,16 @@ class ConfigurationService:
             for plotter in self.config_data['plotters']:
                 plotter['is_default'] = False
         
+        gcode_sequences = (
+            plotter_data.gcode_sequences.dict()
+            if plotter_data.gcode_sequences is not None
+            else GcodeSettings().dict()
+        )
+        if plotter_data.gcode_pen_up_command is not None:
+            gcode_sequences["pen_up_command"] = plotter_data.gcode_pen_up_command
+        if plotter_data.gcode_pen_down_command is not None:
+            gcode_sequences["pen_down_command"] = plotter_data.gcode_pen_down_command
+
         plotter_dict = {
             "id": plotter_id,
             "name": plotter_data.name,
@@ -455,11 +498,7 @@ class ConfigurationService:
             "pen_up_position": plotter_data.pen_up_position,
             "pen_down_position": plotter_data.pen_down_position,
             "pen_speed": plotter_data.pen_speed,
-            "gcode_sequences": (
-                plotter_data.gcode_sequences.dict()
-                if plotter_data.gcode_sequences is not None
-                else GcodeSettings().dict()
-            ),
+            "gcode_sequences": gcode_sequences,
             "home_position_x": plotter_data.home_position_x,
             "home_position_y": plotter_data.home_position_y,
             "is_default": plotter_data.is_default,
@@ -474,6 +513,7 @@ class ConfigurationService:
     
     def get_plotter(self, plotter_id: str) -> Optional[PlotterResponse]:
         """Get a plotter configuration by ID"""
+        self._refresh_if_changed()
         for plotter in self.config_data['plotters']:
             if plotter['id'] == plotter_id:
                 return self._dict_to_plotter_response(plotter)
@@ -481,6 +521,7 @@ class ConfigurationService:
     
     def list_plotters(self) -> PlotterListResponse:
         """List all plotter configurations"""
+        self._refresh_if_changed()
         plotters = [self._dict_to_plotter_response(plotter) for plotter in self.config_data['plotters']]
         return PlotterListResponse(plotters=plotters, total=len(plotters))
     
@@ -496,6 +537,15 @@ class ConfigurationService:
                 
                 # Update fields that are provided
                 update_data = plotter_data.dict(exclude_unset=True)
+                pen_up_override = update_data.pop("gcode_pen_up_command", None)
+                pen_down_override = update_data.pop("gcode_pen_down_command", None)
+                if pen_up_override is not None or pen_down_override is not None:
+                    existing_sequences = plotter.get('gcode_sequences', self._get_default_gcode_sequences())
+                    if pen_up_override is not None:
+                        existing_sequences['pen_up_command'] = pen_up_override
+                    if pen_down_override is not None:
+                        existing_sequences['pen_down_command'] = pen_down_override
+                    update_data['gcode_sequences'] = existing_sequences
                 for key, value in update_data.items():
                     if key == 'plotter_type':
                         plotter[key] = value.value
@@ -523,9 +573,21 @@ class ConfigurationService:
     
     def get_default_plotter(self) -> Optional[PlotterResponse]:
         """Get the default plotter configuration"""
-        for plotter in self.config_data['plotters']:
-            if plotter.get('is_default', False):
-                return self._dict_to_plotter_response(plotter)
+        self._refresh_if_changed()
+        default_plotters = [p for p in self.config_data['plotters'] if p.get('is_default', False)]
+        if default_plotters:
+            if len(default_plotters) == 1:
+                return self._dict_to_plotter_response(default_plotters[0])
+
+            def _plotter_updated_at(plotter: Dict[str, Any]) -> float:
+                updated_at = plotter.get('updated_at') or plotter.get('created_at')
+                try:
+                    return datetime.fromisoformat(updated_at).timestamp()
+                except Exception:
+                    return 0.0
+
+            latest_default = max(default_plotters, key=_plotter_updated_at)
+            return self._dict_to_plotter_response(latest_default)
         return None
     
     # Paper management methods
@@ -613,6 +675,7 @@ class ConfigurationService:
 
     def get_gcode_settings(self) -> GcodeSettings:
         """Return automatic G-code sequences for the default plotter."""
+        self._refresh_if_changed()
         default_plotter = self.get_default_plotter()
         if default_plotter:
             return default_plotter.gcode_sequences
@@ -645,6 +708,7 @@ class ConfigurationService:
 
     def get_all_configurations(self) -> ConfigurationResponse:
         """Get all configurations (plotters and papers)"""
+        self._refresh_if_changed()
         plotters = [self._dict_to_plotter_response(plotter) for plotter in self.config_data['plotters']]
         papers = [self._dict_to_paper_response(paper) for paper in self.config_data['papers']]
         default_plotter = self.get_default_plotter()
@@ -705,6 +769,7 @@ class ConfigurationService:
 
     def get_plotter_gcode_settings(self, plotter_id: str) -> Optional[GcodeSettings]:
         """Return automatic G-code sequences for a specific plotter"""
+        self._refresh_if_changed()
         for plotter in self.config_data.get('plotters', []):
             if plotter['id'] == plotter_id:
                 gcode_data = plotter.get('gcode_sequences', self._get_default_gcode_sequences())

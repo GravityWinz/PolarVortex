@@ -127,6 +127,23 @@ export default function ControlPanel({ currentProject }) {
     loadProjects();
   }, []);
 
+  useEffect(() => {
+    const handlePlotterConfigUpdated = () => {
+      loadDefaultPlotterPenCommands();
+    };
+    window.addEventListener(
+      "pv_plotter_config_updated",
+      handlePlotterConfigUpdated
+    );
+    return () => {
+      window.removeEventListener(
+        "pv_plotter_config_updated",
+        handlePlotterConfigUpdated
+      );
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Restore print state and check for active jobs after initial load
   useEffect(() => {
     const restorePrintState = async () => {
@@ -367,6 +384,13 @@ export default function ControlPanel({ currentProject }) {
               ];
             });
             scrollToBottom();
+          } else if (
+            data.type === "plotter_created" ||
+            data.type === "plotter_updated" ||
+            data.type === "plotter_deleted" ||
+            data.type === "gcode_settings_updated"
+          ) {
+            loadDefaultPlotterPenCommands();
           }
         } catch (err) {
           console.error("Error parsing WebSocket message:", err);

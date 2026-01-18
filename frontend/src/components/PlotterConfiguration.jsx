@@ -75,6 +75,10 @@ export default function PlotterConfiguration() {
     is_default: false,
   });
 
+  const notifyPlotterConfigUpdated = () => {
+    window.dispatchEvent(new Event('pv_plotter_config_updated'));
+  };
+
   useEffect(() => {
     loadPlotters();
   }, []);
@@ -164,6 +168,7 @@ export default function PlotterConfiguration() {
         setSuccess('Plotter created successfully');
       }
       setDialogOpen(false);
+      notifyPlotterConfigUpdated();
       loadPlotters();
     } catch (err) {
       setError(err.message);
@@ -175,6 +180,7 @@ export default function PlotterConfiguration() {
       try {
         await deletePlotter(plotter.id);
         setSuccess('Plotter deleted successfully');
+        notifyPlotterConfigUpdated();
         loadPlotters();
       } catch (err) {
         setError(err.message);
@@ -186,6 +192,7 @@ export default function PlotterConfiguration() {
     try {
       await updatePlotter(plotter.id, { ...plotter, is_default: true });
       setSuccess(`"${plotter.name}" set as default`);
+      notifyPlotterConfigUpdated();
       loadPlotters();
     } catch (err) {
       setError(err.message);

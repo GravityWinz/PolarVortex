@@ -653,7 +653,12 @@ export async function getDefaultPaper() {
 
 export async function getDefaultPlotter() {
   try {
-    const response = await fetch(`${BASE_URL}/config/plotters/default`);
+    const response = await fetch(`${BASE_URL}/config/plotters/default`, {
+      cache: "no-store",
+      headers: {
+        "Cache-Control": "no-cache",
+      },
+    });
     return await response.json();
   } catch (err) {
     console.error("Error fetching default plotter:", err);
