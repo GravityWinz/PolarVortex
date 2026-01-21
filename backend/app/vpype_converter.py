@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Any, Dict, Literal, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+# SVG length conversion constants (CSS pixels assumed at 96 DPI)
+SVG_PX_PER_INCH = 96.0
+SVG_MM_PER_INCH = 25.4
 # Write debug logs inside the repo so paths work in containers and on host
 # Persist vpype debug logs inside container storage
 LOG_PATH = Path("/app/local_storage/log/vpype.log")
@@ -96,19 +99,119 @@ def generate_exponential_pen_down_sequence(
     return "\n".join(commands)
 
 
-def _get_stroke_value(elem) -> str:
-    """Return the stroke color for an SVG element, falling back to style attr."""
-    stroke = elem.get("stroke")
-    if stroke:
-        return stroke
+def _get_style_attribute(elem, name: str) -> Optional[str]:
+    """Return an attribute value, falling back to inline style (if present)."""
+    direct = elem.get(name)
+    if direct:
+        return direct.strip()
     style = elem.get("style", "")
     for part in style.split(";"):
         if ":" not in part:
             continue
         key, value = part.split(":", 1)
-        if key.strip() == "stroke":
+        if key.strip() == name:
             return value.strip()
-    return "none"
+    return None
+
+
+def _get_explicit_stroke_value(elem) -> Optional[str]:
+    """Return the stroke color explicitly set on the element, or None if unset."""
+    stroke = _get_style_attribute(elem, "stroke")
+    if stroke is None or stroke == "":
+        return None
+    return stroke
+
+
+def _parse_svg_length_to_px(value: Optional[str]) -> Optional[float]:
+    """Convert an SVG length string to CSS pixels."""
+    if not value:
+        return None
+    match = re.match(r"^([+-]?\d*\.?\d+)([a-z%]*)$", str(value).strip(), re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        number = float(match.group(1))
+    except ValueError:
+        return None
+    unit = (match.group(2) or "").lower()
+
+    if unit in {"", "px"}:
+        return number
+    if unit == "mm":
+        return (number * SVG_PX_PER_INCH) / SVG_MM_PER_INCH
+    if unit == "cm":
+        return (number * SVG_PX_PER_INCH) / (SVG_MM_PER_INCH / 10.0)
+    if unit == "in":
+        return number * SVG_PX_PER_INCH
+    if unit == "pt":
+        return (number * SVG_PX_PER_INCH) / 72.0
+    if unit == "pc":
+        return (number * SVG_PX_PER_INCH) / 6.0
+    return None
+
+
+def _ensure_svg_viewbox(
+    svg_path: Path,
+    tmp_dir: Path = Path("/app/local_storage/tmp"),
+    generation_tag: Optional[str] = None,
+) -> Tuple[Path, bool]:
+    """
+    Ensure the SVG has a numeric viewBox when width/height use units.
+
+    Some SVGs specify width/height in mm/cm but omit viewBox, which causes
+    downstream tools to treat user units as raw numbers and clip content.
+    """
+    try:
+        import xml.etree.ElementTree as ET
+
+        tree = ET.parse(svg_path)
+        root = tree.getroot()
+        if root.get("viewBox") or root.get("viewbox"):
+            return svg_path, False
+
+        viewbox_value = None
+        try:
+            from svgpathtools import Path as SvgPath
+            from svgpathtools import svg2paths2
+
+            paths, _, _ = svg2paths2(str(svg_path))
+            min_x = min_y = float("inf")
+            max_x = max_y = float("-inf")
+            for path in paths:
+                if not isinstance(path, SvgPath):
+                    continue
+                try:
+                    x0, x1, y0, y1 = path.bbox()
+                except Exception:
+                    continue
+                min_x = min(min_x, x0)
+                max_x = max(max_x, x1)
+                min_y = min(min_y, y0)
+                max_y = max(max_y, y1)
+            if min_x != float("inf") and max_x != float("-inf"):
+                width = max_x - min_x
+                height = max_y - min_y
+                if width > 0 and height > 0:
+                    viewbox_value = f"{min_x:.4f} {min_y:.4f} {width:.4f} {height:.4f}"
+        except Exception:
+            logger.debug("Failed to compute SVG bounds for viewBox", exc_info=True)
+
+        if viewbox_value is None:
+            width_px = _parse_svg_length_to_px(root.get("width"))
+            height_px = _parse_svg_length_to_px(root.get("height"))
+            if width_px is None or height_px is None:
+                return svg_path, False
+            viewbox_value = f"0 0 {width_px:.4f} {height_px:.4f}"
+
+        root.set("viewBox", viewbox_value)
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        tag = generation_tag or str(int(time.time()))
+        tmp_path = tmp_dir / f"{svg_path.stem}_{tag}_viewbox.svg"
+        tree.write(tmp_path, encoding="utf-8", xml_declaration=True)
+        return tmp_path, True
+    except Exception:
+        logger.debug("Failed to ensure SVG viewBox", exc_info=True)
+        return svg_path, False
 
 
 # Color name mapping for common hex values
@@ -271,15 +374,20 @@ def sort_svg_by_stroke(
             "ellipse",
         }
 
-        def collect_drawable_elements(elem, drawable_list: list):
+        def collect_drawable_elements(elem, drawable_list: list, inherited_stroke: Optional[str] = None):
             """Recursively collect all drawable elements from element tree."""
             tag = elem.tag.rsplit("}", 1)[-1] if "}" in elem.tag else elem.tag
+            explicit_stroke = _get_explicit_stroke_value(elem)
+            if explicit_stroke is not None:
+                current_stroke = explicit_stroke
+            else:
+                current_stroke = inherited_stroke
             if tag in drawable_tags:
-                drawable_list.append(elem)
+                drawable_list.append((elem, current_stroke))
             else:
                 # Recursively process children (for groups, etc.)
                 for child in elem:
-                    collect_drawable_elements(child, drawable_list)
+                    collect_drawable_elements(child, drawable_list, current_stroke)
         
         # Collect all drawable elements recursively
         all_drawables = []
@@ -296,8 +404,8 @@ def sort_svg_by_stroke(
         color_order = []
         color_groups: Dict[str, list] = {}
 
-        for elem in all_drawables:
-            stroke = _get_stroke_value(elem)
+        for elem, inherited_stroke in all_drawables:
+            stroke = inherited_stroke or "none"
             if stroke not in color_order:
                 color_order.append(stroke)
                 # Generate descriptor for this color
@@ -868,8 +976,13 @@ async def convert_svg_to_gcode_file(
         "enable_occult": enable_occult,
     })
     # #endregion
-    sorted_svg_path, color_metadata = sort_svg_by_stroke(svg_path, generation_tag=generation_tag)
-    cleanup_sorted = sorted_svg_path != svg_path
+    normalized_svg_path, cleanup_viewbox = _ensure_svg_viewbox(
+        svg_path, generation_tag=generation_tag
+    )
+    sorted_svg_path, color_metadata = sort_svg_by_stroke(
+        normalized_svg_path, generation_tag=generation_tag
+    )
+    cleanup_sorted = sorted_svg_path != normalized_svg_path
 
     try:
         pipeline = build_vpype_pipeline(
@@ -979,12 +1092,21 @@ async def convert_svg_to_gcode_file(
         except Exception:
             logger.debug("Failed to write G-code metadata header", exc_info=True)
 
-        # Clean up the temp colorsorted file if we created one (after subprocess fully completed).
+        # Clean up temp SVG files if we created them (after subprocess fully completed).
         if cleanup_sorted and sorted_svg_path.exists():
             try:
                 sorted_svg_path.unlink()
             except Exception:
-                logger.debug("Failed to delete temp colorsorted SVG %s", sorted_svg_path, exc_info=True)
+                logger.debug(
+                    "Failed to delete temp colorsorted SVG %s", sorted_svg_path, exc_info=True
+                )
+        if cleanup_viewbox and normalized_svg_path.exists() and normalized_svg_path != sorted_svg_path:
+            try:
+                normalized_svg_path.unlink()
+            except Exception:
+                logger.debug(
+                    "Failed to delete temp viewBox SVG %s", normalized_svg_path, exc_info=True
+                )
     finally:
         # Leave the temp file on failure for debugging.
         pass

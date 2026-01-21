@@ -73,6 +73,35 @@ const DEFAULT_UPLOAD_SETTINGS = {
   resolution: "medium",
 };
 const PAN_STEP = 10;
+const SVG_PX_PER_INCH = 96;
+const SVG_MM_PER_INCH = 25.4;
+
+function parseSvgLength(value) {
+  if (!value) return null;
+  const match = String(value).trim().match(/^([+-]?\d*\.?\d+)([a-z%]*)$/i);
+  if (!match) return null;
+  const number = Number.parseFloat(match[1]);
+  if (Number.isNaN(number)) return null;
+  const unit = (match[2] || "").toLowerCase();
+
+  switch (unit) {
+    case "":
+    case "px":
+      return number;
+    case "mm":
+      return (number * SVG_PX_PER_INCH) / SVG_MM_PER_INCH;
+    case "cm":
+      return (number * SVG_PX_PER_INCH) / (SVG_MM_PER_INCH / 10);
+    case "in":
+      return number * SVG_PX_PER_INCH;
+    case "pt":
+      return (number * SVG_PX_PER_INCH) / 72;
+    case "pc":
+      return (number * SVG_PX_PER_INCH) / 6;
+    default:
+      return null;
+  }
+}
 
 function normalizeAsset(filename, meta = {}, typeOverride) {
   const ext = (filename || "").split(".").pop()?.toLowerCase() || "";
@@ -1745,23 +1774,35 @@ export default function EditProject({ currentProject }) {
 
                         let rectWidth = "100%";
                         let rectHeight = "100%";
+                        let computedViewBox = null;
 
                         // Use viewBox if available, otherwise use width/height
                         if (viewBoxMatch) {
-                          const viewBox = viewBoxMatch[1].split(/\s+/);
+                          const viewBox = viewBoxMatch[1].trim().split(/[\s,]+/);
                           if (viewBox.length >= 4) {
                             rectWidth = viewBox[2];
                             rectHeight = viewBox[3];
                           }
                         } else if (widthMatch && heightMatch) {
-                          rectWidth = widthMatch[1];
-                          rectHeight = heightMatch[1];
+                          const widthRaw = widthMatch[1];
+                          const heightRaw = heightMatch[1];
+                          const widthPx = parseSvgLength(widthRaw);
+                          const heightPx = parseSvgLength(heightRaw);
+
+                          if (widthPx !== null && heightPx !== null) {
+                            rectWidth = String(widthPx);
+                            rectHeight = String(heightPx);
+                            computedViewBox = `0 0 ${rectWidth} ${rectHeight}`;
+                          } else {
+                            rectWidth = widthRaw;
+                            rectHeight = heightRaw;
+                          }
                         }
 
                         // Add viewBox if it doesn't exist but width/height do
                         let newAttrs = attrs;
-                        if (!viewBoxMatch && widthMatch && heightMatch) {
-                          newAttrs = `${attrs} viewBox="0 0 ${widthMatch[1]} ${heightMatch[1]}"`;
+                        if (!viewBoxMatch && computedViewBox) {
+                          newAttrs = `${attrs} viewBox="${computedViewBox}"`;
                         }
 
                         // Preserve original SVG attributes but add background

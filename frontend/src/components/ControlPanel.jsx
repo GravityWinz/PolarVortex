@@ -62,6 +62,9 @@ export default function ControlPanel({ currentProject }) {
   const [commandLog, setCommandLog] = useState([]);
   const [loading, setLoading] = useState(false);
   const [commandInput, setCommandInput] = useState("");
+  const [commandHistory, setCommandHistory] = useState([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [historyDraft, setHistoryDraft] = useState("");
   const [motionMode, setMotionMode] = useState("relative"); // "absolute" or "relative"
   const [penState, setPenState] = useState("up"); // "up" or "down"
   const [penUpCommand, setPenUpCommand] = useState("M280 P0 S110");
@@ -612,6 +615,12 @@ export default function ControlPanel({ currentProject }) {
     }
     const command = commandInput.trim();
     setCommandInput("");
+    setHistoryIndex(-1);
+    setHistoryDraft("");
+    setCommandHistory((prev) => {
+      const next = [...prev, command];
+      return next.slice(-50);
+    });
     await sendCommand(command);
   };
 
@@ -740,10 +749,47 @@ export default function ControlPanel({ currentProject }) {
     }
   };
 
-  const handleCommandInputKeyPress = (e) => {
+  const handleCommandInputKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSendCommand();
+      return;
+    }
+
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      if (e.altKey || e.ctrlKey || e.metaKey) {
+        return;
+      }
+      if (commandHistory.length === 0) {
+        return;
+      }
+      e.preventDefault();
+
+      if (e.key === "ArrowUp") {
+        if (historyIndex === -1) {
+          setHistoryDraft(commandInput);
+          const nextIndex = commandHistory.length - 1;
+          setHistoryIndex(nextIndex);
+          setCommandInput(commandHistory[nextIndex]);
+        } else if (historyIndex > 0) {
+          const nextIndex = historyIndex - 1;
+          setHistoryIndex(nextIndex);
+          setCommandInput(commandHistory[nextIndex]);
+        }
+      } else {
+        if (historyIndex === -1) {
+          return;
+        }
+        if (historyIndex < commandHistory.length - 1) {
+          const nextIndex = historyIndex + 1;
+          setHistoryIndex(nextIndex);
+          setCommandInput(commandHistory[nextIndex]);
+        } else {
+          setHistoryIndex(-1);
+          setCommandInput(historyDraft);
+          setHistoryDraft("");
+        }
+      }
     }
   };
 
@@ -1668,7 +1714,7 @@ export default function ControlPanel({ currentProject }) {
                 placeholder="Enter G-code command (e.g., G28, M280 P0 S33)"
                 value={commandInput}
                 onChange={(e) => setCommandInput(e.target.value)}
-                onKeyPress={handleCommandInputKeyPress}
+                onKeyDown={handleCommandInputKeyDown}
                 disabled={!connected || loading}
                 InputProps={{
                   endAdornment: (
