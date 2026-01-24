@@ -1164,6 +1164,9 @@ def _monitor_gcode_print(job_id: str, total_commands: int):
                     if job_id in plotter_service.gcode_jobs:
                         plotter_service.gcode_jobs[job_id]["status"] = "canceled"
                         plotter_service.gcode_jobs[job_id]["finished_at"] = datetime.now().isoformat()
+                        last_progress = plotter_service.gcode_jobs[job_id].get("progress", 0)
+                plotter_service.current_status["drawing"] = False
+                plotter_service.current_status["progress"] = last_progress if "last_progress" in locals() else 0
                 break
             
             # Check for pause
@@ -1174,6 +1177,8 @@ def _monitor_gcode_print(job_id: str, total_commands: int):
                     if job_id in plotter_service.gcode_jobs:
                         plotter_service.gcode_jobs[job_id]["status"] = "paused"
                         plotter_service.gcode_jobs[job_id]["paused"] = True
+                        plotter_service.current_status["drawing"] = True
+                        plotter_service.current_status["progress"] = plotter_service.gcode_jobs[job_id].get("progress", 0)
             else:
                 if core.paused and not pause_event.is_set():
                     core.resume()
@@ -1182,6 +1187,8 @@ def _monitor_gcode_print(job_id: str, total_commands: int):
                         if plotter_service.gcode_jobs[job_id].get("status") == "paused":
                             plotter_service.gcode_jobs[job_id]["status"] = "running"
                             plotter_service.gcode_jobs[job_id]["paused"] = False
+                            plotter_service.current_status["drawing"] = True
+                            plotter_service.current_status["progress"] = plotter_service.gcode_jobs[job_id].get("progress", 0)
             
             # Check if print finished
             # Check completion regardless of pause state - a print can finish while paused
@@ -1200,6 +1207,8 @@ def _monitor_gcode_print(job_id: str, total_commands: int):
                         if plotter_service.gcode_jobs[job_id].get("lines_total", 0) > 0:
                             plotter_service.gcode_jobs[job_id]["lines_sent"] = plotter_service.gcode_jobs[job_id]["lines_total"]
                             plotter_service.gcode_jobs[job_id]["progress"] = 100
+                plotter_service.current_status["drawing"] = False
+                plotter_service.current_status["progress"] = 100
                 break
             
             # Update progress based on lines sent
@@ -1224,6 +1233,8 @@ def _monitor_gcode_print(job_id: str, total_commands: int):
                             plotter_service.gcode_jobs[job_id]["progress"] = min(progress, 100)
                         else:
                             plotter_service.gcode_jobs[job_id]["progress"] = 0
+                        plotter_service.current_status["drawing"] = True
+                        plotter_service.current_status["progress"] = plotter_service.gcode_jobs[job_id]["progress"]
             
             time.sleep(0.5)  # Check every 500ms
             
@@ -1234,6 +1245,7 @@ def _monitor_gcode_print(job_id: str, total_commands: int):
                 plotter_service.gcode_jobs[job_id]["status"] = "failed"
                 plotter_service.gcode_jobs[job_id]["error"] = str(e)
                 plotter_service.gcode_jobs[job_id]["finished_at"] = datetime.now().isoformat()
+        plotter_service.current_status["drawing"] = False
 
 
 def _run_gcode_commands_thread(job_id: str, commands: List[str], filename: str):
@@ -1247,6 +1259,8 @@ def _run_gcode_commands_thread(job_id: str, commands: List[str], filename: str):
                 if job_id in plotter_service.gcode_jobs:
                     plotter_service.gcode_jobs[job_id]["status"] = "running"
                     plotter_service.gcode_jobs[job_id]["started_at"] = datetime.now().isoformat()
+                    plotter_service.current_status["drawing"] = True
+                    plotter_service.current_status["progress"] = plotter_service.gcode_jobs[job_id].get("progress", 0)
             
             results: List[Dict[str, Any]] = []
             total_commands = len(commands)
@@ -1264,6 +1278,8 @@ def _run_gcode_commands_thread(job_id: str, commands: List[str], filename: str):
                             plotter_service.gcode_jobs[job_id]["status"] = "canceled"
                             plotter_service.gcode_jobs[job_id]["finished_at"] = datetime.now().isoformat()
                             plotter_service.gcode_jobs[job_id]["results"] = results
+                            plotter_service.current_status["drawing"] = False
+                            plotter_service.current_status["progress"] = plotter_service.gcode_jobs[job_id].get("progress", 0)
                     return
 
                 # Handle pause
@@ -1272,6 +1288,8 @@ def _run_gcode_commands_thread(job_id: str, commands: List[str], filename: str):
                         if job_id in plotter_service.gcode_jobs:
                             plotter_service.gcode_jobs[job_id]["status"] = "paused"
                             plotter_service.gcode_jobs[job_id]["paused"] = True
+                            plotter_service.current_status["drawing"] = True
+                            plotter_service.current_status["progress"] = plotter_service.gcode_jobs[job_id].get("progress", 0)
                     while pause_event.is_set():
                         await asyncio.sleep(0.1)
                         # Check for cancellation while paused
@@ -1290,6 +1308,8 @@ def _run_gcode_commands_thread(job_id: str, commands: List[str], filename: str):
                         if job_id in plotter_service.gcode_jobs:
                             plotter_service.gcode_jobs[job_id]["status"] = "running"
                             plotter_service.gcode_jobs[job_id]["paused"] = False
+                            plotter_service.current_status["drawing"] = True
+                            plotter_service.current_status["progress"] = plotter_service.gcode_jobs[job_id].get("progress", 0)
 
                 try:
                     resp = await plotter_service.send_gcode_command(GcodeRequest(command=cmd))
@@ -1306,6 +1326,8 @@ def _run_gcode_commands_thread(job_id: str, commands: List[str], filename: str):
                         if total_commands > 0:
                             progress = int((lines_sent / total_commands) * 100)
                             plotter_service.gcode_jobs[job_id]["progress"] = min(progress, 100)
+                            plotter_service.current_status["drawing"] = True
+                            plotter_service.current_status["progress"] = plotter_service.gcode_jobs[job_id]["progress"]
                 
                 if not resp.get("success"):
                     break
@@ -1323,6 +1345,9 @@ def _run_gcode_commands_thread(job_id: str, commands: List[str], filename: str):
                     if job_status == "completed" and total_commands > 0:
                         plotter_service.gcode_jobs[job_id]["lines_sent"] = total_commands
                         plotter_service.gcode_jobs[job_id]["progress"] = 100
+            plotter_service.current_status["drawing"] = False
+            if job_status == "completed":
+                plotter_service.current_status["progress"] = 100
         except Exception as e:
             logger.error(f"G-code job {job_id} failed: {e}")
             with plotter_service._gcode_jobs_lock:
@@ -1330,6 +1355,7 @@ def _run_gcode_commands_thread(job_id: str, commands: List[str], filename: str):
                     plotter_service.gcode_jobs[job_id]["status"] = "failed"
                     plotter_service.gcode_jobs[job_id]["error"] = str(e)
                     plotter_service.gcode_jobs[job_id]["finished_at"] = datetime.now().isoformat()
+            plotter_service.current_status["drawing"] = False
 
     asyncio.run(runner())
 
