@@ -4,14 +4,24 @@ import logoImage from "../assets/PolarVortexLogo_small.png";
 import { getStatus } from "../services/apiService";
 
 export default function StatusPanel() {
-  const [status, setStatus] = useState({ progress: 0, drawing: false, raw: "" });
+  const [status, setStatus] = useState({
+    progress: 0,
+    drawing: false,
+    raw: "",
+    error: "",
+  });
 
   const fetchStatus = async () => {
     const data = await getStatus();
-    setStatus({
-      ...status,
-      raw: data.status || JSON.stringify(data),
-    });
+    const progressValue = Number.isFinite(Number(data.progress)) ? Number(data.progress) : 0;
+    const isError = Boolean(data.error);
+    setStatus((prev) => ({
+      ...prev,
+      progress: isError ? 0 : progressValue,
+      drawing: isError ? false : Boolean(data.drawing),
+      raw: data.status || data.error || JSON.stringify(data),
+      error: isError ? data.error : "",
+    }));
   };
 
   useEffect(() => {
@@ -44,8 +54,8 @@ export default function StatusPanel() {
             Drawing Status
           </Typography>
           <Chip 
-            label={status.drawing ? "Active" : "Idle"} 
-            color={status.drawing ? "success" : "default"}
+            label={status.error ? "Error" : status.drawing ? "Active" : "Idle"} 
+            color={status.error ? "error" : status.drawing ? "success" : "default"}
             size="small"
           />
         </Box>
