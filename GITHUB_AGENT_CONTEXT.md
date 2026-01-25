@@ -15,6 +15,31 @@ This repo uses the GitHub CLI (`gh`) for issue, branch, commit, and PR workflows
 3. **Implement the changes**
    - Work locally as usual.
    - Keep changes scoped to the issue requirements.
+   - Post issue comments with progress updates while working.
+
+### Recommended comment cadence
+- Post an initial "starting work" comment.
+- Post updates at meaningful milestones or if blocked.
+- Post a final summary when ready for review.
+- Typical cadence is 2-4 comments per issue.
+
+### Comment template
+Starting work:
+- Status: Starting
+- Plan: <short plan in 1-3 bullets>
+- ETA: <rough estimate if known>
+
+Progress update:
+- Status: In progress
+- Completed: <what changed or was finished>
+- Next: <next step>
+- Blocked: <yes/no + details if yes>
+
+Ready for review:
+- Status: Ready for review
+- Summary: <what was done>
+- Tests: <what you ran or "not run">
+- Notes: <risks, follow-ups, or links>
 
 4. **Commit the changes**
    - Commit only completed work for the issue.
@@ -35,6 +60,9 @@ This repo uses the GitHub CLI (`gh`) for issue, branch, commit, and PR workflows
 
 Create issue:
 - `gh issue create --title "..." --body "..."`
+
+Comment on issue:
+- `gh issue comment <number> --body "..."`
 
 Create branch:
 - `git checkout -b issue/123-short-title`
