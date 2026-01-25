@@ -122,6 +122,8 @@ export default function ControlPanel({ currentProject }) {
     };
   });
   const logContainerRef = useRef(null);
+  const logPageRef = useRef(logPage);
+  const prevLogCountRef = useRef(commandLog.length);
   const wsRef = useRef(null);
   const processedMessagesRef = useRef(new Set());
   const progressPollIntervalRef = useRef(null);
@@ -145,6 +147,10 @@ export default function ControlPanel({ currentProject }) {
     loadDefaultPlotterPenCommands();
     loadProjects();
   }, []);
+
+  useEffect(() => {
+    logPageRef.current = logPage;
+  }, [logPage]);
 
   useEffect(() => {
     const handlePlotterConfigUpdated = () => {
@@ -332,7 +338,31 @@ export default function ControlPanel({ currentProject }) {
       1,
       Math.ceil(commandLog.length / LOG_PAGE_SIZE)
     );
-    setLogPage(totalPages);
+    const prevTotalPages = Math.max(
+      1,
+      Math.ceil(prevLogCountRef.current / LOG_PAGE_SIZE)
+    );
+    const currentPage = logPageRef.current;
+
+    if (currentPage > totalPages) {
+      setLogPage(totalPages);
+      prevLogCountRef.current = commandLog.length;
+      return;
+    }
+
+    if (currentPage < prevTotalPages) {
+      prevLogCountRef.current = commandLog.length;
+      return;
+    }
+
+    if (
+      (currentPage === prevTotalPages || isNearBottom()) &&
+      currentPage !== totalPages
+    ) {
+      setLogPage(totalPages);
+    }
+
+    prevLogCountRef.current = commandLog.length;
   }, [commandLog]);
 
   // WebSocket connection for real-time updates
