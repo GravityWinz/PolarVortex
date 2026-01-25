@@ -74,8 +74,16 @@ class SpirographGenerator(BaseSvgGenerator):
         outer_radius = settings.get("outer_radius", 200)
         inner_radius = settings.get("inner_radius", 60)
         pen_distance = settings.get("pen_distance", 50)
+        complete_pattern = settings.get("complete_pattern", False)
         num_cycles = settings.get("num_cycles", 10)
         num_points = settings.get("num_points", 1000)
+        
+        # If complete_pattern is enabled, calculate the number of cycles needed
+        if complete_pattern:
+            calculated_cycles = self._calculate_complete_cycles(outer_radius, inner_radius)
+            num_cycles = calculated_cycles
+            # Update settings to reflect the calculated value
+            settings["num_cycles"] = calculated_cycles
         width = settings.get("width", 800)
         height = settings.get("height", 800)
         stroke_width = settings.get("stroke_width", 1)
@@ -86,7 +94,8 @@ class SpirographGenerator(BaseSvgGenerator):
             # Generate spirograph SVG
             svg_content = self._generate_spirograph(
                 outer_radius, inner_radius, pen_distance, num_cycles, num_points,
-                width, height, stroke_width, stroke_color, background_color
+                width, height, stroke_width, stroke_color, background_color,
+                complete_pattern
             )
             
             processing_time = (datetime.now() - start_time).total_seconds()
@@ -118,18 +127,63 @@ class SpirographGenerator(BaseSvgGenerator):
             logger.error(f"Spirograph generation error: {e}")
             raise
     
+    def _calculate_complete_cycles(self, outer_radius: float, inner_radius: float) -> float:
+        """
+        Calculate the number of cycles needed to complete the pattern.
+        
+        For a hypotrochoid, the pattern closes when the inner circle completes
+        enough rotations relative to the outer circle. The rotation ratio is (R-r)/r.
+        
+        If we write (R-r)/r as a fraction a/b in lowest terms, the pattern closes
+        after b rotations of the inner circle relative to the outer, which corresponds
+        to a rotations of the outer reference (parameter t).
+        
+        Returns the number of cycles (outer rotations) needed to complete the pattern.
+        """
+        if outer_radius <= 0 or inner_radius <= 0:
+            return 10.0  # Fallback
+        
+        if inner_radius >= outer_radius:
+            return 1.0  # Invalid case, return minimum
+        
+        from math import gcd
+        
+        # Convert to integers to find GCD
+        # Use a large scale to maintain precision
+        scale = 1000000
+        R_int = int(round(outer_radius * scale))
+        r_int = int(round(inner_radius * scale))
+        
+        # Calculate (R - r) and r
+        R_minus_r = R_int - r_int
+        
+        if R_minus_r <= 0:
+            return 1.0
+        
+        # Find GCD to simplify the ratio (R-r)/r
+        common_divisor = gcd(R_minus_r, r_int)
+        a = R_minus_r // common_divisor
+        b = r_int // common_divisor
+        
+        # The pattern closes after 'a' rotations of the outer reference
+        # This is the number of cycles we need
+        cycles = float(a)
+        
+        return max(1.0, cycles)
+    
     def _generate_spirograph(
         self,
         outer_radius: float,
         inner_radius: float,
         pen_distance: float,
-        num_cycles: int,
+        num_cycles: float,
         num_points: int,
         width: int,
         height: int,
         stroke_width: float,
         stroke_color: str,
-        bg_color: str
+        bg_color: str,
+        complete_pattern: bool = False
     ) -> str:
         """Generate spirograph pattern using parametric equations"""
         
@@ -140,20 +194,20 @@ class SpirographGenerator(BaseSvgGenerator):
         # l = ρ/r (pen distance ratio)
         l = pen_distance / inner_radius if inner_radius > 0 else 0.833
         
-        # Calculate the number of rotations needed to complete the pattern
-        # The pattern repeats when the inner circle has rotated enough times
-        # LCM of the number of teeth determines when pattern repeats
-        # For simplicity, we use num_cycles parameter
-        
         # Center the pattern in the SVG
         center_x = width / 2
         center_y = height / 2
         
         # Calculate points using parametric equations
         points = []
-        for i in range(num_points):
+        # If complete_pattern, ensure we end exactly at the closing point
+        # Otherwise, use the specified number of points
+        num_points_to_use = num_points + 1 if complete_pattern else num_points
+        for i in range(num_points_to_use):
             # t ranges from 0 to 2π * num_cycles
-            t = i * (2 * math.pi * num_cycles) / num_points
+            # When complete_pattern is true, the last point (i=num_points) will be at t=2π*num_cycles
+            # When false, the last point (i=num_points-1) will be slightly before 2π*num_cycles
+            t = i * (2 * math.pi * num_cycles) / num_points if num_points > 0 else 0
             
             # Spirograph parametric equations (hypotrochoid - inner circle rolls inside)
             x = outer_radius * ((1 - k) * math.cos(t) + l * k * math.cos((1 - k) / k * t))
@@ -174,6 +228,11 @@ class SpirographGenerator(BaseSvgGenerator):
             path_data = f'M {points[0][0]:.2f} {points[0][1]:.2f}'
             for point in points[1:]:
                 path_data += f' L {point[0]:.2f} {point[1]:.2f}'
+            
+            # Close the path if complete_pattern is enabled
+            # This ensures the pattern connects smoothly at the start/end point
+            if complete_pattern:
+                path_data += ' Z'
             
             lines.append(
                 f'  <path d="{path_data}" fill="none" stroke="{stroke_color}" stroke-width="{stroke_width}"/>'
@@ -261,6 +320,7 @@ class SpirographGenerator(BaseSvgGenerator):
             "outer_radius": 200,
             "inner_radius": 60,
             "pen_distance": 50,
+            "complete_pattern": False,
             "num_cycles": 10,
             "num_points": 1000,
             "width": 800,
@@ -279,7 +339,10 @@ class SpirographGenerator(BaseSvgGenerator):
         validated["outer_radius"] = max(10, min(500, float(validated.get("outer_radius", 200))))
         validated["inner_radius"] = max(5, min(validated["outer_radius"] * 0.9, float(validated.get("inner_radius", 60))))
         validated["pen_distance"] = max(0, min(validated["inner_radius"] * 2, float(validated.get("pen_distance", 50))))
-        validated["num_cycles"] = max(1, min(100, int(validated.get("num_cycles", 10))))
+        validated["complete_pattern"] = bool(validated.get("complete_pattern", False))
+        # If complete_pattern is enabled, num_cycles will be calculated automatically
+        if not validated["complete_pattern"]:
+            validated["num_cycles"] = max(1, min(100, int(validated.get("num_cycles", 10))))
         validated["num_points"] = max(100, min(10000, int(validated.get("num_points", 1000))))
         validated["width"] = max(100, min(5000, int(validated.get("width", 800))))
         validated["height"] = max(100, min(5000, int(validated.get("height", 800))))
@@ -323,13 +386,21 @@ class SpirographGenerator(BaseSvgGenerator):
                 "effects": "When pen_distance = 0, creates a circle. When pen_distance = inner_radius, creates a cardioid. Larger values create more extended patterns.",
                 "when_to_adjust": "Adjust to create different curve shapes - closer to 0 for simpler curves, closer to inner_radius for more interesting shapes"
             },
+            "complete_pattern": {
+                "description": "Complete the pattern so pen returns to start",
+                "purpose": "When enabled, automatically calculates the number of cycles needed for the pattern to close perfectly",
+                "range": "true/false",
+                "default": False,
+                "effects": "When enabled, the pattern will close exactly at the starting point. When disabled, use num_cycles to control pattern length manually.",
+                "when_to_adjust": "Enable for closed patterns, disable to manually control pattern length"
+            },
             "num_cycles": {
-                "description": "Number of complete cycles to draw",
+                "description": "Number of complete cycles to draw (only used when complete_pattern is false)",
                 "purpose": "Controls how many times the inner circle completes a rotation",
                 "range": "1-100",
                 "default": 10,
-                "effects": "More cycles create more complete patterns that may close on themselves. Fewer cycles create partial patterns.",
-                "when_to_adjust": "Increase to see the full pattern, decrease for partial patterns"
+                "effects": "More cycles create more complete patterns that may close on themselves. Fewer cycles create partial patterns. Ignored when complete_pattern is enabled.",
+                "when_to_adjust": "Adjust when complete_pattern is disabled. Increase to see more of the pattern, decrease for partial patterns"
             },
             "num_points": {
                 "description": "Number of points to calculate for the curve",

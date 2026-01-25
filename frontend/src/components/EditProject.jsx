@@ -2,6 +2,7 @@ import {
   Code as CodeIcon,
   AutoFixHigh as ConvertIcon,
   DeleteOutline as DeleteIcon,
+  DriveFileRenameOutline as RenameIcon,
   InsertDriveFile as FileIcon,
   Create as GenerateSvgIcon,
   Image as ImageIcon,
@@ -9,6 +10,7 @@ import {
   RestartAlt as ResetZoomIcon,
   Article as SvgIcon,
   AutoGraph as VectorizeIcon,
+  MoreVert as MoreVertIcon,
 } from "@mui/icons-material";
 import {
   Alert,
@@ -29,13 +31,17 @@ import {
   List,
   ListItem,
   ListItemButton,
+  ListItemIcon,
   ListItemText,
   ListSubheader,
+  Menu,
   MenuItem,
   Paper,
   Select,
+  Slider,
   Stack,
   Switch,
+  TextField,
   Tooltip,
   Typography,
 } from "@mui/material";
@@ -50,6 +56,8 @@ import {
   getProjectFileUrl,
   getProjectGcodeAnalysis,
   getProjectSvgAnalysis,
+  createProjectThumbnail,
+  renameProjectFile,
   uploadGcodeToProject,
   uploadImageToProject,
 } from "../services/apiService";
@@ -66,6 +74,35 @@ const DEFAULT_UPLOAD_SETTINGS = {
   resolution: "medium",
 };
 const PAN_STEP = 10;
+const SVG_PX_PER_INCH = 96;
+const SVG_MM_PER_INCH = 25.4;
+
+function parseSvgLength(value) {
+  if (!value) return null;
+  const match = String(value).trim().match(/^([+-]?\d*\.?\d+)([a-z%]*)$/i);
+  if (!match) return null;
+  const number = Number.parseFloat(match[1]);
+  if (Number.isNaN(number)) return null;
+  const unit = (match[2] || "").toLowerCase();
+
+  switch (unit) {
+    case "":
+    case "px":
+      return number;
+    case "mm":
+      return (number * SVG_PX_PER_INCH) / SVG_MM_PER_INCH;
+    case "cm":
+      return (number * SVG_PX_PER_INCH) / (SVG_MM_PER_INCH / 10);
+    case "in":
+      return number * SVG_PX_PER_INCH;
+    case "pt":
+      return (number * SVG_PX_PER_INCH) / 72;
+    case "pc":
+      return (number * SVG_PX_PER_INCH) / 6;
+    default:
+      return null;
+  }
+}
 
 function normalizeAsset(filename, meta = {}, typeOverride) {
   const ext = (filename || "").split(".").pop()?.toLowerCase() || "";
@@ -79,20 +116,34 @@ function normalizeAsset(filename, meta = {}, typeOverride) {
       ? "gcode"
       : "other");
 
+  const label = meta.is_thumbnail
+    ? "Thumbnail"
+    : meta.is_processed
+    ? "Processed"
+    : meta.is_original
+    ? "Original"
+    : "";
+
   return {
     filename,
     type,
-    label: meta.is_thumbnail
-      ? `Thumbnail (${filename})`
-      : meta.is_processed
-      ? `Processed (${filename})`
-      : filename,
-    meta,
+    label,
+    meta: {
+      ...meta,
+      size: meta.size ?? null,
+      created: meta.created ?? null,
+      modified: meta.modified ?? null,
+    },
     displayName: filename?.split("/").pop() || filename,
   };
 }
 
 function groupAssets(imageEntries = [], gcodeEntries = []) {
+  const metaByFilename = new Map(
+    (imageEntries || [])
+      .filter((entry) => entry?.filename)
+      .map((entry) => [entry.filename, entry])
+  );
   const images = [];
   const svgs = [];
 
@@ -106,6 +157,9 @@ function groupAssets(imageEntries = [], gcodeEntries = []) {
       is_thumbnail: entry.is_thumbnail,
       is_processed: entry.is_processed,
       is_original: entry.is_original,
+      size: entry.size,
+      created: entry.created,
+      modified: entry.modified,
     });
     if (normalized.type === "svg") {
       svgs.push(normalized);
@@ -114,11 +168,56 @@ function groupAssets(imageEntries = [], gcodeEntries = []) {
     }
   });
 
-  const gcode = (gcodeEntries || []).map((file) =>
-    normalizeAsset(file, {}, "gcode")
-  );
+  const gcode = (gcodeEntries || []).map((file) => {
+    const filename = file || "";
+    const meta =
+      metaByFilename.get(filename) ||
+      metaByFilename.get(filename.split("/").pop()) ||
+      {};
+    return normalizeAsset(filename, {
+      size: meta.size,
+      created: meta.created,
+      modified: meta.modified,
+    }, "gcode");
+  });
 
   return { images, svgs, gcode };
+}
+
+function formatFileSize(bytes) {
+  if (bytes === null || bytes === undefined || Number.isNaN(Number(bytes))) {
+    return "";
+  }
+  const size = Number(bytes);
+  if (size < 1024) return `${size} B`;
+  const kb = size / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  const mb = kb / 1024;
+  if (mb < 1024) return `${mb.toFixed(1)} MB`;
+  const gb = mb / 1024;
+  return `${gb.toFixed(1)} GB`;
+}
+
+function formatFileDate(isoString) {
+  if (!isoString) return "";
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+  });
+}
+
+function buildAssetSecondaryText(asset) {
+  if (!asset) return undefined;
+  const parts = [];
+  if (asset.label) parts.push(asset.label);
+  const sizeText = formatFileSize(asset.meta?.size);
+  if (sizeText) parts.push(sizeText);
+  const dateText = formatFileDate(asset.meta?.modified || asset.meta?.created);
+  if (dateText) parts.push(dateText);
+  return parts.length ? parts.join(" • ") : undefined;
 }
 
 function parseGcodeForPreview(content) {
@@ -177,6 +276,16 @@ export default function EditProject({ currentProject }) {
   const [loadingAssets, setLoadingAssets] = useState(false);
   const [assetError, setAssetError] = useState("");
   const [selectedAsset, setSelectedAsset] = useState(null);
+  const [contextMenu, setContextMenu] = useState(null);
+  const [contextAsset, setContextAsset] = useState(null);
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
+  const [renameError, setRenameError] = useState("");
+  const [renaming, setRenaming] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [thumbnailLoading, setThumbnailLoading] = useState(false);
+  const [isDragActive, setIsDragActive] = useState(false);
   const [projectDetails, setProjectDetails] = useState(null);
   const [gcodePreview, setGcodePreview] = useState({
     loading: false,
@@ -208,6 +317,15 @@ export default function EditProject({ currentProject }) {
     occultIgnoreLayers: false,
     occultAcrossLayersOnly: false,
     occultKeepOcculted: false,
+    enableOptimization: false,
+    linemergeTolerance: 0.5,
+    linesimplifyTolerance: 0.1,
+    reloopTolerance: 0.1,
+    linesortEnabled: true,
+    linesortTwoOpt: true,
+    linesortPasses: 250,
+    servoDelayMs: 100.0,
+    penDebounceSteps: 7,
   });
   const [convertLoading, setConvertLoading] = useState(false);
   const [convertError, setConvertError] = useState("");
@@ -250,7 +368,7 @@ export default function EditProject({ currentProject }) {
     [assets]
   );
 
-  const loadAssets = async () => {
+  const loadAssets = async (preferFilename = "") => {
     if (!currentProject?.id) {
       setProjectDetails(null);
       setAssets({ images: [], svgs: [], gcode: [] });
@@ -276,10 +394,16 @@ export default function EditProject({ currentProject }) {
       );
       setAssets(grouped);
       setProjectDetails(projectResponse || null);
-
-      const first =
-        grouped.images[0] || grouped.svgs[0] || grouped.gcode[0] || null;
-      setSelectedAsset(first);
+      const allAssets = [...grouped.images, ...grouped.svgs, ...grouped.gcode];
+      const preferred = preferFilename
+        ? allAssets.find(
+            (asset) =>
+              asset.filename === preferFilename ||
+              asset.displayName === preferFilename
+          )
+        : null;
+      const first = allAssets[0] || null;
+      setSelectedAsset(preferred || first);
     } catch (err) {
       setAssetError(err.message || "Failed to load project assets");
     } finally {
@@ -495,23 +619,124 @@ export default function EditProject({ currentProject }) {
     };
   }, [imageDragging, imageDragStart]);
 
-  const handleDeleteAsset = async (asset) => {
+  const openDeleteDialog = (asset) => {
     if (!currentProject || !asset) return;
-    const confirmed = window.confirm(
-      `Delete ${asset.displayName}? This cannot be undone.`
-    );
-    if (!confirmed) return;
+    setDeleteTarget(asset);
+    setDeleteDialogOpen(true);
+  };
+
+  const closeDeleteDialog = () => {
+    if (deletingFile) return;
+    setDeleteDialogOpen(false);
+    setDeleteTarget(null);
+  };
+
+  const handleDeleteAsset = async () => {
+    if (!currentProject || !deleteTarget) return;
     try {
-      setDeletingFile(asset.filename);
-      await deleteProjectFile(currentProject.id, asset.filename);
-      if (selectedAsset?.filename === asset.filename) {
+      setDeletingFile(deleteTarget.filename);
+      await deleteProjectFile(currentProject.id, deleteTarget.filename);
+      if (selectedAsset?.filename === deleteTarget.filename) {
         setSelectedAsset(null);
       }
       await loadAssets();
+      setDeleteDialogOpen(false);
+      setDeleteTarget(null);
     } catch (err) {
       setAssetError(err.message || "Failed to delete file");
     } finally {
       setDeletingFile(null);
+    }
+  };
+
+  const handleOpenContextMenu = (event, asset) => {
+    event.preventDefault();
+    setSelectedAsset(asset);
+    setContextAsset(asset);
+    setContextMenu({
+      mouseX: event.clientX + 2,
+      mouseY: event.clientY - 6,
+      anchorEl: null,
+    });
+  };
+
+  const handleOpenAssetMenuButton = (event, asset) => {
+    event.stopPropagation();
+    setSelectedAsset(asset);
+    setContextAsset(asset);
+    setContextMenu({
+      mouseX: null,
+      mouseY: null,
+      anchorEl: event.currentTarget,
+    });
+  };
+
+  const handleCloseContextMenu = () => {
+    setContextMenu(null);
+  };
+
+  const openRenameDialog = (asset) => {
+    if (!asset) return;
+    setRenameValue(asset.displayName || "");
+    setRenameError("");
+    setRenameDialogOpen(true);
+    handleCloseContextMenu();
+  };
+
+  const closeRenameDialog = () => {
+    if (renaming) return;
+    setRenameDialogOpen(false);
+    setRenameError("");
+  };
+
+  const handleRename = async () => {
+    if (!currentProject || !contextAsset) return;
+    const trimmed = renameValue.trim();
+    if (!trimmed) {
+      setRenameError("File name is required.");
+      return;
+    }
+    if (/[\\/]/.test(trimmed)) {
+      setRenameError("File name cannot include path separators.");
+      return;
+    }
+    if (trimmed === contextAsset.displayName) {
+      setRenameDialogOpen(false);
+      return;
+    }
+
+    setRenaming(true);
+    setRenameError("");
+    try {
+      const result = await renameProjectFile(
+        currentProject.id,
+        contextAsset.filename,
+        trimmed
+      );
+      const newFilename = result.new_filename || trimmed;
+      await loadAssets(newFilename);
+      setContextAsset((prev) =>
+        prev ? { ...prev, filename: newFilename, displayName: trimmed } : prev
+      );
+      setRenameDialogOpen(false);
+    } catch (err) {
+      setRenameError(err.message || "Failed to rename file");
+    } finally {
+      setRenaming(false);
+    }
+  };
+
+  const handleCreateThumbnail = async (asset) => {
+    if (!currentProject || !asset) return;
+    setThumbnailLoading(true);
+    setAssetError("");
+    try {
+      await createProjectThumbnail(currentProject.id, asset.filename);
+      await loadAssets(asset.filename);
+    } catch (err) {
+      setAssetError(err.message || "Failed to create thumbnail");
+    } finally {
+      setThumbnailLoading(false);
     }
   };
 
@@ -573,6 +798,15 @@ export default function EditProject({ currentProject }) {
         occult_ignore_layers: Boolean(convertOptions.occultIgnoreLayers),
         occult_across_layers_only: Boolean(convertOptions.occultAcrossLayersOnly),
         occult_keep_occulted: Boolean(convertOptions.occultKeepOcculted),
+        enable_optimization: Boolean(convertOptions.enableOptimization),
+        linemerge_tolerance: convertOptions.linemergeTolerance,
+        linesimplify_tolerance: convertOptions.linesimplifyTolerance,
+        reloop_tolerance: convertOptions.reloopTolerance,
+        linesort_enabled: Boolean(convertOptions.linesortEnabled),
+        linesort_two_opt: Boolean(convertOptions.linesortTwoOpt),
+        linesort_passes: convertOptions.linesortPasses,
+        servo_delay_ms: convertOptions.servoDelayMs,
+        pen_debounce_steps: convertOptions.penDebounceSteps,
       });
       await loadAssets();
       setConvertDialogOpen(false);
@@ -584,8 +818,10 @@ export default function EditProject({ currentProject }) {
     }
   };
 
-  const handleUploadFile = async (file) => {
-    if (!file || !currentProject) return;
+  const validateUploadFile = (file) => {
+    if (!file) {
+      throw new Error("No file selected.");
+    }
     const name = (file.name || "").toLowerCase();
     const ext = name.match(/\.[^.]+$/)?.[0]?.slice(1) || "";
     const isSvg = ext === "svg";
@@ -593,37 +829,78 @@ export default function EditProject({ currentProject }) {
     const isImage = file.type.startsWith("image/") || isSvg;
 
     if (!isImage && !isGcode) {
-      setAssetError(
+      throw new Error(
         "Unsupported file type. Use image/SVG or G-code (.gcode/.nc/.txt)."
       );
-      return;
     }
 
     if (file.size > 10 * 1024 * 1024) {
-      setAssetError("File size must be less than 10MB");
-      return;
+      throw new Error("File size must be less than 10MB");
     }
 
+    return { isGcode };
+  };
+
+  const uploadSingleFile = async (file) => {
+    if (!currentProject) return;
+    const { isGcode } = validateUploadFile(file);
+    if (isGcode) {
+      const formData = new FormData();
+      formData.append("file", file);
+      await uploadGcodeToProject(currentProject.id, formData);
+    } else {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("settings", JSON.stringify(DEFAULT_UPLOAD_SETTINGS));
+      await uploadImageToProject(currentProject.id, formData);
+    }
+  };
+
+  const handleUploadFiles = async (files = []) => {
+    if (!currentProject || !files.length) return;
     setAssetError("");
     setUploading(true);
     try {
-      if (isGcode) {
-        const formData = new FormData();
-        formData.append("file", file);
-        await uploadGcodeToProject(currentProject.id, formData);
-      } else {
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("settings", JSON.stringify(DEFAULT_UPLOAD_SETTINGS));
-        await uploadImageToProject(currentProject.id, formData);
+      for (const file of files) {
+        await uploadSingleFile(file);
       }
-
       await loadAssets();
     } catch (err) {
       setAssetError(err.message || "Upload failed");
     } finally {
       setUploading(false);
     }
+  };
+
+  const handleUploadFile = async (file) => {
+    await handleUploadFiles(file ? [file] : []);
+  };
+
+  const handleDragOver = (event) => {
+    if (!currentProject) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setIsDragActive(true);
+  };
+
+  const handleDragEnter = (event) => {
+    if (!currentProject) return;
+    event.preventDefault();
+    setIsDragActive(true);
+  };
+
+  const handleDragLeave = (event) => {
+    if (!event.currentTarget.contains(event.relatedTarget)) {
+      setIsDragActive(false);
+    }
+  };
+
+  const handleDrop = async (event) => {
+    if (!currentProject) return;
+    event.preventDefault();
+    setIsDragActive(false);
+    const files = Array.from(event.dataTransfer.files || []);
+    await handleUploadFiles(files);
   };
 
   const handleFileInputChange = async (event) => {
@@ -953,7 +1230,7 @@ export default function EditProject({ currentProject }) {
     setVectorizeProject(null);
     // Refresh assets after vectorization
     if (currentProject) {
-      loadProjectAssets();
+      loadAssets();
     }
   };
 
@@ -966,7 +1243,7 @@ export default function EditProject({ currentProject }) {
     setGenerateSvgDialogOpen(false);
     // Refresh assets after generation
     if (currentProject) {
-      loadProjectAssets();
+      loadAssets();
     }
   };
 
@@ -1522,23 +1799,35 @@ export default function EditProject({ currentProject }) {
 
                         let rectWidth = "100%";
                         let rectHeight = "100%";
+                        let computedViewBox = null;
 
                         // Use viewBox if available, otherwise use width/height
                         if (viewBoxMatch) {
-                          const viewBox = viewBoxMatch[1].split(/\s+/);
+                          const viewBox = viewBoxMatch[1].trim().split(/[\s,]+/);
                           if (viewBox.length >= 4) {
                             rectWidth = viewBox[2];
                             rectHeight = viewBox[3];
                           }
                         } else if (widthMatch && heightMatch) {
-                          rectWidth = widthMatch[1];
-                          rectHeight = heightMatch[1];
+                          const widthRaw = widthMatch[1];
+                          const heightRaw = heightMatch[1];
+                          const widthPx = parseSvgLength(widthRaw);
+                          const heightPx = parseSvgLength(heightRaw);
+
+                          if (widthPx !== null && heightPx !== null) {
+                            rectWidth = String(widthPx);
+                            rectHeight = String(heightPx);
+                            computedViewBox = `0 0 ${rectWidth} ${rectHeight}`;
+                          } else {
+                            rectWidth = widthRaw;
+                            rectHeight = heightRaw;
+                          }
                         }
 
                         // Add viewBox if it doesn't exist but width/height do
                         let newAttrs = attrs;
-                        if (!viewBoxMatch && widthMatch && heightMatch) {
-                          newAttrs = `${attrs} viewBox="0 0 ${widthMatch[1]} ${heightMatch[1]}"`;
+                        if (!viewBoxMatch && computedViewBox) {
+                          newAttrs = `${attrs} viewBox="${computedViewBox}"`;
                         }
 
                         // Preserve original SVG attributes but add background
@@ -1636,59 +1925,25 @@ export default function EditProject({ currentProject }) {
             key={`${title}-${item.filename}`}
             disablePadding
             secondaryAction={
-              <Stack direction="row" spacing={0.5}>
-                {isVectorizableAsset(item) && (
-                  <Tooltip title="Vectorize image">
-                    <span>
-                      <IconButton
-                        edge="end"
-                        aria-label={`vectorize ${item.displayName}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openVectorizeDialog(item);
-                        }}
-                        size="small"
-                      >
-                        <VectorizeIcon fontSize="small" />
-                      </IconButton>
-                    </span>
-                  </Tooltip>
-                )}
-                {item.type === "svg" && (
-                  <IconButton
-                    edge="end"
-                    aria-label={`convert ${item.displayName}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openConvertDialog(item);
-                    }}
-                    size="small"
-                    color="primary"
-                    disabled={convertLoading}
-                  >
-                    <ConvertIcon fontSize="small" />
-                  </IconButton>
-                )}
-                <IconButton
-                  edge="end"
-                  aria-label={`delete ${item.displayName}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDeleteAsset(item);
-                  }}
-                  disabled={deletingFile === item.filename}
-                  size="small"
-                >
-                  <DeleteIcon fontSize="small" />
-                </IconButton>
-              </Stack>
+              <IconButton
+                edge="end"
+                size="small"
+                aria-label={`Asset actions for ${item.displayName}`}
+                onClick={(event) => handleOpenAssetMenuButton(event, item)}
+              >
+                <MoreVertIcon fontSize="small" />
+              </IconButton>
             }
           >
             <ListItemButton
               selected={selectedAsset?.filename === item.filename}
               onClick={() => setSelectedAsset(item)}
+              onContextMenu={(event) => handleOpenContextMenu(event, item)}
             >
-              <ListItemText primary={item.displayName} secondary={item.label} />
+              <ListItemText
+                primary={item.displayName}
+                secondary={buildAssetSecondaryText(item)}
+              />
             </ListItemButton>
           </ListItem>
         ))}
@@ -1752,7 +2007,43 @@ export default function EditProject({ currentProject }) {
 
       <Grid container spacing={3}>
         <Grid item xs={12} md={4}>
-          <Paper sx={{ p: 2, height: "100%", minHeight: 420 }}>
+          <Paper
+            sx={{
+              p: 2,
+              height: "100%",
+              minHeight: 420,
+              border: isDragActive ? "2px dashed" : undefined,
+              borderColor: isDragActive ? "primary.main" : undefined,
+              bgcolor: isDragActive ? "action.hover" : undefined,
+              position: "relative",
+            }}
+            onDragOver={handleDragOver}
+            onDragEnter={handleDragEnter}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
+            {isDragActive && (
+              <Box
+                sx={{
+                  position: "absolute",
+                  inset: 0,
+                  zIndex: 1,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  pointerEvents: "none",
+                }}
+              >
+                <Paper
+                  elevation={2}
+                  sx={{ px: 2, py: 1, bgcolor: "background.paper" }}
+                >
+                  <Typography variant="body2" color="text.secondary">
+                    Drop files to upload
+                  </Typography>
+                </Paper>
+              </Box>
+            )}
             <Stack
               direction="row"
               spacing={1}
@@ -1973,6 +2264,199 @@ export default function EditProject({ currentProject }) {
               </Box>
             )}
 
+            <Divider sx={{ my: 2 }} />
+
+            <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+              G-code Optimization
+            </Typography>
+
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={convertOptions.enableOptimization}
+                  onChange={(e) =>
+                    setConvertOptions((prev) => ({
+                      ...prev,
+                      enableOptimization: e.target.checked,
+                    }))
+                  }
+                  color="primary"
+                />
+              }
+              label="Enable G-code optimization"
+            />
+
+            {convertOptions.enableOptimization && (
+              <Box sx={{ pl: 3, mt: 1 }}>
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    Linemerge tolerance: {convertOptions.linemergeTolerance.toFixed(2)}mm
+                  </Typography>
+                  <Slider
+                    value={convertOptions.linemergeTolerance}
+                    onChange={(e, value) =>
+                      setConvertOptions((prev) => ({
+                        ...prev,
+                        linemergeTolerance: value,
+                      }))
+                    }
+                    min={0.01}
+                    max={2.0}
+                    step={0.01}
+                    valueLabelDisplay="auto"
+                    disabled={convertLoading}
+                  />
+                </Box>
+
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    Linesimplify tolerance: {convertOptions.linesimplifyTolerance.toFixed(2)}mm
+                  </Typography>
+                  <Slider
+                    value={convertOptions.linesimplifyTolerance}
+                    onChange={(e, value) =>
+                      setConvertOptions((prev) => ({
+                        ...prev,
+                        linesimplifyTolerance: value,
+                      }))
+                    }
+                    min={0.01}
+                    max={1.0}
+                    step={0.01}
+                    valueLabelDisplay="auto"
+                    disabled={convertLoading}
+                  />
+                </Box>
+
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    Reloop tolerance: {convertOptions.reloopTolerance.toFixed(2)}mm
+                  </Typography>
+                  <Slider
+                    value={convertOptions.reloopTolerance}
+                    onChange={(e, value) =>
+                      setConvertOptions((prev) => ({
+                        ...prev,
+                        reloopTolerance: value,
+                      }))
+                    }
+                    min={0.01}
+                    max={1.0}
+                    step={0.01}
+                    valueLabelDisplay="auto"
+                    disabled={convertLoading}
+                  />
+                </Box>
+
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={convertOptions.linesortEnabled}
+                      onChange={(e) =>
+                        setConvertOptions((prev) => ({
+                          ...prev,
+                          linesortEnabled: e.target.checked,
+                        }))
+                      }
+                      color="primary"
+                    />
+                  }
+                  label="Enable linesort"
+                />
+
+                <Box sx={{ pl: 3, mt: 1 }}>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={convertOptions.linesortTwoOpt}
+                        onChange={(e) =>
+                          setConvertOptions((prev) => ({
+                            ...prev,
+                            linesortTwoOpt: e.target.checked,
+                          }))
+                        }
+                        disabled={!convertOptions.linesortEnabled}
+                        color="primary"
+                      />
+                    }
+                    label="Use two-opt algorithm"
+                  />
+
+                  <Box sx={{ mb: 2, mt: 2 }}>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                      Linesort passes: {convertOptions.linesortPasses}
+                    </Typography>
+                    <Slider
+                      value={convertOptions.linesortPasses}
+                      onChange={(e, value) =>
+                        setConvertOptions((prev) => ({
+                          ...prev,
+                          linesortPasses: value,
+                        }))
+                      }
+                      min={1}
+                      max={1000}
+                      step={1}
+                      valueLabelDisplay="auto"
+                      disabled={convertLoading || !convertOptions.linesortEnabled}
+                    />
+                  </Box>
+                </Box>
+              </Box>
+            )}
+
+            <Divider sx={{ my: 2 }} />
+
+            <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+              Pen Control (Servo Debounce)
+            </Typography>
+
+            <Box sx={{ mb: 2 }}>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                Servo delay after pen down: {convertOptions.servoDelayMs.toFixed(0)}ms
+              </Typography>
+              <Slider
+                value={convertOptions.servoDelayMs}
+                onChange={(e, value) =>
+                  setConvertOptions((prev) => ({
+                    ...prev,
+                    servoDelayMs: value,
+                  }))
+                }
+                min={0}
+                max={500}
+                step={10}
+                valueLabelDisplay="auto"
+                disabled={convertLoading}
+              />
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
+                Delay after pen down to allow servo to settle (reduces bouncing)
+              </Typography>
+            </Box>
+
+            <Box sx={{ mb: 2 }}>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                Pen debounce steps: {convertOptions.penDebounceSteps}
+              </Typography>
+              <Slider
+                value={convertOptions.penDebounceSteps}
+                onChange={(e, value) =>
+                  setConvertOptions((prev) => ({
+                    ...prev,
+                    penDebounceSteps: value,
+                  }))
+                }
+                min={1}
+                max={15}
+                step={1}
+                valueLabelDisplay="auto"
+                disabled={convertLoading}
+              />
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
+                Number of M280 commands for exponential pen down approach (more steps = smoother but slower)
+              </Typography>
+            </Box>
+
             {/* Fit/center and pen mapping removed; we always center without pen mapping. */}
 
             {convertError && <Alert severity="error">{convertError}</Alert>}
@@ -1991,6 +2475,136 @@ export default function EditProject({ currentProject }) {
             disabled={convertLoading || !currentProject || !convertTarget}
           >
             {convertLoading ? "Converting..." : "Convert"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Menu
+        open={contextMenu !== null}
+        onClose={handleCloseContextMenu}
+        anchorReference={contextMenu?.anchorEl ? "anchorEl" : "anchorPosition"}
+        anchorEl={contextMenu?.anchorEl}
+        anchorPosition={
+          contextMenu?.anchorEl
+            ? undefined
+            : contextMenu !== null
+            ? { top: contextMenu.mouseY, left: contextMenu.mouseX }
+            : undefined
+        }
+      >
+        {contextAsset &&
+          (contextAsset.type === "image" || contextAsset.type === "svg") &&
+          !contextAsset.meta?.is_thumbnail && (
+            <MenuItem
+              onClick={() => {
+                handleCloseContextMenu();
+                handleCreateThumbnail(contextAsset);
+              }}
+              disabled={thumbnailLoading}
+            >
+              <ListItemIcon>
+                <ImageIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText>Set as Project Thumbnail</ListItemText>
+            </MenuItem>
+          )}
+        <MenuItem onClick={() => openRenameDialog(contextAsset)} disabled={!contextAsset}>
+          <ListItemIcon>
+            <RenameIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Rename</ListItemText>
+        </MenuItem>
+        {contextAsset && isVectorizableAsset(contextAsset) && (
+          <MenuItem
+            onClick={() => {
+              handleCloseContextMenu();
+              openVectorizeDialog(contextAsset);
+            }}
+          >
+            <ListItemIcon>
+              <VectorizeIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Vectorize</ListItemText>
+          </MenuItem>
+        )}
+        {contextAsset?.type === "svg" && (
+          <MenuItem
+            onClick={() => {
+              handleCloseContextMenu();
+              openConvertDialog(contextAsset);
+            }}
+          >
+            <ListItemIcon>
+              <ConvertIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Convert to G-code</ListItemText>
+          </MenuItem>
+        )}
+        <MenuItem
+          onClick={() => {
+            handleCloseContextMenu();
+            openDeleteDialog(contextAsset);
+          }}
+          disabled={!contextAsset}
+        >
+          <ListItemIcon>
+            <DeleteIcon fontSize="small" color="error" />
+          </ListItemIcon>
+          <ListItemText>Delete</ListItemText>
+        </MenuItem>
+      </Menu>
+
+      <Dialog open={renameDialogOpen} onClose={closeRenameDialog} maxWidth="xs" fullWidth>
+        <DialogTitle>Rename File</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            fullWidth
+            margin="dense"
+            label="File name"
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            error={Boolean(renameError)}
+            helperText={renameError || " "}
+            disabled={renaming}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                handleRename();
+              }
+            }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeRenameDialog} disabled={renaming}>
+            Cancel
+          </Button>
+          <Button variant="contained" onClick={handleRename} disabled={renaming}>
+            {renaming ? "Renaming..." : "Rename"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={deleteDialogOpen} onClose={closeDeleteDialog} maxWidth="xs" fullWidth>
+        <DialogTitle>Delete file?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            {deleteTarget
+              ? `Delete "${deleteTarget.displayName}"? This cannot be undone.`
+              : "Delete this file? This cannot be undone."}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeDeleteDialog} disabled={Boolean(deletingFile)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleDeleteAsset}
+            color="error"
+            variant="contained"
+            disabled={Boolean(deletingFile)}
+          >
+            {deletingFile ? "Deleting..." : "Delete"}
           </Button>
         </DialogActions>
       </Dialog>

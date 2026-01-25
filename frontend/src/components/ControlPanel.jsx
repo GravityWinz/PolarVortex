@@ -10,6 +10,7 @@ import {
   Stop,
 } from "@mui/icons-material";
 import {
+  Alert,
   Box,
   Button,
   Chip,
@@ -24,6 +25,7 @@ import {
   Pagination,
   Paper,
   Select,
+  Snackbar,
   Stack,
   TextField,
   Tooltip,
@@ -61,7 +63,15 @@ export default function ControlPanel({ currentProject }) {
   const [connectionStatus, setConnectionStatus] = useState(null);
   const [commandLog, setCommandLog] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [snackbar, setSnackbar] = useState({
+    open: false,
+    message: "",
+    severity: "info",
+  });
   const [commandInput, setCommandInput] = useState("");
+  const [commandHistory, setCommandHistory] = useState([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [historyDraft, setHistoryDraft] = useState("");
   const [motionMode, setMotionMode] = useState("relative"); // "absolute" or "relative"
   const [penState, setPenState] = useState("up"); // "up" or "down"
   const [penUpCommand, setPenUpCommand] = useState("M280 P0 S110");
@@ -118,6 +128,15 @@ export default function ControlPanel({ currentProject }) {
 
   const baudRates = [9600, 19200, 38400, 57600, 115200, 250000];
 
+  const showSnackbar = (message, severity = "info") => {
+    setSnackbar({ open: true, message, severity });
+  };
+
+  const handleSnackbarClose = (_, reason) => {
+    if (reason === "clickaway") return;
+    setSnackbar((prev) => ({ ...prev, open: false }));
+  };
+
   // Load available ports on mount
   useEffect(() => {
     loadPorts();
@@ -125,6 +144,23 @@ export default function ControlPanel({ currentProject }) {
     loadCommandLog();
     loadDefaultPlotterPenCommands();
     loadProjects();
+  }, []);
+
+  useEffect(() => {
+    const handlePlotterConfigUpdated = () => {
+      loadDefaultPlotterPenCommands();
+    };
+    window.addEventListener(
+      "pv_plotter_config_updated",
+      handlePlotterConfigUpdated
+    );
+    return () => {
+      window.removeEventListener(
+        "pv_plotter_config_updated",
+        handlePlotterConfigUpdated
+      );
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Restore print state and check for active jobs after initial load
@@ -367,6 +403,13 @@ export default function ControlPanel({ currentProject }) {
               ];
             });
             scrollToBottom();
+          } else if (
+            data.type === "plotter_created" ||
+            data.type === "plotter_updated" ||
+            data.type === "plotter_deleted" ||
+            data.type === "gcode_settings_updated"
+          ) {
+            loadDefaultPlotterPenCommands();
           }
         } catch (err) {
           console.error("Error parsing WebSocket message:", err);
@@ -456,7 +499,7 @@ export default function ControlPanel({ currentProject }) {
 
   const handleConnect = async () => {
     if (!selectedPort) {
-      alert("Please select a port");
+      showSnackbar("Please select a port", "warning");
       return;
     }
     setLoading(true);
@@ -508,10 +551,13 @@ export default function ControlPanel({ currentProject }) {
 
         await loadCommandLog();
       } else {
-        alert(`Connection failed: ${result.error || "Unknown error"}`);
+        showSnackbar(
+          `Connection failed: ${result.error || "Unknown error"}`,
+          "error"
+        );
       }
     } catch (err) {
-      alert(`Connection error: ${err.message}`);
+      showSnackbar(`Connection error: ${err.message}`, "error");
     } finally {
       setLoading(false);
     }
@@ -525,10 +571,13 @@ export default function ControlPanel({ currentProject }) {
         setConnected(false);
         setConnectionStatus(null);
       } else {
-        alert(`Disconnect failed: ${result.error || "Unknown error"}`);
+        showSnackbar(
+          `Disconnect failed: ${result.error || "Unknown error"}`,
+          "error"
+        );
       }
     } catch (err) {
-      alert(`Disconnect error: ${err.message}`);
+      showSnackbar(`Disconnect error: ${err.message}`, "error");
     } finally {
       setLoading(false);
     }
@@ -545,7 +594,7 @@ export default function ControlPanel({ currentProject }) {
 
   const sendCommand = async (gcode) => {
     if (!connected) {
-      alert("Please connect to plotter first");
+      showSnackbar("Please connect to plotter first", "warning");
       return;
     }
     try {
@@ -578,7 +627,7 @@ export default function ControlPanel({ currentProject }) {
         }
       }
     } catch (err) {
-      alert(`Command error: ${err.message}`);
+      showSnackbar(`Command error: ${err.message}`, "error");
     }
   };
 
@@ -588,20 +637,26 @@ export default function ControlPanel({ currentProject }) {
     }
     const command = commandInput.trim();
     setCommandInput("");
+    setHistoryIndex(-1);
+    setHistoryDraft("");
+    setCommandHistory((prev) => {
+      const next = [...prev, command];
+      return next.slice(-50);
+    });
     await sendCommand(command);
   };
 
   const handleRunProjectGcode = async () => {
     if (!selectedPrintProject) {
-      alert("Select a project to print G-code from");
+      showSnackbar("Select a project to print G-code from", "warning");
       return;
     }
     if (!selectedPrintGcode) {
-      alert("Select a G-code file to print");
+      showSnackbar("Select a G-code file to print", "warning");
       return;
     }
     if (!connected) {
-      alert("Please connect to plotter first");
+      showSnackbar("Please connect to plotter first", "warning");
       return;
     }
     try {
@@ -639,10 +694,13 @@ export default function ControlPanel({ currentProject }) {
           status: null,
         });
         localStorage.removeItem("pv_gcode_progress");
-        alert("G-code job started but no job ID was returned. Unable to track progress.");
+        showSnackbar(
+          "G-code job started but no job ID was returned. Unable to track progress.",
+          "warning"
+        );
       }
     } catch (err) {
-      alert(`G-code run error: ${err.message}`);
+      showSnackbar(`G-code run error: ${err.message}`, "error");
       setGcodeRunning(false);
       setGcodeProgress({
         jobId: null,
@@ -712,14 +770,51 @@ export default function ControlPanel({ currentProject }) {
       setGcodePaused(res.paused);
       // Progress polling will continue and update status automatically
     } catch (err) {
-      alert(`Pause error: ${err.message}`);
+      showSnackbar(`Pause error: ${err.message}`, "error");
     }
   };
 
-  const handleCommandInputKeyPress = (e) => {
+  const handleCommandInputKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSendCommand();
+      return;
+    }
+
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      if (e.altKey || e.ctrlKey || e.metaKey) {
+        return;
+      }
+      if (commandHistory.length === 0) {
+        return;
+      }
+      e.preventDefault();
+
+      if (e.key === "ArrowUp") {
+        if (historyIndex === -1) {
+          setHistoryDraft(commandInput);
+          const nextIndex = commandHistory.length - 1;
+          setHistoryIndex(nextIndex);
+          setCommandInput(commandHistory[nextIndex]);
+        } else if (historyIndex > 0) {
+          const nextIndex = historyIndex - 1;
+          setHistoryIndex(nextIndex);
+          setCommandInput(commandHistory[nextIndex]);
+        }
+      } else {
+        if (historyIndex === -1) {
+          return;
+        }
+        if (historyIndex < commandHistory.length - 1) {
+          const nextIndex = historyIndex + 1;
+          setHistoryIndex(nextIndex);
+          setCommandInput(commandHistory[nextIndex]);
+        } else {
+          setHistoryIndex(-1);
+          setCommandInput(historyDraft);
+          setHistoryDraft("");
+        }
+      }
     }
   };
 
@@ -741,14 +836,14 @@ export default function ControlPanel({ currentProject }) {
 
   const handleMove = async (x, y) => {
     if (!connected) {
-      alert("Please connect to plotter first");
+      showSnackbar("Please connect to plotter first", "warning");
       return;
     }
     try {
       // Use current motion mode - don't switch modes, just move
       await sendGcodeCommand(`G0 X${x} Y${y}`);
     } catch (err) {
-      alert(`Movement error: ${err.message}`);
+      showSnackbar(`Movement error: ${err.message}`, "error");
     }
   };
 
@@ -767,7 +862,7 @@ export default function ControlPanel({ currentProject }) {
 
   const handleStop = () => {
     stopPlotter().catch((err) => {
-      alert(`Stop error: ${err.message}`);
+      showSnackbar(`Stop error: ${err.message}`, "error");
     });
   };
 
@@ -977,7 +1072,7 @@ export default function ControlPanel({ currentProject }) {
                             });
                             localStorage.removeItem("pv_gcode_progress");
                             stopPlotter().catch((err) =>
-                              alert(`Stop error: ${err.message}`)
+                              showSnackbar(`Stop error: ${err.message}`, "error")
                             );
                           }}
                           sx={{ fontWeight: "bold", textTransform: "none" }}
@@ -1644,7 +1739,7 @@ export default function ControlPanel({ currentProject }) {
                 placeholder="Enter G-code command (e.g., G28, M280 P0 S33)"
                 value={commandInput}
                 onChange={(e) => setCommandInput(e.target.value)}
-                onKeyPress={handleCommandInputKeyPress}
+                onKeyDown={handleCommandInputKeyDown}
                 disabled={!connected || loading}
                 InputProps={{
                   endAdornment: (
@@ -1670,6 +1765,20 @@ export default function ControlPanel({ currentProject }) {
           </Paper>
         </Grid>
       </Grid>
+
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={5000}
+        onClose={handleSnackbarClose}
+      >
+        <Alert
+          onClose={handleSnackbarClose}
+          severity={snackbar.severity}
+          sx={{ width: "100%" }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }

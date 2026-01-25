@@ -48,8 +48,11 @@ class ImageHelper:
         return file_content_type == "image/svg+xml" or ext == ".svg"
     
     def get_project_directory(self, project_id: str) -> Path:
-        """Get the project directory path for a given project ID"""
-        return self.project_storage_path / project_id
+        """Get the project directory path for a given project ID
+        Uses project_service to handle name-prefixed directories correctly
+        """
+        from .project_service import project_service
+        return project_service._get_project_directory(project_id)
     
     def save_original_image(self, image_data: bytes, image_name: str, project_id: str) -> str:
         """Save original image to the project directory"""
@@ -83,6 +86,32 @@ class ImageHelper:
             return str(thumb_path)
         except Exception as e:
             logger.error(f"Thumbnail creation error: {e}")
+            return None
+
+    def create_thumbnail_from_project_file(self, project_id: str, filename: str) -> Optional[str]:
+        """Create a thumbnail from a file already stored in the project directory"""
+        try:
+            project_dir = self.get_project_directory(project_id)
+            file_path = (project_dir / filename).resolve()
+            if not file_path.exists() or not file_path.is_file():
+                return None
+
+            ext = file_path.suffix.lower()
+            if ext == ".svg":
+                try:
+                    import cairosvg
+                except Exception as e:
+                    logger.error(f"CairoSVG not available: {e}")
+                    return None
+
+                svg_bytes = file_path.read_bytes()
+                png_bytes = cairosvg.svg2png(bytestring=svg_bytes)
+                return self.create_thumbnail(png_bytes, file_path.name, project_id)
+
+            image_bytes = file_path.read_bytes()
+            return self.create_thumbnail(image_bytes, file_path.name, project_id)
+        except Exception as e:
+            logger.error(f"Thumbnail creation from file error: {e}")
             return None
     
     def validate_upload(self, file_content_type: str, file_size: int) -> None:
@@ -421,30 +450,40 @@ class ImageHelper:
             
             images = []
             
-            # Get all files in the project directory
+            def add_file_entry(file_path: Path, filename: str):
+                file_stat = file_path.stat()
+                is_original = not filename.startswith("thumb_") and not filename.startswith("processed_")
+                is_thumbnail = filename.startswith("thumb_")
+                is_processed = filename.startswith("processed_")
+                images.append({
+                    "filename": filename,
+                    "path": str(file_path),
+                    "size": file_stat.st_size,
+                    "created": datetime.fromtimestamp(file_stat.st_ctime).isoformat(),
+                    "modified": datetime.fromtimestamp(file_stat.st_mtime).isoformat(),
+                    "is_original": is_original,
+                    "is_thumbnail": is_thumbnail,
+                    "is_processed": is_processed
+                })
+
+            # Get files in the project root
             for file_path in project_dir.iterdir():
-                if file_path.is_file():
-                    file_stat = file_path.stat()
-                    
-                    # Skip project.yaml file
-                    if file_path.name == "project.yaml":
+                if not file_path.is_file():
+                    continue
+
+                if file_path.name == "project.yaml":
+                    continue
+
+                add_file_entry(file_path, file_path.name)
+
+            # Also include G-code files stored under the gcode subdirectory
+            gcode_dir = project_dir / "gcode"
+            if gcode_dir.exists() and gcode_dir.is_dir():
+                for file_path in gcode_dir.iterdir():
+                    if not file_path.is_file():
                         continue
-                    
-                    # Determine file type
-                    is_original = not file_path.name.startswith('thumb_') and not file_path.name.startswith('processed_')
-                    is_thumbnail = file_path.name.startswith('thumb_')
-                    is_processed = file_path.name.startswith('processed_')
-                    
-                    images.append({
-                        "filename": file_path.name,
-                        "path": str(file_path),
-                        "size": file_stat.st_size,
-                        "created": datetime.fromtimestamp(file_stat.st_ctime).isoformat(),
-                        "modified": datetime.fromtimestamp(file_stat.st_mtime).isoformat(),
-                        "is_original": is_original,
-                        "is_thumbnail": is_thumbnail,
-                        "is_processed": is_processed
-                    })
+                    relative_name = str(Path("gcode") / file_path.name)
+                    add_file_entry(file_path, relative_name)
             
             # Sort by creation time (newest first)
             images.sort(key=lambda x: x["created"], reverse=True)

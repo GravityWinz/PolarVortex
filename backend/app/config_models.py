@@ -10,6 +10,7 @@ class GcodeSettings(BaseModel):
     before_print: List[str] = Field(default_factory=list, description="Commands to run just before starting a print job")
     pen_up_command: str = Field(default="M280 P0 S110", description="Command to raise pen")
     pen_down_command: str = Field(default="M280 P0 S130", description="Command to lower pen")
+    servo_delay_ms: float = Field(default=100.0, description="Delay in milliseconds after servo commands to allow settling (reduces bouncing)")
 
 
 class GcodeSettingsUpdate(BaseModel):
@@ -18,6 +19,7 @@ class GcodeSettingsUpdate(BaseModel):
     before_print: Optional[List[str]] = Field(None, description="Commands to run before print start")
     pen_up_command: Optional[str] = Field(None, description="Command to raise pen")
     pen_down_command: Optional[str] = Field(None, description="Command to lower pen")
+    servo_delay_ms: Optional[float] = Field(None, description="Delay in milliseconds after servo commands to allow settling")
 
 
 class PlotterType(str, Enum):
@@ -94,6 +96,8 @@ class PlotterCreate(BaseModel):
     pen_down_position: float = Field(default=0.0, description="Pen down position in mm")
     pen_speed: float = Field(default=20.0, description="Pen movement speed in mm/s")
     gcode_sequences: GcodeSettings = Field(default_factory=GcodeSettings, description="Automatic G-code for this plotter")
+    gcode_pen_up_command: Optional[str] = Field(None, description="Command to raise pen (legacy)")
+    gcode_pen_down_command: Optional[str] = Field(None, description="Command to lower pen (legacy)")
     home_position_x: float = Field(default=0.0, description="Home position X coordinate")
     home_position_y: float = Field(default=0.0, description="Home position Y coordinate")
     is_default: bool = Field(default=False, description="Whether this is the default plotter")
@@ -113,6 +117,8 @@ class PlotterUpdate(BaseModel):
     pen_down_position: Optional[float] = Field(None, description="Pen down position in mm")
     pen_speed: Optional[float] = Field(None, description="Pen movement speed in mm/s")
     gcode_sequences: Optional[GcodeSettings] = Field(None, description="Automatic G-code for this plotter")
+    gcode_pen_up_command: Optional[str] = Field(None, description="Command to raise pen (legacy)")
+    gcode_pen_down_command: Optional[str] = Field(None, description="Command to lower pen (legacy)")
     home_position_x: Optional[float] = Field(None, description="Home position X coordinate")
     home_position_y: Optional[float] = Field(None, description="Home position Y coordinate")
     is_default: Optional[bool] = Field(None, description="Whether this is the default plotter")

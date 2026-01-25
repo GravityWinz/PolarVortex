@@ -47,3 +47,5 @@ PolarVortex controls a polargraph plotter with a React + Material UI frontend an
 
 - If requests are ambiguous, ask for clarification.
 - Follow existing folder structure and component patterns.
+
+

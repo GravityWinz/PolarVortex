@@ -102,6 +102,27 @@ export async function deleteProject(projectId) {
   }
 }
 
+export async function updateProject(projectId, projectData) {
+  try {
+    const response = await fetch(`${BASE_URL}/projects/${projectId}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(projectData),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to update project: ${response.statusText}`);
+    }
+
+    return await response.json();
+  } catch (err) {
+    console.error("Error updating project:", err);
+    throw err;
+  }
+}
+
 // Project assets API
 export async function getProjectAssets(projectId) {
   try {
@@ -140,6 +161,44 @@ export async function deleteProjectFile(projectId, filename) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(data.detail || data.error || `Failed to delete file: ${response.statusText}`);
+  }
+  return data;
+}
+
+export async function renameProjectFile(projectId, filename, newFilename) {
+  const safePath = (filename || "").split("/").map(encodeURIComponent).join("/");
+  const url = `${BASE_URL}/projects/${projectId}/images/${safePath}/rename`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ new_filename: newFilename }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success === false) {
+    throw new Error(
+      data.detail ||
+        data.error ||
+        data.message ||
+        `Failed to rename file: ${response.statusText}`
+    );
+  }
+  return data;
+}
+
+export async function createProjectThumbnail(projectId, filename) {
+  const safePath = (filename || "").split("/").map(encodeURIComponent).join("/");
+  const url = `${BASE_URL}/projects/${projectId}/images/${safePath}/thumbnail`;
+  const response = await fetch(url, { method: "POST" });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success === false) {
+    throw new Error(
+      data.detail ||
+        data.error ||
+        data.message ||
+        `Failed to create thumbnail: ${response.statusText}`
+    );
   }
   return data;
 }
@@ -594,7 +653,12 @@ export async function getDefaultPaper() {
 
 export async function getDefaultPlotter() {
   try {
-    const response = await fetch(`${BASE_URL}/config/plotters/default`);
+    const response = await fetch(`${BASE_URL}/config/plotters/default`, {
+      cache: "no-store",
+      headers: {
+        "Cache-Control": "no-cache",
+      },
+    });
     return await response.json();
   } catch (err) {
     console.error("Error fetching default plotter:", err);

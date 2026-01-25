@@ -52,3 +52,8 @@ class ProjectListResponse(BaseModel):
     """Model for listing projects"""
     projects: list[ProjectResponse]
     total: int
+
+
+class FileRenameRequest(BaseModel):
+    """Model for renaming a project file"""
+    new_filename: str = Field(..., description="New filename", min_length=1, max_length=255)
