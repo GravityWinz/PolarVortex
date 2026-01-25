@@ -1,9 +1,9 @@
-import { Close as CloseIcon, Save as SaveIcon } from "@mui/icons-material";
+import { Close as CloseIcon, ExpandMore as ExpandMoreIcon, Help as HelpIcon, Save as SaveIcon } from "@mui/icons-material";
 import {
-    Alert,
     Accordion,
     AccordionDetails,
     AccordionSummary,
+    Alert,
     Box,
     Button,
     Card,
@@ -28,9 +28,8 @@ import {
     Tooltip,
     Typography,
 } from "@mui/material";
-import { Help as HelpIcon, ExpandMore as ExpandMoreIcon } from "@mui/icons-material";
 import React, { useEffect, useState } from "react";
-import { 
+import {
     generateProjectSvg,
     getAvailableSvgGenerators,
     getSvgGeneratorInfo,
@@ -49,6 +48,24 @@ const GenerateSvgDialog = ({ open, onClose, project }) => {
   const [error, setError] = useState(null);
   const [filename, setFilename] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const normalizeFilename = (value) => value.trim().replace(/\.svg$/i, "");
+  const getFilenameError = (value) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return "Filename is required";
+    }
+    if (/[\\/]/.test(trimmed)) {
+      return "Filename cannot include slashes";
+    }
+    if (trimmed.includes("..")) {
+      return "Filename cannot include ..";
+    }
+    return "";
+  };
+  const normalizedFilename = normalizeFilename(filename);
+  const rawFilenameError = getFilenameError(filename);
+  const filenameError =
+    generationResult || filename.trim() ? rawFilenameError : "";
 
   // Load available algorithms on mount
   useEffect(() => {
@@ -151,17 +168,11 @@ const GenerateSvgDialog = ({ open, onClose, project }) => {
       return;
     }
 
-    // Prompt for filename if not provided
-    let saveFilename = filename.trim();
-    if (!saveFilename) {
-      const defaultName = `${selectedAlgorithm}_${new Date().toISOString().slice(0, 10)}`;
-      saveFilename = prompt("Enter filename (without .svg extension):", defaultName);
-      if (!saveFilename || !saveFilename.trim()) {
-        return; // User cancelled
-      }
-      setFilename(saveFilename.trim());
-      saveFilename = saveFilename.trim();
+    if (filenameError) {
+      return;
     }
+
+    const saveFilename = `${normalizedFilename}.svg`;
 
     setIsSaving(true);
     setError(null);
@@ -520,6 +531,23 @@ const GenerateSvgDialog = ({ open, onClose, project }) => {
                 </Typography>
               )}
 
+              <Divider sx={{ my: 2 }} />
+
+              <TextField
+                fullWidth
+                label="Filename"
+                value={filename}
+                onChange={(e) => setFilename(e.target.value)}
+                disabled={isSaving}
+                error={Boolean(filenameError)}
+                helperText={
+                  filenameError ||
+                  (normalizedFilename
+                    ? `Saved as ${normalizedFilename}.svg`
+                    : "Add a filename; .svg is added automatically.")
+                }
+              />
+
               {error && (
                 <Alert severity="error" sx={{ mt: 2 }}>
                   {error}
@@ -541,7 +569,7 @@ const GenerateSvgDialog = ({ open, onClose, project }) => {
           onClick={handleSave}
           variant="contained"
           color="primary"
-          disabled={!generationResult || isSaving}
+          disabled={!generationResult || isSaving || Boolean(filenameError)}
           startIcon={isSaving ? <CircularProgress size={20} /> : <SaveIcon />}
         >
           {isSaving ? "Saving..." : "Save"}

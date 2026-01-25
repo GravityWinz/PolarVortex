@@ -1,12 +1,13 @@
-import { afterAll, afterEach, beforeAll } from "vitest";
+import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { server } from "./server";
-import "@testing-library/jest-dom/vitest";
 
-beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
-afterEach(() => {
-  server.resetHandlers();
-  cleanup();
-});
-afterAll(() => server.close());
+export const setupMsw = () => {
+  beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+  afterEach(() => {
+    server.resetHandlers();
+    cleanup();
+  });
+  afterAll(() => server.close());
+};
 

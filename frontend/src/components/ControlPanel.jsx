@@ -839,11 +839,14 @@ export default function ControlPanel({ currentProject }) {
       showSnackbar("Please connect to plotter first", "warning");
       return;
     }
-    try {
-      // Use current motion mode - don't switch modes, just move
-      await sendGcodeCommand(`G0 X${x} Y${y}`);
-    } catch (err) {
-      showSnackbar(`Movement error: ${err.message}`, "error");
+    const activeMode = motionMode || "relative";
+    const requiresRestore = activeMode !== "relative";
+    if (requiresRestore) {
+      await sendCommand("G91");
+    }
+    await sendCommand(`G0 X${x} Y${y}`);
+    if (requiresRestore) {
+      await sendCommand("G90");
     }
   };
 
