@@ -434,3 +434,5 @@ Thumbs.db
 .env.production
 .env.development
 .env
+/backend/venv
+/backend/venv-3.12
