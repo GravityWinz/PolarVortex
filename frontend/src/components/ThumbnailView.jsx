@@ -14,6 +14,10 @@ import {
     CardMedia,
     Chip,
     CircularProgress,
+    Dialog,
+    DialogActions,
+    DialogContent,
+    DialogTitle,
     Grid,
     IconButton,
     Paper,
@@ -32,6 +36,9 @@ export default function ThumbnailView({ onProjectSelect }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [failedThumbnails, setFailedThumbnails] = useState(new Set());
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Fetch projects from API
   useEffect(() => {
@@ -62,17 +69,31 @@ export default function ThumbnailView({ onProjectSelect }) {
     }
   };
 
-  const handleDelete = async (projectId) => {
-    if (!window.confirm("Are you sure you want to delete this project? This will also delete any associated images.")) {
-      return;
-    }
+  const openDeleteDialog = (project) => {
+    if (!project) return;
+    setDeleteTarget(project);
+    setDeleteDialogOpen(true);
+  };
 
+  const closeDeleteDialog = () => {
+    if (deleting) return;
+    setDeleteDialogOpen(false);
+    setDeleteTarget(null);
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
     try {
-      await deleteProject(projectId);
-      setProjects(projects.filter(project => project.id !== projectId));
+      setDeleting(true);
+      await deleteProject(deleteTarget.id);
+      setProjects(projects.filter(project => project.id !== deleteTarget.id));
+      setDeleteDialogOpen(false);
+      setDeleteTarget(null);
     } catch (err) {
       setError("Failed to delete project");
       console.error("Failed to delete project:", err);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -283,7 +304,7 @@ export default function ThumbnailView({ onProjectSelect }) {
                     size="small"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleDelete(project.id);
+                      openDeleteDialog(project);
                     }}
                     sx={{ color: "error.main" }}
                   >
@@ -295,6 +316,25 @@ export default function ThumbnailView({ onProjectSelect }) {
           </Grid>
         ))}
       </Grid>
+
+      <Dialog open={deleteDialogOpen} onClose={closeDeleteDialog} maxWidth="xs" fullWidth>
+        <DialogTitle>Delete project?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            {deleteTarget
+              ? `Delete "${deleteTarget.name}"? This will also delete any associated images.`
+              : "Delete this project and its associated images?"}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeDeleteDialog} disabled={deleting}>
+            Cancel
+          </Button>
+          <Button onClick={handleDelete} color="error" variant="contained" disabled={deleting}>
+            {deleting ? "Deleting..." : "Delete"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

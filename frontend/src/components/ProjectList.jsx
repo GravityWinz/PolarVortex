@@ -1,6 +1,7 @@
 import {
   Delete as DeleteIcon,
-  Folder as FolderIcon
+  Folder as FolderIcon,
+  MoreVert as MoreVertIcon
 } from "@mui/icons-material";
 import {
   Alert,
@@ -57,6 +58,9 @@ export default function ProjectList({
   const [renameValue, setRenameValue] = useState("");
   const [renameError, setRenameError] = useState("");
   const [renaming, setRenaming] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Fetch projects from API
   useEffect(() => {
@@ -97,21 +101,31 @@ export default function ProjectList({
     }
   };
 
-  const handleDeleteProject = async (projectId) => {
-    if (
-      !window.confirm(
-        "Are you sure you want to delete this project? This will also delete any associated images."
-      )
-    ) {
-      return;
-    }
+  const openDeleteDialog = (project) => {
+    if (!project) return;
+    setDeleteTarget(project);
+    setDeleteDialogOpen(true);
+  };
 
+  const closeDeleteDialog = () => {
+    if (deleting) return;
+    setDeleteDialogOpen(false);
+    setDeleteTarget(null);
+  };
+
+  const handleDeleteProject = async () => {
+    if (!deleteTarget) return;
     try {
-      await deleteProject(projectId);
-      setProjects((prev) => prev.filter((p) => p.id !== projectId));
+      setDeleting(true);
+      await deleteProject(deleteTarget.id);
+      setProjects((prev) => prev.filter((p) => p.id !== deleteTarget.id));
+      setDeleteDialogOpen(false);
+      setDeleteTarget(null);
     } catch (err) {
       setError("Failed to delete project");
       console.error("Error deleting project:", err);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -133,6 +147,17 @@ export default function ProjectList({
     setContextMenu({
       mouseX: event.clientX + 2,
       mouseY: event.clientY - 6,
+      anchorEl: null,
+    });
+  };
+
+  const handleOpenMenuButton = (event, project) => {
+    event.stopPropagation();
+    setContextProject(project);
+    setContextMenu({
+      mouseX: null,
+      mouseY: null,
+      anchorEl: event.currentTarget,
     });
   };
 
@@ -292,11 +317,20 @@ export default function ProjectList({
                     pt: 2,
                     pb: 1,
                     textAlign: "center",
+                    position: "relative",
                   }}
                 >
                   <Typography variant="subtitle1" component="div" noWrap>
                     {project.name}
                   </Typography>
+                  <IconButton
+                    size="small"
+                    aria-label={`Project actions for ${project.name}`}
+                    onClick={(event) => handleOpenMenuButton(event, project)}
+                    sx={{ position: "absolute", top: 4, right: 4 }}
+                  >
+                    <MoreVertIcon fontSize="small" />
+                  </IconButton>
                 </Box>
                 <CardMedia
                   component="div"
@@ -405,7 +439,7 @@ export default function ProjectList({
                       size="small"
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleDeleteProject(project.id);
+                        openDeleteDialog(project);
                       }}
                       sx={{ color: "error.main" }}
                     >
@@ -464,9 +498,12 @@ export default function ProjectList({
       <Menu
         open={contextMenu !== null}
         onClose={handleCloseContextMenu}
-        anchorReference="anchorPosition"
+        anchorReference={contextMenu?.anchorEl ? "anchorEl" : "anchorPosition"}
+        anchorEl={contextMenu?.anchorEl}
         anchorPosition={
-          contextMenu !== null
+          contextMenu?.anchorEl
+            ? undefined
+            : contextMenu !== null
             ? { top: contextMenu.mouseY, left: contextMenu.mouseX }
             : undefined
         }
@@ -481,7 +518,7 @@ export default function ProjectList({
           onClick={() => {
             handleCloseContextMenu();
             if (contextProject) {
-              handleDeleteProject(contextProject.id);
+              openDeleteDialog(contextProject);
             }
           }}
           disabled={!contextProject}
@@ -520,6 +557,25 @@ export default function ProjectList({
           </Button>
           <Button onClick={handleRenameProject} variant="contained" disabled={renaming}>
             {renaming ? "Renaming..." : "Rename"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={deleteDialogOpen} onClose={closeDeleteDialog} maxWidth="xs" fullWidth>
+        <DialogTitle>Delete project?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            {deleteTarget
+              ? `Delete "${deleteTarget.name}"? This will also delete any associated images.`
+              : "Delete this project and its associated images?"}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeDeleteDialog} disabled={deleting}>
+            Cancel
+          </Button>
+          <Button onClick={handleDeleteProject} color="error" variant="contained" disabled={deleting}>
+            {deleting ? "Deleting..." : "Delete"}
           </Button>
         </DialogActions>
       </Dialog>

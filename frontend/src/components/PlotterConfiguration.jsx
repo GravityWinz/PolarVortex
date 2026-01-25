@@ -54,6 +54,9 @@ export default function PlotterConfiguration() {
   const [success, setSuccess] = useState(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingPlotter, setEditingPlotter] = useState(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     plotter_type: 'polargraph',
@@ -175,16 +178,32 @@ export default function PlotterConfiguration() {
     }
   };
 
-  const handleDelete = async (plotter) => {
-    if (window.confirm(`Are you sure you want to delete "${plotter.name}"?`)) {
-      try {
-        await deletePlotter(plotter.id);
-        setSuccess('Plotter deleted successfully');
-        notifyPlotterConfigUpdated();
-        loadPlotters();
-      } catch (err) {
-        setError(err.message);
-      }
+  const openDeleteDialog = (plotter) => {
+    if (!plotter) return;
+    setDeleteTarget(plotter);
+    setDeleteDialogOpen(true);
+  };
+
+  const closeDeleteDialog = () => {
+    if (deleting) return;
+    setDeleteDialogOpen(false);
+    setDeleteTarget(null);
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      setDeleting(true);
+      await deletePlotter(deleteTarget.id);
+      setSuccess('Plotter deleted successfully');
+      notifyPlotterConfigUpdated();
+      setDeleteDialogOpen(false);
+      setDeleteTarget(null);
+      loadPlotters();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -266,7 +285,7 @@ export default function PlotterConfiguration() {
                   </IconButton>
                   <IconButton
                     size="small"
-                    onClick={() => handleDelete(plotter)}
+                    onClick={() => openDeleteDialog(plotter)}
                     title="Delete"
                     disabled={plotter.is_default}
                   >
@@ -544,6 +563,25 @@ export default function PlotterConfiguration() {
           <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
           <Button onClick={handleSave} variant="contained">
             {editingPlotter ? 'Update' : 'Create'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={deleteDialogOpen} onClose={closeDeleteDialog} maxWidth="xs" fullWidth>
+        <DialogTitle>Delete plotter?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            {deleteTarget
+              ? `Delete "${deleteTarget.name}"?`
+              : "Delete this plotter?"}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeDeleteDialog} disabled={deleting}>
+            Cancel
+          </Button>
+          <Button onClick={handleDelete} color="error" variant="contained" disabled={deleting}>
+            {deleting ? "Deleting..." : "Delete"}
           </Button>
         </DialogActions>
       </Dialog>

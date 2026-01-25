@@ -10,6 +10,7 @@ import {
   RestartAlt as ResetZoomIcon,
   Article as SvgIcon,
   AutoGraph as VectorizeIcon,
+  MoreVert as MoreVertIcon,
 } from "@mui/icons-material";
 import {
   Alert,
@@ -281,6 +282,8 @@ export default function EditProject({ currentProject }) {
   const [renameValue, setRenameValue] = useState("");
   const [renameError, setRenameError] = useState("");
   const [renaming, setRenaming] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [thumbnailLoading, setThumbnailLoading] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
   const [projectDetails, setProjectDetails] = useState(null);
@@ -616,19 +619,29 @@ export default function EditProject({ currentProject }) {
     };
   }, [imageDragging, imageDragStart]);
 
-  const handleDeleteAsset = async (asset) => {
+  const openDeleteDialog = (asset) => {
     if (!currentProject || !asset) return;
-    const confirmed = window.confirm(
-      `Delete ${asset.displayName}? This cannot be undone.`
-    );
-    if (!confirmed) return;
+    setDeleteTarget(asset);
+    setDeleteDialogOpen(true);
+  };
+
+  const closeDeleteDialog = () => {
+    if (deletingFile) return;
+    setDeleteDialogOpen(false);
+    setDeleteTarget(null);
+  };
+
+  const handleDeleteAsset = async () => {
+    if (!currentProject || !deleteTarget) return;
     try {
-      setDeletingFile(asset.filename);
-      await deleteProjectFile(currentProject.id, asset.filename);
-      if (selectedAsset?.filename === asset.filename) {
+      setDeletingFile(deleteTarget.filename);
+      await deleteProjectFile(currentProject.id, deleteTarget.filename);
+      if (selectedAsset?.filename === deleteTarget.filename) {
         setSelectedAsset(null);
       }
       await loadAssets();
+      setDeleteDialogOpen(false);
+      setDeleteTarget(null);
     } catch (err) {
       setAssetError(err.message || "Failed to delete file");
     } finally {
@@ -643,6 +656,18 @@ export default function EditProject({ currentProject }) {
     setContextMenu({
       mouseX: event.clientX + 2,
       mouseY: event.clientY - 6,
+      anchorEl: null,
+    });
+  };
+
+  const handleOpenAssetMenuButton = (event, asset) => {
+    event.stopPropagation();
+    setSelectedAsset(asset);
+    setContextAsset(asset);
+    setContextMenu({
+      mouseX: null,
+      mouseY: null,
+      anchorEl: event.currentTarget,
     });
   };
 
@@ -1899,17 +1924,26 @@ export default function EditProject({ currentProject }) {
           <ListItem
             key={`${title}-${item.filename}`}
             disablePadding
-            secondaryAction={null}
+            secondaryAction={
+              <IconButton
+                edge="end"
+                size="small"
+                aria-label={`Asset actions for ${item.displayName}`}
+                onClick={(event) => handleOpenAssetMenuButton(event, item)}
+              >
+                <MoreVertIcon fontSize="small" />
+              </IconButton>
+            }
           >
             <ListItemButton
               selected={selectedAsset?.filename === item.filename}
               onClick={() => setSelectedAsset(item)}
               onContextMenu={(event) => handleOpenContextMenu(event, item)}
             >
-            <ListItemText
-              primary={item.displayName}
-              secondary={buildAssetSecondaryText(item)}
-            />
+              <ListItemText
+                primary={item.displayName}
+                secondary={buildAssetSecondaryText(item)}
+              />
             </ListItemButton>
           </ListItem>
         ))}
@@ -2448,9 +2482,12 @@ export default function EditProject({ currentProject }) {
       <Menu
         open={contextMenu !== null}
         onClose={handleCloseContextMenu}
-        anchorReference="anchorPosition"
+        anchorReference={contextMenu?.anchorEl ? "anchorEl" : "anchorPosition"}
+        anchorEl={contextMenu?.anchorEl}
         anchorPosition={
-          contextMenu !== null
+          contextMenu?.anchorEl
+            ? undefined
+            : contextMenu !== null
             ? { top: contextMenu.mouseY, left: contextMenu.mouseX }
             : undefined
         }
@@ -2506,7 +2543,7 @@ export default function EditProject({ currentProject }) {
         <MenuItem
           onClick={() => {
             handleCloseContextMenu();
-            handleDeleteAsset(contextAsset);
+            openDeleteDialog(contextAsset);
           }}
           disabled={!contextAsset}
         >
@@ -2544,6 +2581,30 @@ export default function EditProject({ currentProject }) {
           </Button>
           <Button variant="contained" onClick={handleRename} disabled={renaming}>
             {renaming ? "Renaming..." : "Rename"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={deleteDialogOpen} onClose={closeDeleteDialog} maxWidth="xs" fullWidth>
+        <DialogTitle>Delete file?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            {deleteTarget
+              ? `Delete "${deleteTarget.displayName}"? This cannot be undone.`
+              : "Delete this file? This cannot be undone."}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeDeleteDialog} disabled={Boolean(deletingFile)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleDeleteAsset}
+            color="error"
+            variant="contained"
+            disabled={Boolean(deletingFile)}
+          >
+            {deletingFile ? "Deleting..." : "Delete"}
           </Button>
         </DialogActions>
       </Dialog>

@@ -10,6 +10,7 @@ import {
   Stop,
 } from "@mui/icons-material";
 import {
+  Alert,
   Box,
   Button,
   Chip,
@@ -24,6 +25,7 @@ import {
   Pagination,
   Paper,
   Select,
+  Snackbar,
   Stack,
   TextField,
   Tooltip,
@@ -61,6 +63,11 @@ export default function ControlPanel({ currentProject }) {
   const [connectionStatus, setConnectionStatus] = useState(null);
   const [commandLog, setCommandLog] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [snackbar, setSnackbar] = useState({
+    open: false,
+    message: "",
+    severity: "info",
+  });
   const [commandInput, setCommandInput] = useState("");
   const [commandHistory, setCommandHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -120,6 +127,15 @@ export default function ControlPanel({ currentProject }) {
   const progressPollIntervalRef = useRef(null);
 
   const baudRates = [9600, 19200, 38400, 57600, 115200, 250000];
+
+  const showSnackbar = (message, severity = "info") => {
+    setSnackbar({ open: true, message, severity });
+  };
+
+  const handleSnackbarClose = (_, reason) => {
+    if (reason === "clickaway") return;
+    setSnackbar((prev) => ({ ...prev, open: false }));
+  };
 
   // Load available ports on mount
   useEffect(() => {
@@ -483,7 +499,7 @@ export default function ControlPanel({ currentProject }) {
 
   const handleConnect = async () => {
     if (!selectedPort) {
-      alert("Please select a port");
+      showSnackbar("Please select a port", "warning");
       return;
     }
     setLoading(true);
@@ -535,10 +551,13 @@ export default function ControlPanel({ currentProject }) {
 
         await loadCommandLog();
       } else {
-        alert(`Connection failed: ${result.error || "Unknown error"}`);
+        showSnackbar(
+          `Connection failed: ${result.error || "Unknown error"}`,
+          "error"
+        );
       }
     } catch (err) {
-      alert(`Connection error: ${err.message}`);
+      showSnackbar(`Connection error: ${err.message}`, "error");
     } finally {
       setLoading(false);
     }
@@ -552,10 +571,13 @@ export default function ControlPanel({ currentProject }) {
         setConnected(false);
         setConnectionStatus(null);
       } else {
-        alert(`Disconnect failed: ${result.error || "Unknown error"}`);
+        showSnackbar(
+          `Disconnect failed: ${result.error || "Unknown error"}`,
+          "error"
+        );
       }
     } catch (err) {
-      alert(`Disconnect error: ${err.message}`);
+      showSnackbar(`Disconnect error: ${err.message}`, "error");
     } finally {
       setLoading(false);
     }
@@ -572,7 +594,7 @@ export default function ControlPanel({ currentProject }) {
 
   const sendCommand = async (gcode) => {
     if (!connected) {
-      alert("Please connect to plotter first");
+      showSnackbar("Please connect to plotter first", "warning");
       return;
     }
     try {
@@ -605,7 +627,7 @@ export default function ControlPanel({ currentProject }) {
         }
       }
     } catch (err) {
-      alert(`Command error: ${err.message}`);
+      showSnackbar(`Command error: ${err.message}`, "error");
     }
   };
 
@@ -626,15 +648,15 @@ export default function ControlPanel({ currentProject }) {
 
   const handleRunProjectGcode = async () => {
     if (!selectedPrintProject) {
-      alert("Select a project to print G-code from");
+      showSnackbar("Select a project to print G-code from", "warning");
       return;
     }
     if (!selectedPrintGcode) {
-      alert("Select a G-code file to print");
+      showSnackbar("Select a G-code file to print", "warning");
       return;
     }
     if (!connected) {
-      alert("Please connect to plotter first");
+      showSnackbar("Please connect to plotter first", "warning");
       return;
     }
     try {
@@ -672,10 +694,13 @@ export default function ControlPanel({ currentProject }) {
           status: null,
         });
         localStorage.removeItem("pv_gcode_progress");
-        alert("G-code job started but no job ID was returned. Unable to track progress.");
+        showSnackbar(
+          "G-code job started but no job ID was returned. Unable to track progress.",
+          "warning"
+        );
       }
     } catch (err) {
-      alert(`G-code run error: ${err.message}`);
+      showSnackbar(`G-code run error: ${err.message}`, "error");
       setGcodeRunning(false);
       setGcodeProgress({
         jobId: null,
@@ -745,7 +770,7 @@ export default function ControlPanel({ currentProject }) {
       setGcodePaused(res.paused);
       // Progress polling will continue and update status automatically
     } catch (err) {
-      alert(`Pause error: ${err.message}`);
+      showSnackbar(`Pause error: ${err.message}`, "error");
     }
   };
 
@@ -811,14 +836,14 @@ export default function ControlPanel({ currentProject }) {
 
   const handleMove = async (x, y) => {
     if (!connected) {
-      alert("Please connect to plotter first");
+      showSnackbar("Please connect to plotter first", "warning");
       return;
     }
     try {
       // Use current motion mode - don't switch modes, just move
       await sendGcodeCommand(`G0 X${x} Y${y}`);
     } catch (err) {
-      alert(`Movement error: ${err.message}`);
+      showSnackbar(`Movement error: ${err.message}`, "error");
     }
   };
 
@@ -837,7 +862,7 @@ export default function ControlPanel({ currentProject }) {
 
   const handleStop = () => {
     stopPlotter().catch((err) => {
-      alert(`Stop error: ${err.message}`);
+      showSnackbar(`Stop error: ${err.message}`, "error");
     });
   };
 
@@ -1047,7 +1072,7 @@ export default function ControlPanel({ currentProject }) {
                             });
                             localStorage.removeItem("pv_gcode_progress");
                             stopPlotter().catch((err) =>
-                              alert(`Stop error: ${err.message}`)
+                              showSnackbar(`Stop error: ${err.message}`, "error")
                             );
                           }}
                           sx={{ fontWeight: "bold", textTransform: "none" }}
@@ -1740,6 +1765,20 @@ export default function ControlPanel({ currentProject }) {
           </Paper>
         </Grid>
       </Grid>
+
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={5000}
+        onClose={handleSnackbarClose}
+      >
+        <Alert
+          onClose={handleSnackbarClose}
+          severity={snackbar.severity}
+          sx={{ width: "100%" }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }
