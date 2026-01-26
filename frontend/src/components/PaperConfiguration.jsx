@@ -9,6 +9,7 @@ import {
     Alert,
     Box,
     Button,
+    Checkbox,
     Chip,
     CircularProgress,
     Dialog,
@@ -16,6 +17,8 @@ import {
     DialogContent,
     DialogTitle,
     FormControl,
+    FormControlLabel,
+    FormHelperText,
     Grid,
     IconButton,
     InputLabel,
@@ -379,14 +382,18 @@ export default function PaperConfiguration() {
             </Grid>
             <Grid item xs={12}>
               <FormControl>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={formData.is_default}
-                    onChange={(e) => setFormData(prev => ({ ...prev, is_default: e.target.checked }))}
-                  />
-                  Set as default paper
-                </label>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={formData.is_default}
+                      onChange={(e) => setFormData(prev => ({ ...prev, is_default: e.target.checked }))}
+                    />
+                  }
+                  label="Set as default paper"
+                />
+                <FormHelperText>
+                  Used as the default selection for new projects.
+                </FormHelperText>
               </FormControl>
             </Grid>
           </Grid>
