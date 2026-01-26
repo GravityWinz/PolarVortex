@@ -1972,37 +1972,43 @@ export default function EditProject({ currentProject }) {
             </Typography>
           )}
         </Box>
-        <Stack direction="row" spacing={1}>
-          <input
-            type="file"
-            hidden
-            ref={fileInputRef}
-            onChange={handleFileInputChange}
-          />
-          <Button
-            variant="contained"
-            onClick={triggerFilePicker}
-            disabled={!currentProject || uploading}
-          >
-            {uploading ? "Uploading…" : "Upload"}
-          </Button>
-          <Button
-            variant="outlined"
-            startIcon={<RefreshIcon />}
-            onClick={loadAssets}
-            disabled={loadingAssets || !currentProject}
-          >
-            Refresh
-          </Button>
-          <Button
-            variant="outlined"
-            startIcon={<GenerateSvgIcon />}
-            onClick={openGenerateSvgDialog}
-            disabled={!currentProject}
-          >
-            Generate SVG
-          </Button>
-        </Stack>
+        <Box>
+          <Stack direction="row" spacing={1}>
+            <input
+              type="file"
+              hidden
+              ref={fileInputRef}
+              onChange={handleFileInputChange}
+              accept="image/*,.svg,.gcode,.nc,.txt"
+            />
+            <Button
+              variant="contained"
+              onClick={triggerFilePicker}
+              disabled={!currentProject || uploading}
+            >
+              {uploading ? "Uploading…" : "Upload"}
+            </Button>
+            <Button
+              variant="outlined"
+              startIcon={<RefreshIcon />}
+              onClick={loadAssets}
+              disabled={loadingAssets || !currentProject}
+            >
+              Refresh
+            </Button>
+            <Button
+              variant="outlined"
+              startIcon={<GenerateSvgIcon />}
+              onClick={openGenerateSvgDialog}
+              disabled={!currentProject}
+            >
+              Generate SVG
+            </Button>
+          </Stack>
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
+            Supported formats: images, SVG, or G-code (.gcode, .nc, .txt).
+          </Typography>
+        </Box>
       </Stack>
 
       <Grid container spacing={3}>
