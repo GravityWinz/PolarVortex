@@ -39,10 +39,8 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./backend/local_storage:/app/local_storage:rw
-      - ./backend/uploads:/app/uploads:rw
-      - ./backend/processed_images:/app/processed_images:rw
-      - ./backend/logs:/app/logs:rw
+      - ./local_storage:/app/local_storage:rw
+      - ./logs:/app/logs:rw
     environment:
       - PYTHONPATH=/app
       - BACKEND_HOST=0.0.0.0
@@ -56,6 +54,10 @@ services:
       - .env.production
     devices:
       - /dev/ttyACM0:/dev/ttyACM0
+      - /dev/ttyACM1:/dev/ttyACM1
+      - /dev/ttyACM2:/dev/ttyACM2
+      - /dev/ttyACM3:/dev/ttyACM3
+      - /dev/ttyACM4:/dev/ttyACM4
       - /dev/serial/by-id/usb-marlinfw.org_Marlin_USB_Device_18FF601AAE299828528F78F9F5001E87-if00:/dev/serial/by-id/usb-marlinfw.org_Marlin_USB_Device_18FF601AAE299828528F78F9F5001E87-if00
     privileged: true
     group_add:
