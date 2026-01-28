@@ -24,6 +24,7 @@ import {
     Select,
     Slider,
     Switch,
+    TextField,
     Tooltip,
     Typography,
 } from "@mui/material";
@@ -454,17 +455,18 @@ const VectorizeDialog = ({ open, onClose, project }) => {
                               </Tooltip>
                             )}
                           </Box>
-                          <input
-                            type="text"
+                          <TextField
+                            label={displayName}
                             value={currentValue}
                             onChange={(e) => handleSettingChange(key, e.target.value)}
                             disabled={isVectorizing}
-                            style={{
-                              width: '100%',
-                              padding: '8px',
-                              border: '1px solid #ccc',
-                              borderRadius: '4px'
-                            }}
+                            fullWidth
+                            size="small"
+                            helperText={
+                              paramDoc
+                                ? `${paramDoc.description}${paramDoc.purpose ? ` — ${paramDoc.purpose}` : ""}`
+                                : undefined
+                            }
                           />
                         </Box>
                       );

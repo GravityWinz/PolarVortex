@@ -9,6 +9,7 @@ import {
     Alert,
     Box,
     Button,
+    Checkbox,
     Chip,
     CircularProgress,
     Dialog,
@@ -17,6 +18,8 @@ import {
     DialogTitle,
     Divider,
     FormControl,
+    FormControlLabel,
+    FormHelperText,
     Grid,
     IconButton,
     InputLabel,
@@ -547,14 +550,18 @@ export default function PlotterConfiguration() {
 
             <Grid item xs={12}>
               <FormControl>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={formData.is_default}
-                    onChange={(e) => setFormData(prev => ({ ...prev, is_default: e.target.checked }))}
-                  />
-                  Set as default plotter
-                </label>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={formData.is_default}
+                      onChange={(e) => setFormData(prev => ({ ...prev, is_default: e.target.checked }))}
+                    />
+                  }
+                  label="Set as default plotter"
+                />
+                <FormHelperText>
+                  Used as the default selection for new projects.
+                </FormHelperText>
               </FormControl>
             </Grid>
           </Grid>
