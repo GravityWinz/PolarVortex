@@ -107,9 +107,14 @@ def install_dependencies():
                     "Pillow==10.1.0",
                     "opencv-python-headless==4.8.1.78",
                     "numpy==1.24.3",
-                    "python-dotenv==1.0.0",
-                    "websockets==12.0",
-                    "aiofiles==23.2.1"
+                    "scipy>=1.11.0",
+                    "scikit-image>=0.22.0",
+                    "PyYAML==6.0.1",
+                    "vpype==1.15.0",
+                    "vpype-gcode>=0.10.0",
+                    "vpype-occult>=0.4.0",
+                    "svgpathtools==1.6.1",
+                    "cairosvg>=2.7.0"
                 ]
                 
                 for package in packages:

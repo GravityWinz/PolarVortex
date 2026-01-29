@@ -57,9 +57,14 @@ Some Python packages require C++ compilers on Windows, which can cause installat
    pip install Pillow==10.1.0
    pip install opencv-python-headless==4.8.1.78
    pip install numpy==1.24.3
-   pip install python-dotenv==1.0.0
-   pip install websockets==12.0
-   pip install aiofiles==23.2.1
+   pip install scipy>=1.11.0
+   pip install scikit-image>=0.22.0
+   pip install PyYAML==6.0.1
+   pip install vpype==1.15.0
+   pip install vpype-gcode>=0.10.0
+   pip install vpype-occult>=0.4.0
+   pip install svgpathtools==1.6.1
+   pip install cairosvg>=2.7.0
    ```
 
 6. **Create directories:**
