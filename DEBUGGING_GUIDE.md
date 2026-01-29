@@ -223,6 +223,28 @@ If you need to debug from a different machine:
 2. **Ensure firewall allows** debug ports (5678, 9229)
 3. **Use SSH tunneling** if needed
 
+### Cursor Remote (SSH) install timeout
+If Cursor reports "Failed to install server within the timeout", try:
+
+1. **Increase the install timeout** in Cursor settings:
+   ```json
+   {
+     "remote.SSH.serverInstallTimeout": 120
+   }
+   ```
+   Use a larger value on slower ARM boards (e.g., 300 seconds).
+2. **Check the remote log file** for a more specific error:
+   ```bash
+   ls /run/user/<uid>/cursor-remote-code.log.*
+   ```
+3. **Verify disk space and permissions** on the remote host:
+   - Ensure `~/.cursor-server` is writable
+   - Confirm there is enough free space in the home directory
+4. **Clear partial installs** if needed:
+   ```bash
+   rm -rf ~/.cursor-server/bin
+   ```
+
 ### Production Debugging
 For debugging production issues:
 
