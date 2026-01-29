@@ -109,6 +109,7 @@ def install_dependencies():
                     "numpy==1.24.3",
                     "scipy>=1.11.0",
                     "scikit-image>=0.22.0",
+                    "httpx==0.27.2",
                     "PyYAML==6.0.1",
                     "vpype==1.15.0",
                     "vpype-gcode>=0.10.0",
