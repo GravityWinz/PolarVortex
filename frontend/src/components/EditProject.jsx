@@ -11,6 +11,7 @@ import {
   Article as SvgIcon,
   AutoGraph as VectorizeIcon,
   MoreVert as MoreVertIcon,
+  Terrain as TerrainIcon,
 } from "@mui/icons-material";
 import {
   Alert,
@@ -62,6 +63,7 @@ import {
   uploadImageToProject,
 } from "../services/apiService";
 import GenerateSvgDialog from "./GenerateSvgDialog";
+import TerrainSvgDialog from "./TerrainSvgDialog";
 import VectorizeDialog from "./VectorizeDialog";
 
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "bmp", "webp"];
@@ -334,6 +336,7 @@ export default function EditProject({ currentProject }) {
   const [vectorizeDialogOpen, setVectorizeDialogOpen] = useState(false);
   const [vectorizeProject, setVectorizeProject] = useState(null);
   const [generateSvgDialogOpen, setGenerateSvgDialogOpen] = useState(false);
+  const [terrainSvgDialogOpen, setTerrainSvgDialogOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);
   const [gcodeZoom, setGcodeZoom] = useState(1);
@@ -1247,6 +1250,18 @@ export default function EditProject({ currentProject }) {
     }
   };
 
+  const openTerrainSvgDialog = () => {
+    if (!currentProject) return;
+    setTerrainSvgDialogOpen(true);
+  };
+
+  const handleCloseTerrainSvgDialog = () => {
+    setTerrainSvgDialogOpen(false);
+    if (currentProject) {
+      loadAssets();
+    }
+  };
+
   const renderGcodePlot = () => {
     const printableSegments = (gcodeGeometry.segments || []).filter(
       (seg) => seg.penDown
@@ -2004,6 +2019,14 @@ export default function EditProject({ currentProject }) {
             >
               Generate SVG
             </Button>
+            <Button
+              variant="outlined"
+              startIcon={<TerrainIcon />}
+              onClick={openTerrainSvgDialog}
+              disabled={!currentProject}
+            >
+              Terrain SVG
+            </Button>
           </Stack>
           <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
             Supported formats: images, SVG, or G-code (.gcode, .nc, .txt).
@@ -2624,6 +2647,12 @@ export default function EditProject({ currentProject }) {
       <GenerateSvgDialog
         open={generateSvgDialogOpen}
         onClose={handleCloseGenerateSvgDialog}
+        project={currentProject}
+      />
+
+      <TerrainSvgDialog
+        open={terrainSvgDialogOpen}
+        onClose={handleCloseTerrainSvgDialog}
         project={currentProject}
       />
     </Box>

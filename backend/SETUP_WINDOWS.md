@@ -59,6 +59,7 @@ Some Python packages require C++ compilers on Windows, which can cause installat
    pip install numpy==1.24.3
    pip install scipy>=1.11.0
    pip install scikit-image>=0.22.0
+   pip install httpx==0.27.2
    pip install PyYAML==6.0.1
    pip install vpype==1.15.0
    pip install vpype-gcode>=0.10.0
