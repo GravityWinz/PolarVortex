@@ -25,7 +25,6 @@ pre-commit==3.6.0
 ipython==8.18.1
 ipdb==0.13.13
 rich==13.7.0
-python-dotenv==1.0.0
 
 # Documentation
 mkdocs==1.5.3

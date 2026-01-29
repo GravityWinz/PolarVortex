@@ -8,12 +8,8 @@ opencv-python-headless==4.8.1.78
 numpy>=1.26,<2.0
 scipy>=1.11.0
 scikit-image>=0.22.0
-python-dotenv==1.0.0
-websockets==12.0
-aiofiles==23.2.1
-debugpy==1.8.0
 PyYAML==6.0.1
-vpype[all]==1.15.0
+vpype==1.15.0
 # Adds gcode export command for vpype
 vpype-gcode>=0.10.0
 # Adds hidden line removal (occult) command for vpype
