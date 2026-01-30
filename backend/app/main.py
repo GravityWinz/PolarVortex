@@ -1999,7 +1999,7 @@ async def generate_terrain_ridgeline(request: TerrainRidgelineRequest):
         )
     except Exception as e:
         logger.error(f"Terrain ridgeline error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to generate terrain SVG")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/projects/{project_id}/generate-svg")
 async def generate_project_svg(

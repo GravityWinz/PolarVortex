@@ -62,11 +62,16 @@ const getFilenameError = (value) => {
 };
 
 const TerrainSvgDialog = ({ open, onClose, project }) => {
+  console.info("[TerrainSvgDialog] render");
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
   const draggingRef = useRef(false);
   const dragStartRef = useRef(null);
   const selectingRef = useRef(false);
+
+  const tokenSnapshot = import.meta.env.VITE_MAPBOX_TOKEN || "";
+  const webglSnapshot =
+    typeof window !== "undefined" && !!window.WebGLRenderingContext;
 
   const [paperOptions, setPaperOptions] = useState([]);
   const [paperError, setPaperError] = useState("");
@@ -119,58 +124,120 @@ const TerrainSvgDialog = ({ open, onClose, project }) => {
   }, [selecting]);
 
   useEffect(() => {
-    if (!open || !mapContainerRef.current) return;
+    if (!open) return;
+    let cancelled = false;
+    let map;
+    let attempts = 0;
     const token = import.meta.env.VITE_MAPBOX_TOKEN;
     if (!token) {
       setError("VITE_MAPBOX_TOKEN is not configured.");
-      return;
+      console.warn("[TerrainSvgDialog] Missing VITE_MAPBOX_TOKEN");
+      return undefined;
+    }
+    console.info(
+      "[TerrainSvgDialog] Using VITE_MAPBOX_TOKEN (len)",
+      token.length
+    );
+    if (!mapboxgl.supported()) {
+      setError("Mapbox GL is not supported in this browser (WebGL required).");
+      console.warn("[TerrainSvgDialog] mapboxgl.supported() returned false");
+      return undefined;
     }
     mapboxgl.accessToken = token;
-    const map = new mapboxgl.Map({
-      container: mapContainerRef.current,
-      style: "mapbox://styles/mapbox/light-v11",
-      center: [DEFAULT_CENTER.lon, DEFAULT_CENTER.lat],
-      zoom: 9,
-    });
-    mapRef.current = map;
 
-    const ensureLayer = () => {
-      if (!map.getSource("bbox")) {
-        map.addSource("bbox", {
-          type: "geojson",
-          data: bboxToGeoJson(bbox) || { type: "FeatureCollection", features: [] },
-        });
-        map.addLayer({
-          id: "bbox-fill",
-          type: "fill",
-          source: "bbox",
-          paint: {
-            "fill-color": "#1976d2",
-            "fill-opacity": 0.15,
-          },
-        });
-        map.addLayer({
-          id: "bbox-outline",
-          type: "line",
-          source: "bbox",
-          paint: {
-            "line-color": "#1976d2",
-            "line-width": 2,
-          },
-        });
+    const tryInitMap = () => {
+      if (cancelled || mapRef.current) return;
+      attempts += 1;
+      const container = mapContainerRef.current;
+      console.info(
+        "[TerrainSvgDialog] init attempt",
+        attempts,
+        "container",
+        Boolean(container)
+      );
+      if (!container) {
+        if (attempts < 6) {
+          window.setTimeout(tryInitMap, 200);
+        } else {
+          setError("Map container not ready.");
+        }
+        return;
       }
+      try {
+        map = new mapboxgl.Map({
+          container,
+          style: "mapbox://styles/mapbox/light-v11",
+          center: [DEFAULT_CENTER.lon, DEFAULT_CENTER.lat],
+          zoom: 9,
+        });
+        mapRef.current = map;
+        console.info("[TerrainSvgDialog] Mapbox map instantiated");
+        attachMapHandlers();
+      } catch (err) {
+        setError(err?.message || "Failed to initialize Mapbox map.");
+        console.error("[TerrainSvgDialog] Mapbox init failed", err);
+        return;
+      }
+
+      const ensureLayer = () => {
+        if (!map.getSource("bbox")) {
+          map.addSource("bbox", {
+            type: "geojson",
+            data: bboxToGeoJson(bbox) || { type: "FeatureCollection", features: [] },
+          });
+          map.addLayer({
+            id: "bbox-fill",
+            type: "fill",
+            source: "bbox",
+            paint: {
+              "fill-color": "#1976d2",
+              "fill-opacity": 0.15,
+            },
+          });
+          map.addLayer({
+            id: "bbox-outline",
+            type: "line",
+            source: "bbox",
+            paint: {
+              "line-color": "#1976d2",
+              "line-width": 2,
+            },
+          });
+        }
+      };
+
+      map.on("error", (event) => {
+        const message = event?.error?.message || "Mapbox error while loading the map.";
+        setError(message);
+        console.error("[TerrainSvgDialog] Mapbox error event", event);
+      });
+
+      map.on("load", () => {
+        ensureLayer();
+        map.resize();
+        console.info("[TerrainSvgDialog] Mapbox map loaded");
+      });
+
+      map.on("idle", () => {
+        const canvas = map.getCanvas();
+        console.info(
+          "[TerrainSvgDialog] Mapbox canvas size",
+          canvas?.width,
+          canvas?.height
+        );
+      });
     };
 
-    map.on("load", ensureLayer);
-
-    const handleMouseDown = (e) => {
+    function handleMouseDown(e) {
+      if (!map) return;
       if (!selectingRef.current) return;
       draggingRef.current = true;
       dragStartRef.current = e.lngLat;
-      map.dragPan.disable();
-    };
+      // dragPan managed by selecting effect
+    }
 
-    const handleMouseMove = (e) => {
+    function handleMouseMove(e) {
+      if (!map) return;
       if (!draggingRef.current || !dragStartRef.current) return;
       const start = dragStartRef.current;
       const current = e.lngLat;
@@ -185,28 +252,64 @@ const TerrainSvgDialog = ({ open, onClose, project }) => {
       if (source) {
         source.setData(bboxToGeoJson(nextBbox));
       }
-    };
+    }
 
-    const handleMouseUp = () => {
+    function handleMouseUp() {
+      if (!map) return;
       if (!draggingRef.current) return;
       draggingRef.current = false;
       dragStartRef.current = null;
-      map.dragPan.enable();
+      // dragPan managed by selecting effect
       setSelecting(false);
-    };
+    }
 
-    map.on("mousedown", handleMouseDown);
-    map.on("mousemove", handleMouseMove);
-    map.on("mouseup", handleMouseUp);
+    function attachMapHandlers() {
+      if (!map) return;
+      map.on("mousedown", handleMouseDown);
+      map.on("mousemove", handleMouseMove);
+      map.on("mouseup", handleMouseUp);
+    }
 
-    return () => {
+    function detachMapHandlers() {
+      if (!map) return;
       map.off("mousedown", handleMouseDown);
       map.off("mousemove", handleMouseMove);
       map.off("mouseup", handleMouseUp);
-      map.remove();
+    }
+
+    tryInitMap();
+
+    return () => {
+      cancelled = true;
+      if (map) {
+        detachMapHandlers();
+        map.remove();
+      }
       mapRef.current = null;
     };
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const map = mapRef.current;
+    if (!map) return;
+    const resize = () => map.resize();
+    const timeoutId = window.setTimeout(resize, 150);
+    window.requestAnimationFrame(resize);
+    return () => window.clearTimeout(timeoutId);
+  }, [open]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (selecting) {
+      map.getCanvas().style.cursor = "crosshair";
+      map.dragPan.disable();
+    } else {
+      map.getCanvas().style.cursor = "";
+      map.dragPan.enable();
+    }
+  }, [selecting]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -236,8 +339,9 @@ const TerrainSvgDialog = ({ open, onClose, project }) => {
       if (!filename) {
         setFilename(`terrain_${new Date().toISOString().slice(0, 10)}`);
       }
-    } catch (err) {
+  } catch (err) {
       setError(err.message || "Failed to generate terrain SVG");
+      console.error("[TerrainSvgDialog] generate failed", err);
     } finally {
       setIsGenerating(false);
     }
@@ -296,6 +400,10 @@ const TerrainSvgDialog = ({ open, onClose, project }) => {
               sx={{ height: "100%", width: "100%" }}
             />
           </Box>
+          <Typography variant="caption" color="text.secondary">
+            Debug: token {tokenSnapshot ? "present" : "missing"} (len {tokenSnapshot.length}),
+            WebGL {webglSnapshot ? "ok" : "unavailable"}
+          </Typography>
           <Stack direction="row" spacing={2} alignItems="center">
             <Button
               variant={selecting ? "contained" : "outlined"}
