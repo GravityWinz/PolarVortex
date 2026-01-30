@@ -1,5 +1,8 @@
-import { Close as CloseIcon, Save as SaveIcon } from "@mui/icons-material";
+import { Close as CloseIcon, ExpandMore as ExpandMoreIcon, Save as SaveIcon } from "@mui/icons-material";
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Alert,
   Box,
   Button,
@@ -32,6 +35,39 @@ const DEFAULT_SETTINGS = {
   strokeWidth: 0.35,
 };
 
+const PARAMETER_DOCS = [
+  {
+    key: "rows",
+    title: "Rows",
+    description: "Number of ridgeline rows (more rows = denser terrain).",
+    range: "20–200",
+  },
+  {
+    key: "cols",
+    title: "Columns",
+    description: "Samples per row (more columns = smoother lines).",
+    range: "50–500",
+  },
+  {
+    key: "rowSpacing",
+    title: "Row Spacing (mm)",
+    description: "Vertical separation between rows in mm.",
+    range: "0.5–6.0",
+  },
+  {
+    key: "heightScale",
+    title: "Height Scale (mm/m)",
+    description: "How much elevation affects height (mm per meter).",
+    range: "0.005–0.1",
+  },
+  {
+    key: "strokeWidth",
+    title: "Stroke Width (mm)",
+    description: "Line thickness in mm.",
+    range: "0.1–2.0",
+  },
+];
+
 const bboxToGeoJson = (bbox) => {
   if (!bbox) return null;
   const { minLon, minLat, maxLon, maxLat } = bbox;
@@ -62,16 +98,12 @@ const getFilenameError = (value) => {
 };
 
 const TerrainSvgDialog = ({ open, onClose, project }) => {
-  console.info("[TerrainSvgDialog] render");
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
   const draggingRef = useRef(false);
   const dragStartRef = useRef(null);
   const selectingRef = useRef(false);
 
-  const tokenSnapshot = import.meta.env.VITE_MAPBOX_TOKEN || "";
-  const webglSnapshot =
-    typeof window !== "undefined" && !!window.WebGLRenderingContext;
 
   const [paperOptions, setPaperOptions] = useState([]);
   const [paperError, setPaperError] = useState("");
@@ -130,17 +162,15 @@ const TerrainSvgDialog = ({ open, onClose, project }) => {
     let attempts = 0;
     const token = import.meta.env.VITE_MAPBOX_TOKEN;
     if (!token) {
-      setError("VITE_MAPBOX_TOKEN is not configured.");
-      console.warn("[TerrainSvgDialog] Missing VITE_MAPBOX_TOKEN");
+      setError(
+        "Mapbox token is missing. Add VITE_MAPBOX_TOKEN and restart the frontend."
+      );
       return undefined;
     }
-    console.info(
-      "[TerrainSvgDialog] Using VITE_MAPBOX_TOKEN (len)",
-      token.length
-    );
     if (!mapboxgl.supported()) {
-      setError("Mapbox GL is not supported in this browser (WebGL required).");
-      console.warn("[TerrainSvgDialog] mapboxgl.supported() returned false");
+      setError(
+        "Mapbox GL is not supported in this browser. Enable WebGL and reload."
+      );
       return undefined;
     }
     mapboxgl.accessToken = token;
@@ -149,12 +179,6 @@ const TerrainSvgDialog = ({ open, onClose, project }) => {
       if (cancelled || mapRef.current) return;
       attempts += 1;
       const container = mapContainerRef.current;
-      console.info(
-        "[TerrainSvgDialog] init attempt",
-        attempts,
-        "container",
-        Boolean(container)
-      );
       if (!container) {
         if (attempts < 6) {
           window.setTimeout(tryInitMap, 200);
@@ -171,11 +195,9 @@ const TerrainSvgDialog = ({ open, onClose, project }) => {
           zoom: 9,
         });
         mapRef.current = map;
-        console.info("[TerrainSvgDialog] Mapbox map instantiated");
         attachMapHandlers();
       } catch (err) {
-        setError(err?.message || "Failed to initialize Mapbox map.");
-        console.error("[TerrainSvgDialog] Mapbox init failed", err);
+        setError(err?.message || "Map failed to initialize. Reload the page.");
         return;
       }
 
@@ -207,24 +229,15 @@ const TerrainSvgDialog = ({ open, onClose, project }) => {
       };
 
       map.on("error", (event) => {
-        const message = event?.error?.message || "Mapbox error while loading the map.";
+        const message =
+          event?.error?.message ||
+          "Mapbox error while loading the map. Check your token and network.";
         setError(message);
-        console.error("[TerrainSvgDialog] Mapbox error event", event);
       });
 
       map.on("load", () => {
         ensureLayer();
         map.resize();
-        console.info("[TerrainSvgDialog] Mapbox map loaded");
-      });
-
-      map.on("idle", () => {
-        const canvas = map.getCanvas();
-        console.info(
-          "[TerrainSvgDialog] Mapbox canvas size",
-          canvas?.width,
-          canvas?.height
-        );
       });
     };
 
@@ -320,7 +333,7 @@ const TerrainSvgDialog = ({ open, onClose, project }) => {
   const handleGenerate = async () => {
     if (!project) return;
     if (!bbox) {
-      setError("Please draw a bounding box on the map.");
+      setError("Draw a bounding box on the map first.");
       return;
     }
     setIsGenerating(true);
@@ -341,7 +354,6 @@ const TerrainSvgDialog = ({ open, onClose, project }) => {
       }
   } catch (err) {
       setError(err.message || "Failed to generate terrain SVG");
-      console.error("[TerrainSvgDialog] generate failed", err);
     } finally {
       setIsGenerating(false);
     }
@@ -400,10 +412,6 @@ const TerrainSvgDialog = ({ open, onClose, project }) => {
               sx={{ height: "100%", width: "100%" }}
             />
           </Box>
-          <Typography variant="caption" color="text.secondary">
-            Debug: token {tokenSnapshot ? "present" : "missing"} (len {tokenSnapshot.length}),
-            WebGL {webglSnapshot ? "ok" : "unavailable"}
-          </Typography>
           <Stack direction="row" spacing={2} alignItems="center">
             <Button
               variant={selecting ? "contained" : "outlined"}
@@ -442,6 +450,29 @@ const TerrainSvgDialog = ({ open, onClose, project }) => {
               </Typography>
             )}
           </FormControl>
+
+          <Accordion>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography variant="subtitle2">Parameter Documentation</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <Stack spacing={2}>
+                {PARAMETER_DOCS.map((param) => (
+                  <Box key={param.key}>
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      {param.title}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {param.description}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Range: {param.range}
+                    </Typography>
+                  </Box>
+                ))}
+              </Stack>
+            </AccordionDetails>
+          </Accordion>
 
           <Stack spacing={2}>
             <Box>

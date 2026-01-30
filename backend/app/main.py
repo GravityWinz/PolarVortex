@@ -1998,8 +1998,17 @@ async def generate_terrain_ridgeline(request: TerrainRidgelineRequest):
             paper_name=paper.name,
         )
     except Exception as e:
-        logger.error(f"Terrain ridgeline error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Terrain ridgeline error", exc_info=True)
+        message = str(e)
+        if "MAPBOX_TOKEN" in message:
+            detail = "Mapbox token is not configured on the server."
+        elif "Bounding box too large" in message:
+            detail = "Selected area is too large. Zoom in or use a smaller box."
+        elif "No paper configurations" in message:
+            detail = "No paper configurations found. Add a paper in Configuration → Papers."
+        else:
+            detail = "Failed to generate terrain SVG. Please try again."
+        raise HTTPException(status_code=500, detail=detail)
 
 @app.post("/projects/{project_id}/generate-svg")
 async def generate_project_svg(
