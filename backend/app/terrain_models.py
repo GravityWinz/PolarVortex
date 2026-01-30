@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, root_validator
+from pydantic import BaseModel, Field, model_validator
 from typing import Optional
 
 
@@ -8,15 +8,12 @@ class TerrainBbox(BaseModel):
     maxLat: float = Field(..., description="Maximum latitude")
     maxLon: float = Field(..., description="Maximum longitude")
 
-    @root_validator
-    def validate_bounds(cls, values):
-        min_lat = values.get("minLat")
-        max_lat = values.get("maxLat")
-        min_lon = values.get("minLon")
-        max_lon = values.get("maxLon")
-
-        if min_lat is None or max_lat is None or min_lon is None or max_lon is None:
-            return values
+    @model_validator(mode="after")
+    def validate_bounds(self):
+        min_lat = self.minLat
+        max_lat = self.maxLat
+        min_lon = self.minLon
+        max_lon = self.maxLon
 
         if min_lat >= max_lat:
             raise ValueError("minLat must be less than maxLat")
@@ -28,7 +25,7 @@ class TerrainBbox(BaseModel):
         if not (-180 <= min_lon <= 180) or not (-180 <= max_lon <= 180):
             raise ValueError("Longitude must be between -180 and 180")
 
-        return values
+        return self
 
 
 class TerrainRidgelineRequest(BaseModel):
