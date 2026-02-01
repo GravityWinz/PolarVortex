@@ -186,19 +186,13 @@ class ConfigurationService:
             {
                 "id": str(uuid.uuid4()),
                 "name": "Default Polargraph",
-                "plotter_type": "polargraph",
                 "width": 1000.0,
                 "height": 1000.0,
                 "mm_per_rev": 95.0,
                 "steps_per_rev": 200.0,
                 "max_speed": 100.0,
-            "acceleration": 50.0,
-            "pen_up_position": 10.0,
-            "pen_down_position": 0.0,
-            "pen_speed": 20.0,
-            "gcode_sequences": self._get_default_gcode_sequences(),
-                "home_position_x": 0.0,
-                "home_position_y": 0.0,
+                "pen_speed": 2000.0,
+                "gcode_sequences": self._get_default_gcode_sequences(),
                 "is_default": True,
                 "created_at": datetime.now().isoformat(),
                 "updated_at": datetime.now().isoformat()
@@ -368,18 +362,8 @@ class ConfigurationService:
             ],
             "pen_up_command": "M280 P0 S110",
             "pen_down_command": "M280 P0 S130",
-            "draw_speed": 2000.0,
             "servo_delay_ms": 100.0,
         }
-
-    @staticmethod
-    def _normalize_draw_speed(value: Optional[float]) -> float:
-        """Clamp draw speed to a safe range (mm/min)."""
-        try:
-            speed = float(value)
-        except (TypeError, ValueError):
-            return 2000.0
-        return min(max(speed, 500.0), 8000.0)
     
     def _validate_and_repair_config(self):
         """Validate and repair configuration to ensure all required fields exist"""
@@ -426,8 +410,8 @@ class ConfigurationService:
         # Ensure all plotters have required fields
         for plotter in self.config_data.get('plotters', []):
             required_fields = [
-                'id', 'name', 'plotter_type', 'width', 'height',
-                'mm_per_rev', 'steps_per_rev', 'gcode_sequences'
+                'id', 'name', 'width', 'height',
+                'mm_per_rev', 'steps_per_rev', 'pen_speed', 'gcode_sequences'
             ]
             for field in required_fields:
                 if field not in plotter:
@@ -435,20 +419,20 @@ class ConfigurationService:
                         plotter[field] = str(uuid.uuid4())
                     elif field in ['width', 'height', 'mm_per_rev', 'steps_per_rev']:
                         plotter[field] = 0.0
+                    elif field == 'pen_speed':
+                        plotter[field] = 2000.0
                     elif field == 'gcode_sequences':
                         plotter[field] = self._get_default_gcode_sequences()
-                    elif field == 'plotter_type':
-                        plotter[field] = 'polargraph'
                     else:
                         plotter[field] = 'Unknown'
                     needs_repair = True
 
             gcode_sequences = plotter.get('gcode_sequences', {})
-            if 'draw_speed' not in gcode_sequences:
-                gcode_sequences['draw_speed'] = 2000.0
+            if 'draw_speed' in gcode_sequences:
+                gcode_sequences.pop('draw_speed', None)
                 plotter['gcode_sequences'] = gcode_sequences
                 needs_repair = True
-        
+
         # Ensure all papers have required fields
         for paper in self.config_data.get('papers', []):
             required_fields = ['id', 'name', 'paper_size', 'width', 'height', 'color']
@@ -504,19 +488,13 @@ class ConfigurationService:
         plotter_dict = {
             "id": plotter_id,
             "name": plotter_data.name,
-            "plotter_type": plotter_data.plotter_type.value,
             "width": plotter_data.width,
             "height": plotter_data.height,
             "mm_per_rev": plotter_data.mm_per_rev,
             "steps_per_rev": plotter_data.steps_per_rev,
             "max_speed": plotter_data.max_speed,
-            "acceleration": plotter_data.acceleration,
-            "pen_up_position": plotter_data.pen_up_position,
-            "pen_down_position": plotter_data.pen_down_position,
             "pen_speed": plotter_data.pen_speed,
             "gcode_sequences": gcode_sequences,
-            "home_position_x": plotter_data.home_position_x,
-            "home_position_y": plotter_data.home_position_y,
             "is_default": plotter_data.is_default,
             "created_at": now.isoformat(),
             "updated_at": now.isoformat()
@@ -575,9 +553,7 @@ class ConfigurationService:
                         existing_sequences['pen_down_command'] = pen_down_override
                     update_data['gcode_sequences'] = existing_sequences
                 for key, value in update_data.items():
-                    if key == 'plotter_type':
-                        plotter[key] = value.value
-                    elif key == 'gcode_sequences' and value is not None:
+                    if key == 'gcode_sequences' and value is not None:
                         if isinstance(value, dict):
                             plotter[key] = value
                         else:
@@ -714,7 +690,6 @@ class ConfigurationService:
             before_print=defaults.get("before_print", []),
             pen_up_command=defaults.get("pen_up_command", "M280 P0 S110"),
             pen_down_command=defaults.get("pen_down_command", "M280 P0 S130"),
-            draw_speed=self._normalize_draw_speed(defaults.get("draw_speed", 2000.0)),
             servo_delay_ms=defaults.get("servo_delay_ms", 100.0),
         )
 
@@ -757,26 +732,19 @@ class ConfigurationService:
         return PlotterResponse(
             id=plotter_dict['id'],
             name=plotter_dict['name'],
-            plotter_type=plotter_dict['plotter_type'],
             width=plotter_dict['width'],
             height=plotter_dict['height'],
             mm_per_rev=plotter_dict['mm_per_rev'],
             steps_per_rev=plotter_dict['steps_per_rev'],
             max_speed=plotter_dict['max_speed'],
-            acceleration=plotter_dict['acceleration'],
-            pen_up_position=plotter_dict['pen_up_position'],
-            pen_down_position=plotter_dict['pen_down_position'],
             pen_speed=plotter_dict['pen_speed'],
             gcode_sequences=GcodeSettings(
                 on_connect=gcode_data.get('on_connect', []),
                 before_print=gcode_data.get('before_print', []),
                 pen_up_command=gcode_data.get('pen_up_command', "M280 P0 S110"),
                 pen_down_command=gcode_data.get('pen_down_command', "M280 P0 S130"),
-                draw_speed=self._normalize_draw_speed(gcode_data.get('draw_speed', 2000.0)),
                 servo_delay_ms=gcode_data.get('servo_delay_ms', 100.0),
             ),
-            home_position_x=plotter_dict['home_position_x'],
-            home_position_y=plotter_dict['home_position_y'],
             is_default=plotter_dict['is_default'],
             created_at=datetime.fromisoformat(plotter_dict['created_at']),
             updated_at=datetime.fromisoformat(plotter_dict['updated_at'])
@@ -814,7 +782,6 @@ class ConfigurationService:
                     before_print=gcode_data.get('before_print', []),
                     pen_up_command=pen_up,
                     pen_down_command=pen_down,
-                    draw_speed=self._normalize_draw_speed(gcode_data.get('draw_speed', 2000.0)),
                     servo_delay_ms=gcode_data.get('servo_delay_ms', 100.0),
                 )
         return None
@@ -838,9 +805,6 @@ class ConfigurationService:
                 if 'pen_down_command' in update_payload:
                     if update_payload['pen_down_command'] is not None:
                         existing['pen_down_command'] = update_payload['pen_down_command']
-                if 'draw_speed' in update_payload:
-                    if update_payload['draw_speed'] is not None:
-                        existing['draw_speed'] = self._normalize_draw_speed(update_payload['draw_speed'])
                 if 'servo_delay_ms' in update_payload:
                     if update_payload['servo_delay_ms'] is not None:
                         existing['servo_delay_ms'] = update_payload['servo_delay_ms']

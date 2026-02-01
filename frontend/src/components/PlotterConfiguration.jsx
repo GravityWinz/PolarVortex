@@ -22,10 +22,7 @@ import {
   FormHelperText,
   Grid,
   IconButton,
-  InputLabel,
-  MenuItem,
   Paper,
-  Select,
   Snackbar,
   Table,
   TableBody,
@@ -44,12 +41,6 @@ import {
   updatePlotter,
 } from "../services/apiService";
 
-const PLOTTER_TYPES = [
-  { value: "polargraph", label: "Polargraph" },
-  { value: "xy_plotter", label: "XY Plotter" },
-  { value: "pen_plotter", label: "Pen Plotter" },
-];
-
 export default function PlotterConfiguration() {
   const [plotters, setPlotters] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -62,19 +53,14 @@ export default function PlotterConfiguration() {
   const [deleting, setDeleting] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
-    plotter_type: "polargraph",
     width: 1000,
     height: 1000,
     mm_per_rev: 95.0,
     steps_per_rev: 200.0,
     max_speed: 100.0,
-    acceleration: 50.0,
-    pen_up_position: 10.0,
-    pen_down_position: 0.0,
-    pen_speed: 20.0,
+    pen_speed: 2000.0,
     gcode_pen_up_command: "M280 P0 S110",
     gcode_pen_down_command: "M280 P0 S130",
-    gcode_draw_speed: 2000,
     gcode_on_connect: "",
     gcode_before_print: "",
     home_position_x: 0.0,
@@ -110,19 +96,14 @@ export default function PlotterConfiguration() {
     setEditingPlotter(null);
     setFormData({
       name: "",
-      plotter_type: "polargraph",
       width: 1000,
       height: 1000,
       mm_per_rev: 95.0,
       steps_per_rev: 200.0,
       max_speed: 100.0,
-      acceleration: 50.0,
-      pen_up_position: 10.0,
-      pen_down_position: 0.0,
-      pen_speed: 20.0,
+      pen_speed: 2000.0,
       gcode_pen_up_command: "M280 P0 S110",
       gcode_pen_down_command: "M280 P0 S130",
-      gcode_draw_speed: 2000,
       gcode_on_connect: "",
       gcode_before_print: "",
       home_position_x: 0.0,
@@ -136,21 +117,16 @@ export default function PlotterConfiguration() {
     setEditingPlotter(plotter);
     setFormData({
       name: plotter.name,
-      plotter_type: plotter.plotter_type,
       width: plotter.width,
       height: plotter.height,
       mm_per_rev: plotter.mm_per_rev,
       steps_per_rev: plotter.steps_per_rev,
       max_speed: plotter.max_speed,
-      acceleration: plotter.acceleration,
-      pen_up_position: plotter.pen_up_position,
-      pen_down_position: plotter.pen_down_position,
       pen_speed: plotter.pen_speed,
       gcode_pen_up_command:
         plotter.gcode_sequences?.pen_up_command || "M280 P0 S110",
       gcode_pen_down_command:
         plotter.gcode_sequences?.pen_down_command || "M280 P0 S130",
-      gcode_draw_speed: plotter.gcode_sequences?.draw_speed ?? 2000,
       gcode_on_connect: (plotter.gcode_sequences?.on_connect || []).join("\n"),
       gcode_before_print: (plotter.gcode_sequences?.before_print || []).join(
         "\n",
@@ -177,9 +153,6 @@ export default function PlotterConfiguration() {
             .filter(Boolean),
           pen_up_command: formData.gcode_pen_up_command || "M280 P0 S110",
           pen_down_command: formData.gcode_pen_down_command || "M280 P0 S130",
-          draw_speed: Number.isFinite(formData.gcode_draw_speed)
-            ? formData.gcode_draw_speed
-            : 2000,
         },
       };
       if (editingPlotter) {
@@ -273,7 +246,6 @@ export default function PlotterConfiguration() {
           <TableHead>
             <TableRow>
               <TableCell>Name</TableCell>
-              <TableCell>Type</TableCell>
               <TableCell>Dimensions (mm)</TableCell>
               <TableCell>Motor Settings</TableCell>
               <TableCell>Default</TableCell>
@@ -284,9 +256,6 @@ export default function PlotterConfiguration() {
             {plotters.map((plotter) => (
               <TableRow key={plotter.id}>
                 <TableCell>{plotter.name}</TableCell>
-                <TableCell>
-                  <Chip label={plotter.plotter_type} size="small" />
-                </TableCell>
                 <TableCell>
                   {plotter.width} × {plotter.height}
                 </TableCell>
@@ -362,27 +331,6 @@ export default function PlotterConfiguration() {
                 }
                 required
               />
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <FormControl fullWidth>
-                <InputLabel>Plotter Type</InputLabel>
-                <Select
-                  value={formData.plotter_type}
-                  onChange={(e) =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      plotter_type: e.target.value,
-                    }))
-                  }
-                  label="Plotter Type"
-                >
-                  {PLOTTER_TYPES.map((type) => (
-                    <MenuItem key={type.value} value={type.value}>
-                      {type.label}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
             </Grid>
 
             <Grid item xs={12}>
@@ -492,21 +440,6 @@ export default function PlotterConfiguration() {
                 required
               />
             </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                label="Acceleration (mm/s²)"
-                type="number"
-                value={formData.acceleration}
-                onChange={(e) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    acceleration: parseFloat(e.target.value) || 0,
-                  }))
-                }
-                required
-              />
-            </Grid>
 
             <Grid item xs={12}>
               <Divider sx={{ my: 2 }} />
@@ -518,40 +451,10 @@ export default function PlotterConfiguration() {
                 Pen Settings
               </Typography>
             </Grid>
-            <Grid item xs={12} sm={4}>
+            <Grid item xs={12} sm={6}>
               <TextField
                 fullWidth
-                label="Pen Up Position (mm)"
-                type="number"
-                value={formData.pen_up_position}
-                onChange={(e) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    pen_up_position: parseFloat(e.target.value) || 0,
-                  }))
-                }
-                required
-              />
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <TextField
-                fullWidth
-                label="Pen Down Position (mm)"
-                type="number"
-                value={formData.pen_down_position}
-                onChange={(e) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    pen_down_position: parseFloat(e.target.value) || 0,
-                  }))
-                }
-                required
-              />
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <TextField
-                fullWidth
-                label="Pen Speed (mm/s)"
+                label="Pen Speed (mm/min)"
                 type="number"
                 value={formData.pen_speed}
                 onChange={(e) =>
@@ -647,22 +550,6 @@ export default function PlotterConfiguration() {
                 Commands run automatically for this plotter. One command per
                 line; empty lines are ignored.
               </Typography>
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                label="Draw Speed (mm/min)"
-                type="number"
-                value={formData.gcode_draw_speed}
-                onChange={(e) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    gcode_draw_speed: parseFloat(e.target.value) || 0,
-                  }))
-                }
-                inputProps={{ min: 500, max: 8000, step: 50 }}
-                helperText="Applied as the G1 feed rate after pen down."
-              />
             </Grid>
             <Grid item xs={12} sm={6}>
               <TextField

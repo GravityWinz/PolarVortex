@@ -26,11 +26,9 @@ export default function GcodeSettings() {
   const [settings, setSettings] = useState({
     on_connect: [],
     before_print: [],
-    draw_speed: 2000,
   });
   const [onConnectText, setOnConnectText] = useState("");
   const [beforePrintText, setBeforePrintText] = useState("");
-  const [drawSpeed, setDrawSpeed] = useState("2000");
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [runningPrePrint, setRunningPrePrint] = useState(false);
@@ -59,29 +57,11 @@ export default function GcodeSettings() {
       setSettings(result);
       setOnConnectText(toMultiline(result.on_connect));
       setBeforePrintText(toMultiline(result.before_print));
-      setDrawSpeed(
-        result.draw_speed !== undefined && result.draw_speed !== null
-          ? String(result.draw_speed)
-          : "2000",
-      );
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
-  };
-
-  const parseDrawSpeed = () => {
-    const value = Number(drawSpeed);
-    if (Number.isNaN(value)) {
-      setError("Draw speed must be a number.");
-      return null;
-    }
-    if (value < 500 || value > 8000) {
-      setError("Draw speed must be between 500 and 8000 mm/min.");
-      return null;
-    }
-    return value;
   };
 
   const handleSave = async () => {
@@ -90,15 +70,9 @@ export default function GcodeSettings() {
       setSuccess(null);
       setError(null);
 
-      const speedValue = parseDrawSpeed();
-      if (speedValue === null) {
-        return;
-      }
-
       const payload = {
         on_connect: normalizeCommands(onConnectText),
         before_print: normalizeCommands(beforePrintText),
-        draw_speed: speedValue,
       };
 
       const updated = await updateGcodeSettings(payload);
@@ -168,17 +142,6 @@ export default function GcodeSettings() {
         )}
 
         <Grid container spacing={3}>
-          <Grid item xs={12}>
-            <TextField
-              label="Draw Speed (mm/min)"
-              type="number"
-              fullWidth
-              value={drawSpeed}
-              onChange={(e) => setDrawSpeed(e.target.value)}
-              helperText="Used for generated G-code drawing moves (500-8000)."
-              inputProps={{ min: 500, max: 8000, step: 50 }}
-            />
-          </Grid>
           <Grid item xs={12} md={6}>
             <TextField
               label="On Connect"
