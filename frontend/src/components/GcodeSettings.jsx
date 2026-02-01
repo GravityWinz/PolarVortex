@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { Bolt as BoltIcon, Save as SaveIcon } from "@mui/icons-material";
 import {
   Alert,
   Box,
@@ -10,11 +10,12 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
+import React, { useEffect, useState } from "react";
 import {
-  Save as SaveIcon,
-  Bolt as BoltIcon,
-} from "@mui/icons-material";
-import { getGcodeSettings, updateGcodeSettings, runPrePrintGcode } from "../services/apiService";
+  getGcodeSettings,
+  runPrePrintGcode,
+  updateGcodeSettings,
+} from "../services/apiService";
 
 /**
  * GcodeSettings allows configuring automatic G-code sent on connect and before print start.
@@ -22,9 +23,14 @@ import { getGcodeSettings, updateGcodeSettings, runPrePrintGcode } from "../serv
 export default function GcodeSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [settings, setSettings] = useState({ on_connect: [], before_print: [] });
+  const [settings, setSettings] = useState({
+    on_connect: [],
+    before_print: [],
+    draw_speed: 2000,
+  });
   const [onConnectText, setOnConnectText] = useState("");
   const [beforePrintText, setBeforePrintText] = useState("");
+  const [drawSpeed, setDrawSpeed] = useState("2000");
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [runningPrePrint, setRunningPrePrint] = useState(false);
@@ -53,11 +59,29 @@ export default function GcodeSettings() {
       setSettings(result);
       setOnConnectText(toMultiline(result.on_connect));
       setBeforePrintText(toMultiline(result.before_print));
+      setDrawSpeed(
+        result.draw_speed !== undefined && result.draw_speed !== null
+          ? String(result.draw_speed)
+          : "2000",
+      );
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
+  };
+
+  const parseDrawSpeed = () => {
+    const value = Number(drawSpeed);
+    if (Number.isNaN(value)) {
+      setError("Draw speed must be a number.");
+      return null;
+    }
+    if (value < 500 || value > 8000) {
+      setError("Draw speed must be between 500 and 8000 mm/min.");
+      return null;
+    }
+    return value;
   };
 
   const handleSave = async () => {
@@ -66,9 +90,15 @@ export default function GcodeSettings() {
       setSuccess(null);
       setError(null);
 
+      const speedValue = parseDrawSpeed();
+      if (speedValue === null) {
+        return;
+      }
+
       const payload = {
         on_connect: normalizeCommands(onConnectText),
         before_print: normalizeCommands(beforePrintText),
+        draw_speed: speedValue,
       };
 
       const updated = await updateGcodeSettings(payload);
@@ -89,7 +119,9 @@ export default function GcodeSettings() {
       const result = await runPrePrintGcode();
       setPrePrintResult(result);
       if (!result.success) {
-        setError("One or more pre-print commands failed. Check the command log.");
+        setError(
+          "One or more pre-print commands failed. Check the command log.",
+        );
       }
     } catch (err) {
       setError(err.message);
@@ -100,7 +132,12 @@ export default function GcodeSettings() {
 
   if (loading) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
+      <Box
+        display="flex"
+        justifyContent="center"
+        alignItems="center"
+        minHeight="200px"
+      >
         <CircularProgress />
       </Box>
     );
@@ -114,14 +151,34 @@ export default function GcodeSettings() {
             Automatic G-code
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Define commands that run automatically. Use one command per line; empty lines are ignored.
+            Define commands that run automatically. Use one command per line;
+            empty lines are ignored.
           </Typography>
         </Box>
 
-        {error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}
-        {success && <Alert severity="success" onClose={() => setSuccess(null)}>{success}</Alert>}
+        {error && (
+          <Alert severity="error" onClose={() => setError(null)}>
+            {error}
+          </Alert>
+        )}
+        {success && (
+          <Alert severity="success" onClose={() => setSuccess(null)}>
+            {success}
+          </Alert>
+        )}
 
         <Grid container spacing={3}>
+          <Grid item xs={12}>
+            <TextField
+              label="Draw Speed (mm/min)"
+              type="number"
+              fullWidth
+              value={drawSpeed}
+              onChange={(e) => setDrawSpeed(e.target.value)}
+              helperText="Used for generated G-code drawing moves (500-8000)."
+              inputProps={{ min: 500, max: 8000, step: 50 }}
+            />
+          </Grid>
           <Grid item xs={12} md={6}>
             <TextField
               label="On Connect"
@@ -179,7 +236,8 @@ export default function GcodeSettings() {
             - Use absolute (`G90`) or relative (`G91`) positioning explicitly.
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            - Include units (`G20` inches or `G21` millimeters) to avoid surprises.
+            - Include units (`G20` inches or `G21` millimeters) to avoid
+            surprises.
           </Typography>
           <Typography variant="body2" color="text.secondary">
             - Keep homing or pen-up commands here to standardize every session.
@@ -189,4 +247,3 @@ export default function GcodeSettings() {
     </Paper>
   );
 }
-

@@ -466,6 +466,15 @@ def build_vpype_config_content(
     pen_down = getattr(gcode, "pen_down_command", "M280 P0 S130")
     if pen_down is None:
         pen_down = "M280 P0 S130"
+    draw_speed = getattr(gcode, "draw_speed", None)
+    if draw_speed is None:
+        draw_speed = 2000.0
+    try:
+        draw_speed = float(draw_speed)
+    except (TypeError, ValueError):
+        draw_speed = 2000.0
+    draw_speed = min(max(draw_speed, 500.0), 8000.0)
+    draw_feed = f"{draw_speed:g}"
     if servo_delay_ms is None:
         servo_delay_ms = 100.0
     if pen_debounce_steps is None or pen_debounce_steps < 1:
@@ -508,17 +517,19 @@ document_start = """
 linecollection_start = "{pen_up}\\n"
 
 # First segment in a path: move then pen down (exponential approach to reduce bouncing)
+# Set draw feed once after pen down.
 segment_first = """
 G0 X{{x:.3f}} Y{{y:.3f}}
 {pen_down_sequence}
+G1 F{draw_feed}
 """
 
 # Subsequent segments while drawing
-segment = "G1 X{{x:.3f}} Y{{y:.3f}} F1500\\n"
+segment = "G1 X{{x:.3f}} Y{{y:.3f}}\\n"
 
 # Last segment in a path: finish move then pen up
 segment_last = """
-G1 X{{x:.3f}} Y{{y:.3f}} F1500
+G1 X{{x:.3f}} Y{{y:.3f}}
 {pen_up}
 """
 
@@ -620,7 +631,7 @@ def insert_m0_pen_changes(
     # Collection starts (linecollection_start) are pen_up commands that appear:
     # - On their own line (not part of segment_last multiline block)
     # - After we've seen at least one drawing command (G0/G1)
-    # - segment_last has format: "G1 X... Y... F1500\n{pen_up}" (pen_up on next line)
+    # - segment_last has format: "G1 X... Y... F<feed>\n{pen_up}" (pen_up on next line)
     # - document_start pen_up appears BEFORE any G0/G1 commands
     
     collection_count = 0
@@ -686,7 +697,7 @@ def insert_m0_pen_changes(
             else:
                 # After drawing has started, check if this is a collection start
                 # Pattern analysis:
-                # - segment_last: G1 ... F1500, then M280 (path end pen_up) - pen_up immediately after G1
+                # - segment_last: G1 ... F<feed>, then M280 (path end pen_up) - pen_up immediately after G1
                 # - linecollection_start: M280 (collection start pen_up), then G0 ... (first segment of next path)
                 # So: if previous line is G1, this is path end (segment_last)
                 #     if next line is G0, this is collection start (linecollection_start)
