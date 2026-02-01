@@ -368,8 +368,18 @@ class ConfigurationService:
             ],
             "pen_up_command": "M280 P0 S110",
             "pen_down_command": "M280 P0 S130",
+            "draw_speed": 2000.0,
             "servo_delay_ms": 100.0,
         }
+
+    @staticmethod
+    def _normalize_draw_speed(value: Optional[float]) -> float:
+        """Clamp draw speed to a safe range (mm/min)."""
+        try:
+            speed = float(value)
+        except (TypeError, ValueError):
+            return 2000.0
+        return min(max(speed, 500.0), 8000.0)
     
     def _validate_and_repair_config(self):
         """Validate and repair configuration to ensure all required fields exist"""
@@ -432,6 +442,12 @@ class ConfigurationService:
                     else:
                         plotter[field] = 'Unknown'
                     needs_repair = True
+
+            gcode_sequences = plotter.get('gcode_sequences', {})
+            if 'draw_speed' not in gcode_sequences:
+                gcode_sequences['draw_speed'] = 2000.0
+                plotter['gcode_sequences'] = gcode_sequences
+                needs_repair = True
         
         # Ensure all papers have required fields
         for paper in self.config_data.get('papers', []):
@@ -539,8 +555,20 @@ class ConfigurationService:
                 update_data = plotter_data.dict(exclude_unset=True)
                 pen_up_override = update_data.pop("gcode_pen_up_command", None)
                 pen_down_override = update_data.pop("gcode_pen_down_command", None)
-                if pen_up_override is not None or pen_down_override is not None:
-                    existing_sequences = plotter.get('gcode_sequences', self._get_default_gcode_sequences())
+                if (
+                    pen_up_override is not None
+                    or pen_down_override is not None
+                    or "gcode_sequences" in update_data
+                ):
+                    existing_sequences = dict(
+                        plotter.get('gcode_sequences', self._get_default_gcode_sequences())
+                    )
+                    incoming_sequences = update_data.pop("gcode_sequences", None)
+                    if incoming_sequences is not None:
+                        if isinstance(incoming_sequences, dict):
+                            existing_sequences.update(incoming_sequences)
+                        else:
+                            existing_sequences.update(incoming_sequences.dict(exclude_unset=True))
                     if pen_up_override is not None:
                         existing_sequences['pen_up_command'] = pen_up_override
                     if pen_down_override is not None:
@@ -686,6 +714,7 @@ class ConfigurationService:
             before_print=defaults.get("before_print", []),
             pen_up_command=defaults.get("pen_up_command", "M280 P0 S110"),
             pen_down_command=defaults.get("pen_down_command", "M280 P0 S130"),
+            draw_speed=self._normalize_draw_speed(defaults.get("draw_speed", 2000.0)),
             servo_delay_ms=defaults.get("servo_delay_ms", 100.0),
         )
 
@@ -743,6 +772,7 @@ class ConfigurationService:
                 before_print=gcode_data.get('before_print', []),
                 pen_up_command=gcode_data.get('pen_up_command', "M280 P0 S110"),
                 pen_down_command=gcode_data.get('pen_down_command', "M280 P0 S130"),
+                draw_speed=self._normalize_draw_speed(gcode_data.get('draw_speed', 2000.0)),
                 servo_delay_ms=gcode_data.get('servo_delay_ms', 100.0),
             ),
             home_position_x=plotter_dict['home_position_x'],
@@ -784,6 +814,7 @@ class ConfigurationService:
                     before_print=gcode_data.get('before_print', []),
                     pen_up_command=pen_up,
                     pen_down_command=pen_down,
+                    draw_speed=self._normalize_draw_speed(gcode_data.get('draw_speed', 2000.0)),
                     servo_delay_ms=gcode_data.get('servo_delay_ms', 100.0),
                 )
         return None
@@ -807,6 +838,9 @@ class ConfigurationService:
                 if 'pen_down_command' in update_payload:
                     if update_payload['pen_down_command'] is not None:
                         existing['pen_down_command'] = update_payload['pen_down_command']
+                if 'draw_speed' in update_payload:
+                    if update_payload['draw_speed'] is not None:
+                        existing['draw_speed'] = self._normalize_draw_speed(update_payload['draw_speed'])
                 if 'servo_delay_ms' in update_payload:
                     if update_payload['servo_delay_ms'] is not None:
                         existing['servo_delay_ms'] = update_payload['servo_delay_ms']

@@ -1,53 +1,53 @@
 import {
-    Add as AddIcon,
-    Delete as DeleteIcon,
-    Edit as EditIcon,
-    StarBorder as StarBorderIcon,
-    Star as StarIcon,
-} from '@mui/icons-material';
+  Add as AddIcon,
+  Delete as DeleteIcon,
+  Edit as EditIcon,
+  StarBorder as StarBorderIcon,
+  Star as StarIcon,
+} from "@mui/icons-material";
 import {
-    Alert,
-    Box,
-    Button,
-    Checkbox,
-    Chip,
-    CircularProgress,
-    Dialog,
-    DialogActions,
-    DialogContent,
-    DialogTitle,
-    Divider,
-    FormControl,
-    FormControlLabel,
-    FormHelperText,
-    Grid,
-    IconButton,
-    InputLabel,
-    MenuItem,
-    Paper,
-    Select,
-    Snackbar,
-    Table,
-    TableBody,
-    TableCell,
-    TableContainer,
-    TableHead,
-    TableRow,
-    TextField,
-    Typography
-} from '@mui/material';
-import React, { useEffect, useState } from 'react';
+  Alert,
+  Box,
+  Button,
+  Checkbox,
+  Chip,
+  CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Divider,
+  FormControl,
+  FormControlLabel,
+  FormHelperText,
+  Grid,
+  IconButton,
+  InputLabel,
+  MenuItem,
+  Paper,
+  Select,
+  Snackbar,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TextField,
+  Typography,
+} from "@mui/material";
+import React, { useEffect, useState } from "react";
 import {
-    createPlotter,
-    deletePlotter,
-    getPlotters,
-    updatePlotter
-} from '../services/apiService';
+  createPlotter,
+  deletePlotter,
+  getPlotters,
+  updatePlotter,
+} from "../services/apiService";
 
 const PLOTTER_TYPES = [
-  { value: 'polargraph', label: 'Polargraph' },
-  { value: 'xy_plotter', label: 'XY Plotter' },
-  { value: 'pen_plotter', label: 'Pen Plotter' },
+  { value: "polargraph", label: "Polargraph" },
+  { value: "xy_plotter", label: "XY Plotter" },
+  { value: "pen_plotter", label: "Pen Plotter" },
 ];
 
 export default function PlotterConfiguration() {
@@ -61,8 +61,8 @@ export default function PlotterConfiguration() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [formData, setFormData] = useState({
-    name: '',
-    plotter_type: 'polargraph',
+    name: "",
+    plotter_type: "polargraph",
     width: 1000,
     height: 1000,
     mm_per_rev: 95.0,
@@ -72,17 +72,18 @@ export default function PlotterConfiguration() {
     pen_up_position: 10.0,
     pen_down_position: 0.0,
     pen_speed: 20.0,
-    gcode_pen_up_command: 'M280 P0 S110',
-    gcode_pen_down_command: 'M280 P0 S130',
-    gcode_on_connect: '',
-    gcode_before_print: '',
+    gcode_pen_up_command: "M280 P0 S110",
+    gcode_pen_down_command: "M280 P0 S130",
+    gcode_draw_speed: 2000,
+    gcode_on_connect: "",
+    gcode_before_print: "",
     home_position_x: 0.0,
     home_position_y: 0.0,
     is_default: false,
   });
 
   const notifyPlotterConfigUpdated = () => {
-    window.dispatchEvent(new Event('pv_plotter_config_updated'));
+    window.dispatchEvent(new Event("pv_plotter_config_updated"));
   };
 
   useEffect(() => {
@@ -99,7 +100,7 @@ export default function PlotterConfiguration() {
         setPlotters(response.plotters || []);
       }
     } catch (err) {
-      setError('Failed to load plotters');
+      setError("Failed to load plotters");
     } finally {
       setLoading(false);
     }
@@ -108,8 +109,8 @@ export default function PlotterConfiguration() {
   const handleCreate = () => {
     setEditingPlotter(null);
     setFormData({
-      name: '',
-      plotter_type: 'polargraph',
+      name: "",
+      plotter_type: "polargraph",
       width: 1000,
       height: 1000,
       mm_per_rev: 95.0,
@@ -119,10 +120,11 @@ export default function PlotterConfiguration() {
       pen_up_position: 10.0,
       pen_down_position: 0.0,
       pen_speed: 20.0,
-      gcode_pen_up_command: 'M280 P0 S110',
-      gcode_pen_down_command: 'M280 P0 S130',
-      gcode_on_connect: '',
-      gcode_before_print: '',
+      gcode_pen_up_command: "M280 P0 S110",
+      gcode_pen_down_command: "M280 P0 S130",
+      gcode_draw_speed: 2000,
+      gcode_on_connect: "",
+      gcode_before_print: "",
       home_position_x: 0.0,
       home_position_y: 0.0,
       is_default: false,
@@ -144,10 +146,15 @@ export default function PlotterConfiguration() {
       pen_up_position: plotter.pen_up_position,
       pen_down_position: plotter.pen_down_position,
       pen_speed: plotter.pen_speed,
-      gcode_pen_up_command: plotter.gcode_sequences?.pen_up_command || 'M280 P0 S110',
-      gcode_pen_down_command: plotter.gcode_sequences?.pen_down_command || 'M280 P0 S130',
-      gcode_on_connect: (plotter.gcode_sequences?.on_connect || []).join('\n'),
-      gcode_before_print: (plotter.gcode_sequences?.before_print || []).join('\n'),
+      gcode_pen_up_command:
+        plotter.gcode_sequences?.pen_up_command || "M280 P0 S110",
+      gcode_pen_down_command:
+        plotter.gcode_sequences?.pen_down_command || "M280 P0 S130",
+      gcode_draw_speed: plotter.gcode_sequences?.draw_speed ?? 2000,
+      gcode_on_connect: (plotter.gcode_sequences?.on_connect || []).join("\n"),
+      gcode_before_print: (plotter.gcode_sequences?.before_print || []).join(
+        "\n",
+      ),
       home_position_x: plotter.home_position_x,
       home_position_y: plotter.home_position_y,
       is_default: plotter.is_default,
@@ -160,18 +167,27 @@ export default function PlotterConfiguration() {
       const payload = {
         ...formData,
         gcode_sequences: {
-          on_connect: (formData.gcode_on_connect || '').split('\n').map((s) => s.trim()).filter(Boolean),
-          before_print: (formData.gcode_before_print || '').split('\n').map((s) => s.trim()).filter(Boolean),
-          pen_up_command: formData.gcode_pen_up_command || 'M280 P0 S110',
-          pen_down_command: formData.gcode_pen_down_command || 'M280 P0 S130',
+          on_connect: (formData.gcode_on_connect || "")
+            .split("\n")
+            .map((s) => s.trim())
+            .filter(Boolean),
+          before_print: (formData.gcode_before_print || "")
+            .split("\n")
+            .map((s) => s.trim())
+            .filter(Boolean),
+          pen_up_command: formData.gcode_pen_up_command || "M280 P0 S110",
+          pen_down_command: formData.gcode_pen_down_command || "M280 P0 S130",
+          draw_speed: Number.isFinite(formData.gcode_draw_speed)
+            ? formData.gcode_draw_speed
+            : 2000,
         },
       };
       if (editingPlotter) {
         await updatePlotter(editingPlotter.id, payload);
-        setSuccess('Plotter updated successfully');
+        setSuccess("Plotter updated successfully");
       } else {
         await createPlotter(payload);
-        setSuccess('Plotter created successfully');
+        setSuccess("Plotter created successfully");
       }
       setDialogOpen(false);
       notifyPlotterConfigUpdated();
@@ -198,7 +214,7 @@ export default function PlotterConfiguration() {
     try {
       setDeleting(true);
       await deletePlotter(deleteTarget.id);
-      setSuccess('Plotter deleted successfully');
+      setSuccess("Plotter deleted successfully");
       notifyPlotterConfigUpdated();
       setDeleteDialogOpen(false);
       setDeleteTarget(null);
@@ -223,7 +239,12 @@ export default function PlotterConfiguration() {
 
   if (loading) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
+      <Box
+        display="flex"
+        justifyContent="center"
+        alignItems="center"
+        minHeight="200px"
+      >
         <CircularProgress />
       </Box>
     );
@@ -231,7 +252,12 @@ export default function PlotterConfiguration() {
 
   return (
     <Box>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+      <Box
+        display="flex"
+        justifyContent="space-between"
+        alignItems="center"
+        mb={3}
+      >
         <Typography variant="h6">Plotter Configurations</Typography>
         <Button
           variant="contained"
@@ -261,13 +287,20 @@ export default function PlotterConfiguration() {
                 <TableCell>
                   <Chip label={plotter.plotter_type} size="small" />
                 </TableCell>
-                <TableCell>{plotter.width} × {plotter.height}</TableCell>
+                <TableCell>
+                  {plotter.width} × {plotter.height}
+                </TableCell>
                 <TableCell>
                   {plotter.mm_per_rev}mm/rev, {plotter.steps_per_rev} steps/rev
                 </TableCell>
                 <TableCell>
                   {plotter.is_default ? (
-                    <Chip icon={<StarIcon />} label="Default" color="primary" size="small" />
+                    <Chip
+                      icon={<StarIcon />}
+                      label="Default"
+                      color="primary"
+                      size="small"
+                    />
                   ) : (
                     <IconButton
                       size="small"
@@ -302,22 +335,31 @@ export default function PlotterConfiguration() {
       </TableContainer>
 
       {/* Add/Edit Dialog */}
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="md" fullWidth>
+      <Dialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
         <DialogTitle>
-          {editingPlotter ? 'Edit Plotter' : 'Add New Plotter'}
+          {editingPlotter ? "Edit Plotter" : "Add New Plotter"}
         </DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 1 }}>
             {/* Basic Information */}
             <Grid item xs={12}>
-              <Typography variant="h6" gutterBottom>Basic Information</Typography>
+              <Typography variant="h6" gutterBottom>
+                Basic Information
+              </Typography>
             </Grid>
             <Grid item xs={12} sm={6}>
               <TextField
                 fullWidth
                 label="Name"
                 value={formData.name}
-                onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, name: e.target.value }))
+                }
                 required
               />
             </Grid>
@@ -326,7 +368,12 @@ export default function PlotterConfiguration() {
                 <InputLabel>Plotter Type</InputLabel>
                 <Select
                   value={formData.plotter_type}
-                  onChange={(e) => setFormData(prev => ({ ...prev, plotter_type: e.target.value }))}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      plotter_type: e.target.value,
+                    }))
+                  }
                   label="Plotter Type"
                 >
                   {PLOTTER_TYPES.map((type) => (
@@ -344,7 +391,9 @@ export default function PlotterConfiguration() {
 
             {/* Dimensions */}
             <Grid item xs={12}>
-              <Typography variant="h6" gutterBottom>Dimensions</Typography>
+              <Typography variant="h6" gutterBottom>
+                Dimensions
+              </Typography>
             </Grid>
             <Grid item xs={12} sm={6}>
               <TextField
@@ -352,7 +401,12 @@ export default function PlotterConfiguration() {
                 label="Width (mm)"
                 type="number"
                 value={formData.width}
-                onChange={(e) => setFormData(prev => ({ ...prev, width: parseFloat(e.target.value) || 0 }))}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    width: parseFloat(e.target.value) || 0,
+                  }))
+                }
                 required
               />
             </Grid>
@@ -362,7 +416,12 @@ export default function PlotterConfiguration() {
                 label="Height (mm)"
                 type="number"
                 value={formData.height}
-                onChange={(e) => setFormData(prev => ({ ...prev, height: parseFloat(e.target.value) || 0 }))}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    height: parseFloat(e.target.value) || 0,
+                  }))
+                }
                 required
               />
             </Grid>
@@ -373,7 +432,9 @@ export default function PlotterConfiguration() {
 
             {/* Motor Settings */}
             <Grid item xs={12}>
-              <Typography variant="h6" gutterBottom>Motor Settings</Typography>
+              <Typography variant="h6" gutterBottom>
+                Motor Settings
+              </Typography>
             </Grid>
             <Grid item xs={12} sm={6}>
               <TextField
@@ -381,7 +442,12 @@ export default function PlotterConfiguration() {
                 label="mm per revolution"
                 type="number"
                 value={formData.mm_per_rev}
-                onChange={(e) => setFormData(prev => ({ ...prev, mm_per_rev: parseFloat(e.target.value) || 0 }))}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    mm_per_rev: parseFloat(e.target.value) || 0,
+                  }))
+                }
                 required
               />
             </Grid>
@@ -391,7 +457,12 @@ export default function PlotterConfiguration() {
                 label="Steps per revolution"
                 type="number"
                 value={formData.steps_per_rev}
-                onChange={(e) => setFormData(prev => ({ ...prev, steps_per_rev: parseFloat(e.target.value) || 0 }))}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    steps_per_rev: parseFloat(e.target.value) || 0,
+                  }))
+                }
                 required
               />
             </Grid>
@@ -402,7 +473,9 @@ export default function PlotterConfiguration() {
 
             {/* Speed Settings */}
             <Grid item xs={12}>
-              <Typography variant="h6" gutterBottom>Speed Settings</Typography>
+              <Typography variant="h6" gutterBottom>
+                Speed Settings
+              </Typography>
             </Grid>
             <Grid item xs={12} sm={6}>
               <TextField
@@ -410,7 +483,12 @@ export default function PlotterConfiguration() {
                 label="Max Speed (mm/s)"
                 type="number"
                 value={formData.max_speed}
-                onChange={(e) => setFormData(prev => ({ ...prev, max_speed: parseFloat(e.target.value) || 0 }))}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    max_speed: parseFloat(e.target.value) || 0,
+                  }))
+                }
                 required
               />
             </Grid>
@@ -420,7 +498,12 @@ export default function PlotterConfiguration() {
                 label="Acceleration (mm/s²)"
                 type="number"
                 value={formData.acceleration}
-                onChange={(e) => setFormData(prev => ({ ...prev, acceleration: parseFloat(e.target.value) || 0 }))}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    acceleration: parseFloat(e.target.value) || 0,
+                  }))
+                }
                 required
               />
             </Grid>
@@ -431,7 +514,9 @@ export default function PlotterConfiguration() {
 
             {/* Pen Settings */}
             <Grid item xs={12}>
-              <Typography variant="h6" gutterBottom>Pen Settings</Typography>
+              <Typography variant="h6" gutterBottom>
+                Pen Settings
+              </Typography>
             </Grid>
             <Grid item xs={12} sm={4}>
               <TextField
@@ -439,7 +524,12 @@ export default function PlotterConfiguration() {
                 label="Pen Up Position (mm)"
                 type="number"
                 value={formData.pen_up_position}
-                onChange={(e) => setFormData(prev => ({ ...prev, pen_up_position: parseFloat(e.target.value) || 0 }))}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    pen_up_position: parseFloat(e.target.value) || 0,
+                  }))
+                }
                 required
               />
             </Grid>
@@ -449,7 +539,12 @@ export default function PlotterConfiguration() {
                 label="Pen Down Position (mm)"
                 type="number"
                 value={formData.pen_down_position}
-                onChange={(e) => setFormData(prev => ({ ...prev, pen_down_position: parseFloat(e.target.value) || 0 }))}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    pen_down_position: parseFloat(e.target.value) || 0,
+                  }))
+                }
                 required
               />
             </Grid>
@@ -459,7 +554,12 @@ export default function PlotterConfiguration() {
                 label="Pen Speed (mm/s)"
                 type="number"
                 value={formData.pen_speed}
-                onChange={(e) => setFormData(prev => ({ ...prev, pen_speed: parseFloat(e.target.value) || 0 }))}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    pen_speed: parseFloat(e.target.value) || 0,
+                  }))
+                }
                 required
               />
             </Grid>
@@ -469,7 +569,12 @@ export default function PlotterConfiguration() {
                 fullWidth
                 label="Pen Up Command"
                 value={formData.gcode_pen_up_command}
-                onChange={(e) => setFormData(prev => ({ ...prev, gcode_pen_up_command: e.target.value }))}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    gcode_pen_up_command: e.target.value,
+                  }))
+                }
                 helperText="Command sent to raise the pen (e.g., servo angle)"
               />
             </Grid>
@@ -478,7 +583,12 @@ export default function PlotterConfiguration() {
                 fullWidth
                 label="Pen Down Command"
                 value={formData.gcode_pen_down_command}
-                onChange={(e) => setFormData(prev => ({ ...prev, gcode_pen_down_command: e.target.value }))}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    gcode_pen_down_command: e.target.value,
+                  }))
+                }
                 helperText="Command sent to lower the pen"
               />
             </Grid>
@@ -489,7 +599,9 @@ export default function PlotterConfiguration() {
 
             {/* Home Position */}
             <Grid item xs={12}>
-              <Typography variant="h6" gutterBottom>Home Position</Typography>
+              <Typography variant="h6" gutterBottom>
+                Home Position
+              </Typography>
             </Grid>
             <Grid item xs={12} sm={6}>
               <TextField
@@ -497,7 +609,12 @@ export default function PlotterConfiguration() {
                 label="Home X (mm)"
                 type="number"
                 value={formData.home_position_x}
-                onChange={(e) => setFormData(prev => ({ ...prev, home_position_x: parseFloat(e.target.value) || 0 }))}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    home_position_x: parseFloat(e.target.value) || 0,
+                  }))
+                }
                 required
               />
             </Grid>
@@ -507,7 +624,12 @@ export default function PlotterConfiguration() {
                 label="Home Y (mm)"
                 type="number"
                 value={formData.home_position_y}
-                onChange={(e) => setFormData(prev => ({ ...prev, home_position_y: parseFloat(e.target.value) || 0 }))}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    home_position_y: parseFloat(e.target.value) || 0,
+                  }))
+                }
                 required
               />
             </Grid>
@@ -518,10 +640,29 @@ export default function PlotterConfiguration() {
 
             {/* Automatic G-code */}
             <Grid item xs={12}>
-              <Typography variant="h6" gutterBottom>Automatic G-code</Typography>
-              <Typography variant="body2" color="text.secondary" gutterBottom>
-                Commands run automatically for this plotter. One command per line; empty lines are ignored.
+              <Typography variant="h6" gutterBottom>
+                Automatic G-code
               </Typography>
+              <Typography variant="body2" color="text.secondary" gutterBottom>
+                Commands run automatically for this plotter. One command per
+                line; empty lines are ignored.
+              </Typography>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Draw Speed (mm/min)"
+                type="number"
+                value={formData.gcode_draw_speed}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    gcode_draw_speed: parseFloat(e.target.value) || 0,
+                  }))
+                }
+                inputProps={{ min: 500, max: 8000, step: 50 }}
+                helperText="Applied as the G1 feed rate after pen down."
+              />
             </Grid>
             <Grid item xs={12} sm={6}>
               <TextField
@@ -530,7 +671,12 @@ export default function PlotterConfiguration() {
                 minRows={6}
                 label="On Connect"
                 value={formData.gcode_on_connect}
-                onChange={(e) => setFormData(prev => ({ ...prev, gcode_on_connect: e.target.value }))}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    gcode_on_connect: e.target.value,
+                  }))
+                }
                 placeholder="G21&#10;G90"
                 helperText="Sent immediately after connecting to the plotter."
               />
@@ -542,7 +688,12 @@ export default function PlotterConfiguration() {
                 minRows={6}
                 label="Before Print Start"
                 value={formData.gcode_before_print}
-                onChange={(e) => setFormData(prev => ({ ...prev, gcode_before_print: e.target.value }))}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    gcode_before_print: e.target.value,
+                  }))
+                }
                 placeholder="G92 X0 Y0 Z0"
                 helperText="Sent right before a print job begins."
               />
@@ -554,7 +705,12 @@ export default function PlotterConfiguration() {
                   control={
                     <Checkbox
                       checked={formData.is_default}
-                      onChange={(e) => setFormData(prev => ({ ...prev, is_default: e.target.checked }))}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          is_default: e.target.checked,
+                        }))
+                      }
                     />
                   }
                   label="Set as default plotter"
@@ -569,12 +725,17 @@ export default function PlotterConfiguration() {
         <DialogActions>
           <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
           <Button onClick={handleSave} variant="contained">
-            {editingPlotter ? 'Update' : 'Create'}
+            {editingPlotter ? "Update" : "Create"}
           </Button>
         </DialogActions>
       </Dialog>
 
-      <Dialog open={deleteDialogOpen} onClose={closeDeleteDialog} maxWidth="xs" fullWidth>
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={closeDeleteDialog}
+        maxWidth="xs"
+        fullWidth
+      >
         <DialogTitle>Delete plotter?</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary">
@@ -587,7 +748,12 @@ export default function PlotterConfiguration() {
           <Button onClick={closeDeleteDialog} disabled={deleting}>
             Cancel
           </Button>
-          <Button onClick={handleDelete} color="error" variant="contained" disabled={deleting}>
+          <Button
+            onClick={handleDelete}
+            color="error"
+            variant="contained"
+            disabled={deleting}
+          >
             {deleting ? "Deleting..." : "Delete"}
           </Button>
         </DialogActions>
