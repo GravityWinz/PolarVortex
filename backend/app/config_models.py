@@ -16,7 +16,6 @@ class GcodeSettings(BaseModel):
         le=8000.0,
         description="Drawing feed rate in mm/min used for G-code generation",
     )
-    servo_delay_ms: float = Field(default=100.0, description="Delay in milliseconds after servo commands to allow settling (reduces bouncing)")
 
 
 class GcodeSettingsUpdate(BaseModel):
@@ -31,7 +30,6 @@ class GcodeSettingsUpdate(BaseModel):
         le=8000.0,
         description="Drawing feed rate in mm/min used for G-code generation",
     )
-    servo_delay_ms: Optional[float] = Field(None, description="Delay in milliseconds after servo commands to allow settling")
 
 
 class PlotterType(str, Enum):
