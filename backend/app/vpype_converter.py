@@ -457,20 +457,27 @@ def sort_svg_by_stroke(
 def build_vpype_config_content() -> str:
     """Generate vpype config content using current plotter gcode settings."""
     gcode = _get_default_gcode_settings()
+    plotter = None
+    try:
+        from .config_service import config_service
+
+        plotter = config_service.get_default_plotter()
+    except Exception:
+        plotter = None
     pen_up = getattr(gcode, "pen_up_command", "M280 P0 S110")
     if pen_up is None:
         pen_up = "M280 P0 S110"
     pen_down = getattr(gcode, "pen_down_command", "M280 P0 S130")
     if pen_down is None:
         pen_down = "M280 P0 S130"
-    draw_speed = getattr(gcode, "draw_speed", None)
-    if draw_speed is None:
-        draw_speed = 2000.0
+    pen_speed = getattr(plotter, "pen_speed", None)
+    if pen_speed is None:
+        pen_speed = 2000.0
     try:
-        draw_speed = float(draw_speed)
+        pen_speed = float(pen_speed)
     except (TypeError, ValueError):
-        draw_speed = 2000.0
-    draw_speed = min(max(draw_speed, 500.0), 8000.0)
+        pen_speed = 2000.0
+    draw_speed = min(max(pen_speed, 500.0), 8000.0)
     draw_feed = f"{draw_speed:g}"
     pen_down_sequence = pen_down
     

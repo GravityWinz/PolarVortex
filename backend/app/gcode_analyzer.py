@@ -69,10 +69,10 @@ def analyze_gcode_file(
     default_travel_feed = travel_feed_mm_per_min
 
     if default_plotter:
-        default_draw_feed = default_draw_feed or (default_plotter.pen_speed * 60.0)
+        default_draw_feed = default_draw_feed or default_plotter.pen_speed
         default_travel_feed = default_travel_feed or (default_plotter.max_speed * 60.0)
 
-    default_draw_feed = default_draw_feed or 1200.0  # reasonable pen speed (~20 mm/s)
+    default_draw_feed = default_draw_feed or 2000.0  # reasonable pen speed (mm/min)
     default_travel_feed = default_travel_feed or 6000.0  # faster travel (~100 mm/s)
 
     current_draw_feed = default_draw_feed
