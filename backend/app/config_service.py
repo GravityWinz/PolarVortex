@@ -78,6 +78,13 @@ class ConfigurationService:
             self.config_data.pop('gcode_sequences', None)
             needs_update = True
 
+        # Remove deprecated servo debounce settings from plotter configs
+        for plotter in self.config_data.get('plotters', []):
+            gcode_sequences = plotter.get('gcode_sequences')
+            if isinstance(gcode_sequences, dict) and 'servo_delay_ms' in gcode_sequences:
+                gcode_sequences.pop('servo_delay_ms', None)
+                needs_update = True
+
         # Save updated configuration if needed
         if needs_update:
             self._save_configurations()
@@ -362,7 +369,6 @@ class ConfigurationService:
             ],
             "pen_up_command": "M280 P0 S110",
             "pen_down_command": "M280 P0 S130",
-            "servo_delay_ms": 100.0,
         }
     
     def _validate_and_repair_config(self):
@@ -428,6 +434,10 @@ class ConfigurationService:
                     needs_repair = True
 
             gcode_sequences = plotter.get('gcode_sequences', {})
+            if 'servo_delay_ms' in gcode_sequences:
+                gcode_sequences.pop('servo_delay_ms', None)
+                plotter['gcode_sequences'] = gcode_sequences
+                needs_repair = True
             if 'draw_speed' in gcode_sequences:
                 gcode_sequences.pop('draw_speed', None)
                 plotter['gcode_sequences'] = gcode_sequences
@@ -690,7 +700,6 @@ class ConfigurationService:
             before_print=defaults.get("before_print", []),
             pen_up_command=defaults.get("pen_up_command", "M280 P0 S110"),
             pen_down_command=defaults.get("pen_down_command", "M280 P0 S130"),
-            servo_delay_ms=defaults.get("servo_delay_ms", 100.0),
         )
 
     def update_gcode_settings(self, gcode_data: GcodeSettingsUpdate) -> GcodeSettings:
@@ -743,7 +752,6 @@ class ConfigurationService:
                 before_print=gcode_data.get('before_print', []),
                 pen_up_command=gcode_data.get('pen_up_command', "M280 P0 S110"),
                 pen_down_command=gcode_data.get('pen_down_command', "M280 P0 S130"),
-                servo_delay_ms=gcode_data.get('servo_delay_ms', 100.0),
             ),
             is_default=plotter_dict['is_default'],
             created_at=datetime.fromisoformat(plotter_dict['created_at']),
@@ -782,7 +790,6 @@ class ConfigurationService:
                     before_print=gcode_data.get('before_print', []),
                     pen_up_command=pen_up,
                     pen_down_command=pen_down,
-                    servo_delay_ms=gcode_data.get('servo_delay_ms', 100.0),
                 )
         return None
 
@@ -805,9 +812,6 @@ class ConfigurationService:
                 if 'pen_down_command' in update_payload:
                     if update_payload['pen_down_command'] is not None:
                         existing['pen_down_command'] = update_payload['pen_down_command']
-                if 'servo_delay_ms' in update_payload:
-                    if update_payload['servo_delay_ms'] is not None:
-                        existing['servo_delay_ms'] = update_payload['servo_delay_ms']
 
                 plotter['gcode_sequences'] = existing
                 self._save_configurations()
