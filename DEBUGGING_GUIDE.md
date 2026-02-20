@@ -5,9 +5,10 @@ This guide explains how to debug both the frontend and backend components of the
 ## 🐛 Backend Python Debugging
 
 ### Prerequisites
-- VS Code with Python extension installed
+
+- **VS Code extensions**: Python (ms-python.python), Python Debugger (ms-python.debugpy)
 - Docker containers running
-- Python debugpy package installed (already included in requirements.txt)
+- Python debugpy package (already in requirements.txt)
 
 ### Configuration Status ✅
 
@@ -18,13 +19,13 @@ This guide explains how to debug both the frontend and backend components of the
 - **Environment**: `PYDEVD_DISABLE_FILE_VALIDATION=1` set
 
 #### 2. VS Code Configuration
-- **Launch Configuration**: `Attach to Backend (Python in Docker)`
+- **Launch configurations**: e.g. `Attach to Backend (Python in Docker)` or `Debug FastAPI Backend (Docker)` for Docker; `Debug FastAPI Backend (Local)` for local runs
 - **Path Mappings**: Local `backend/` → Container `/app`
 - **Debug Port**: localhost:5678
 
 ### How to Debug Backend
 
-#### Method 1: VS Code Debugger (Recommended)
+#### Method 1: VS Code + Docker (Recommended)
 
 1. **Start the containers:**
    ```bash
@@ -40,7 +41,7 @@ This guide explains how to debug both the frontend and backend components of the
 
 4. **Start debugging:**
    - Press `F5` or go to Run and Debug panel
-   - Select `Attach to Backend (Python in Docker)`
+   - Select `Attach to Backend (Python in Docker)` (or `Debug FastAPI Backend (Docker)`)
    - Click the play button
 
 5. **Trigger the code** by making an API request:
@@ -48,7 +49,21 @@ This guide explains how to debug both the frontend and backend components of the
    curl http://localhost:8000/health
    ```
 
-#### Method 2: Manual Debugging
+#### Method 2: Local Debugging (no Docker)
+
+1. **Set up a local environment:**
+   ```bash
+   cd backend
+   python -m venv venv
+   source venv/bin/activate   # macOS/Linux
+   # or: venv\Scripts\activate  # Windows
+   pip install -r requirements.txt
+   pip install -r requirements-dev.txt
+   ```
+
+2. **Set breakpoints**, then press `F5` and select **Debug FastAPI Backend (Local)**. The app runs locally and will stop at breakpoints.
+
+#### Method 3: Manual (attach + pdb)
 
 1. **Attach to the running container:**
    ```bash
@@ -60,232 +75,201 @@ This guide explains how to debug both the frontend and backend components of the
    netstat -tlnp | grep 5678
    ```
 
-3. **Use Python debugger directly:**
+3. **Use Python debugger in code:**
    ```python
    import pdb; pdb.set_trace()
    ```
 
+### Debug Configuration Details
+
+**.vscode/launch.json** typically includes:
+
+**Docker attach:**
+```json
+{
+    "name": "Debug FastAPI Backend (Docker)",
+    "type": "python",
+    "request": "attach",
+    "connect": { "host": "localhost", "port": 5678 },
+    "pathMappings": [
+        { "localRoot": "${workspaceFolder}/backend", "remoteRoot": "/app" }
+    ]
+}
+```
+
+**Local run:**
+```json
+{
+    "name": "Debug FastAPI Backend (Local)",
+    "type": "python",
+    "request": "launch",
+    "program": "${workspaceFolder}/backend/app/main.py"
+}
+```
+
+**Docker (backend):** `backend/Dockerfile.dev` runs debugpy, e.g.:
+- `-Xfrozen_modules=off` for debugging
+- `--listen 0.0.0.0:5678`, `--reload` for uvicorn
+
+### Setting Effective Breakpoints
+
+1. **API endpoints** – at the start of route handlers:
+   ```python
+   @app.get("/status")
+   async def get_status():
+       # Set breakpoint here
+       try:
+           # ...
+   ```
+
+2. **Error handling** – in exception handlers:
+   ```python
+   except Exception as e:
+       # Set breakpoint here to catch errors
+       logger.error(f"Error: {e}")
+   ```
+
+3. **Data processing** – before/after transformations:
+   ```python
+   def process_image_for_plotting(image_data: bytes, settings: dict) -> dict:
+       # Set breakpoint here to inspect input
+       image = Image.open(io.BytesIO(image_data))
+       # Set breakpoint here to inspect processed image
+   ```
+
+### Debug Console (when paused)
+
+In the Debug Console you can run:
+
+```python
+# Inspect variables
+print(image_data)
+print(settings)
+
+# Check file paths
+import os
+print(os.path.exists("local_storage"))
+
+# Test functions
+result = process_image_for_plotting(image_data, settings)
+print(result)
+```
+
+### Common Backend Debugging Scenarios
+
+**File upload:** break in the upload endpoint and inspect `file`, `contents`, `file.content_type`.
+
+**Directory creation:** break in `create_image_directory` and compare `image_name` vs `sanitize_filename(image_name)`.
+
+**Image processing:** break in `process_image_for_plotting` and inspect `image.size`, `image.mode`, and intermediate results.
+
 ### Debugging Features Available
 
-- ✅ **Breakpoints**: Set and hit breakpoints in VS Code
-- ✅ **Variable Inspection**: View local and global variables
-- ✅ **Call Stack**: Navigate through function calls
-- ✅ **Step Through**: Step into, over, and out of functions
-- ✅ **Hot Reload**: Code changes trigger automatic reload
-- ✅ **Console Output**: View print statements and logs
+- ✅ Breakpoints, variable inspection, call stack
+- ✅ Step into / over / out
+- ✅ Hot reload on code changes
+- ✅ Console output and logs
+
+---
 
 ## 🎨 Frontend React Debugging
 
 ### Configuration Status ✅
 
-#### 1. Docker Configuration
 - **Debug Port**: 9229 (exposed and mapped)
-- **Node Inspector**: Running with `--inspect=0.0.0.0:9229`
-- **Hot Reload**: Vite development server with hot reload
-
-#### 2. VS Code Configuration
-- **Launch Configuration**: `Attach to Frontend (Node.js in Docker)`
-- **Path Mappings**: Local `frontend/` → Container `/app`
-- **Debug Port**: localhost:9229
+- **Node Inspector**: `--inspect=0.0.0.0:9229`
+- **Launch**: e.g. `Attach to Frontend (Node.js in Docker)`, path mapping `frontend/` → `/app`
 
 ### How to Debug Frontend
 
-1. **Start the containers:**
-   ```bash
-   docker-compose up -d
-   ```
+1. **Start containers:** `docker-compose up -d`
+2. **Set breakpoints** in React components
+3. **Start debugging:** F5 → select `Attach to Frontend (Node.js in Docker)`
+4. **Open** http://localhost:5173 and trigger the code with breakpoints
 
-2. **Open VS Code and set breakpoints** in your React components
-
-3. **Start debugging:**
-   - Press `F5` or go to Run and Debug panel
-   - Select `Attach to Frontend (Node.js in Docker)`
-   - Click the play button
-
-4. **Open the application** in your browser:
-   - Navigate to http://localhost:5173
-   - Trigger the code with breakpoints
+---
 
 ## 🔧 Full Stack Debugging
 
-### Compound Debugging
-VS Code supports debugging both frontend and backend simultaneously:
+**Compound configuration:** Choose **Debug Full Stack (Docker)** to attach to both backend and frontend at once. Set breakpoints in Python and React and trigger flows from the UI or API.
 
-1. **Select compound configuration:**
-   - Choose `Debug Full Stack (Docker)` from the debug dropdown
-
-2. **Start debugging:**
-   - This will attach to both containers simultaneously
-   - Set breakpoints in both Python and JavaScript/React code
+---
 
 ## 🛠️ Troubleshooting
 
-### Common Issues
+### Debugger won’t connect
 
-#### 1. Debugger Won't Connect
+- **Ports:** `curl -v telnet://localhost:5678` (backend), `telnet://localhost:9229` (frontend)
+- **Container:** `docker-compose ps` and `docker-compose logs backend | grep debugpy`
+- **Restart:** `docker-compose restart backend` (or `frontend`)
+
+### Breakpoints not hitting
+
+- Check **path mappings** (`localRoot` / `remoteRoot`)
+- Attach **before** sending requests
+- For Docker: ensure you’re editing the same files that are mounted in the container
+- Optionally set `"justMyCode": false` in launch.json; use **conditional breakpoints** (right‑click breakpoint → Edit Breakpoint) to reduce noise
+
+### Performance
+
+- Use fewer breakpoints or conditional breakpoints
+- Consider `"justMyCode": false` only when you need to step into libraries
+
+### Container not starting
+
 ```bash
-# Check if debug ports are accessible
-curl -v telnet://localhost:5678  # Backend
-curl -v telnet://localhost:9229  # Frontend
-```
-
-#### 2. Breakpoints Not Hitting
-- Ensure path mappings are correct
-- Check that files are being watched for changes
-- Verify the debugger is attached before making requests
-
-#### 3. Container Not Starting
-```bash
-# Check container logs
 docker-compose logs backend
 docker-compose logs frontend
-
-# Rebuild containers
-docker-compose down
-docker-compose up --build -d
+docker-compose down && docker-compose up --build -d
 ```
 
-#### 4. Frozen Modules Warning
-- This is now fixed with `-Xfrozen_modules=off` flag
-- Environment variable `PYDEVD_DISABLE_FILE_VALIDATION=1` is set
+### Frozen modules warning
 
-### Debug Commands
+- Handled by `-Xfrozen_modules=off` and `PYDEVD_DISABLE_FILE_VALIDATION=1` in the dev setup.
 
-#### Container Management
-```bash
-# Start debugging environment
-docker-compose up -d
+### Cursor Remote (SSH) install timeout
 
-# View logs
-docker-compose logs -f backend
-docker-compose logs -f frontend
+If Cursor reports “Failed to install server within the timeout”:
 
-# Restart specific service
-docker-compose restart backend
-docker-compose restart frontend
+1. **Increase timeout** in settings, e.g. `"remote.SSH.serverInstallTimeout": 120` (or 300 on slow ARM boards).
+2. **Check remote log:** `ls /run/user/<uid>/cursor-remote-code.log.*`
+3. **Disk and permissions:** ensure `~/.cursor-server` is writable and there’s enough free space.
+4. **Retry install:** `rm -rf ~/.cursor-server/bin` then reconnect.
 
-# Rebuild and restart
-docker-compose up --build -d
-```
-
-#### Health Checks
-```bash
-# Test backend health
-curl http://localhost:8000/health
-
-# Test frontend
-curl http://localhost:5173
-
-# Test debug ports
-netstat -an | grep 5678  # Backend debug
-netstat -an | grep 9229  # Frontend debug
-```
+---
 
 ## 📊 Debugging Tips
 
-### Backend Debugging
-1. **Set breakpoints** in API endpoints before making requests
-2. **Use logging** for debugging without stopping execution
-3. **Inspect variables** in the debug console
-4. **Step through async code** carefully
+- **Backend:** Break in API handlers and async boundaries; use logging when you don’t want to stop.
+- **Frontend:** Use React DevTools and Network tab; break in event handlers and state updates.
+- **Resources:** `docker stats`; optionally profile with `time.time()` or a profiler.
 
-### Frontend Debugging
-1. **Set breakpoints** in React components and event handlers
-2. **Use React DevTools** browser extension for component inspection
-3. **Check network requests** in browser DevTools
-4. **Debug state changes** with Redux DevTools (if using Redux)
-
-### Performance Debugging
-1. **Monitor container resources:**
-   ```bash
-   docker stats
-   ```
-
-2. **Check memory usage:**
-   ```bash
-   docker-compose exec backend python -c "import psutil; print(psutil.virtual_memory())"
-   ```
-
-3. **Profile API endpoints:**
-   ```python
-   import time
-   start_time = time.time()
-   # Your code here
-   print(f"Execution time: {time.time() - start_time}")
-   ```
-
-## 🔍 Advanced Debugging
-
-### Remote Debugging
-If you need to debug from a different machine:
-
-1. **Update launch.json** with the correct host IP
-2. **Ensure firewall allows** debug ports (5678, 9229)
-3. **Use SSH tunneling** if needed
-
-### Cursor Remote (SSH) install timeout
-If Cursor reports "Failed to install server within the timeout", try:
-
-1. **Increase the install timeout** in Cursor settings:
-   ```json
-   {
-     "remote.SSH.serverInstallTimeout": 120
-   }
-   ```
-   Use a larger value on slower ARM boards (e.g., 300 seconds).
-2. **Check the remote log file** for a more specific error:
-   ```bash
-   ls /run/user/<uid>/cursor-remote-code.log.*
-   ```
-3. **Verify disk space and permissions** on the remote host:
-   - Ensure `~/.cursor-server` is writable
-   - Confirm there is enough free space in the home directory
-4. **Clear partial installs** if needed:
-   ```bash
-   rm -rf ~/.cursor-server/bin
-   ```
-
-### Production Debugging
-For debugging production issues:
-
-1. **Enable debug mode** in production environment
-2. **Add logging** to track issues
-3. **Use health checks** to monitor service status
-4. **Set up monitoring** with tools like Prometheus/Grafana
+---
 
 ## 📝 Debugging Checklist
 
-Before starting debugging:
+- [ ] Containers running (`docker-compose ps`)
+- [ ] Debug ports reachable (5678, 9229)
+- [ ] VS Code extensions and launch configs set up
+- [ ] Path mappings correct for Docker attach
+- [ ] Breakpoints set; app reachable (http://localhost:8000, http://localhost:5173)
 
-- [ ] Containers are running (`docker-compose ps`)
-- [ ] Debug ports are accessible (5678, 9229)
-- [ ] VS Code extensions are installed
-- [ ] Launch configurations are set up
-- [ ] Path mappings are correct
-- [ ] Breakpoints are set
-- [ ] Application is accessible (http://localhost:8000, http://localhost:5173)
+---
 
-## 🎯 Quick Start Commands
+## 🎯 Quick Start
 
 ```bash
-# Start debugging environment
 docker-compose up -d
-
-# Check status
 docker-compose ps
-
-# View logs
-docker-compose logs -f
-
-# Test endpoints
 curl http://localhost:8000/health
 curl http://localhost:5173
-
-# Attach debugger in VS Code
-# 1. Open Run and Debug panel
-# 2. Select "Attach to Backend (Python in Docker)"
-# 3. Press F5
+# In VS Code: Run and Debug → Attach to Backend (Python in Docker) → F5
 ```
 
-Your debugging setup is now fully configured and ready to use! 🚀
+---
 
+## 🔗 Useful Resources
+
+- [VS Code Python Debugging](https://code.visualstudio.com/docs/python/debugging)
+- [debugpy](https://github.com/microsoft/debugpy)
+- [FastAPI Debugging](https://fastapi.tiangolo.com/tutorial/debugging/)
