@@ -862,11 +862,37 @@ async def upload_gcode_to_project(
 
         project_dir = image_helper.get_project_directory(project_id)
         gcode_dir = project_dir / "gcode"
-        gcode_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            gcode_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            if e.errno == 13:  # Permission denied
+                logger.error(f"Permission denied creating gcode dir: {gcode_dir} ({e})")
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "Permission denied creating project gcode directory. "
+                        "If you run natively after using Docker, fix ownership: "
+                        "sudo chown -R $USER:$USER <your_storage_path> (e.g. backend/local_storage or path in config storage.project_storage)."
+                    ),
+                ) from e
+            raise
 
         save_path = gcode_dir / safe_filename
-        with open(save_path, "wb") as f:
-            f.write(content)
+        try:
+            with open(save_path, "wb") as f:
+                f.write(content)
+        except OSError as e:
+            if e.errno == 13:  # Permission denied
+                logger.error(f"Permission denied writing gcode file: {save_path} ({e})")
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "Permission denied writing G-code file. "
+                        "If you run natively after using Docker, fix ownership of the project storage directory: "
+                        "sudo chown -R $USER:$USER <storage_path> (see storage.project_storage in config)."
+                    ),
+                ) from e
+            raise
 
         # Store relative path inside project for portability
         stored_name = str(Path("gcode") / safe_filename)
