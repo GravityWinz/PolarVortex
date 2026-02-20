@@ -1,0 +1,11 @@
+
+2026-01-28 17:39:14.134 [info] (ssh_tunnel) stdout: Checking for code servers
+
+2026-01-28 17:39:14.134 [info] (ssh_tunnel) stdout: Code server script is not running
+
+2026-01-28 17:39:14.135 [info] (ssh_tunnel) stdout: Creating code server token file /run/user/1000/cursor-remote-code.token.ccf8bcbebf43835f356f85f9505993ab
+Starting code server script /home/guinness/.cursor-server/bin/linux-arm64/618c607a249dd7fd2ffc662c6531143833bebd40/bin/cursor-server --start-server --host=127.0.0.1 --port 0  --connection-token-file /run/user/1000/cursor-remote-code.token.ccf8bcbebf43835f356f85f9505993ab --telemetry-level off --enable-remote-auto-shutdown --accept-server-license-terms &> /run/user/1000/cursor-remote-code.log.ccf8bcbebf43835f356f85f9505993ab &
+Code server started with PID 3649 and wrote pid to file /run/user/1000/cursor-remote-code.pid.ccf8bcbebf43835f356f85f9505993ab
+Code server log file is /run/user/1000/cursor-remote-code.log.ccf8bcbebf43835f356f85f9505993ab
+
+2026-01-28 17:39:44.149 [error] Error installing server: Failed to install server within the timeout
