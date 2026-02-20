@@ -4,7 +4,6 @@ import {
   ArrowForward,
   ArrowUpward,
   Clear,
-  Home,
   Refresh,
   Send,
   Stop,
@@ -861,10 +860,6 @@ export default function ControlPanel({ currentProject }) {
     }
   };
 
-  const handleHome = () => {
-    sendCommand("G28");
-  };
-
   const handleMove = async (x, y) => {
     if (!connected) {
       showSnackbar("Please connect to plotter first", "warning");
@@ -892,12 +887,6 @@ export default function ControlPanel({ currentProject }) {
     } catch {
       setPenState(prev);
     }
-  };
-
-  const handleStop = () => {
-    stopPlotter().catch((err) => {
-      showSnackbar(`Stop error: ${err.message}`, "error");
-    });
   };
 
   const handleStopGcodeStreaming = () => {
@@ -1533,35 +1522,6 @@ export default function ControlPanel({ currentProject }) {
                     alignItems: "center",
                   }}
                 >
-                  <Chip
-                    label="Stop"
-                    color="error"
-                    variant="filled"
-                    icon={<Stop />}
-                    clickable={connected}
-                    onClick={handleStop}
-                    sx={{
-                      minWidth: 110,
-                      textTransform: "none",
-                      fontWeight: "bold",
-                    }}
-                  />
-                  <Chip
-                    label="Auto Home"
-                    color="primary"
-                    variant="filled"
-                    icon={<Home />}
-                    clickable={connected}
-                    onClick={() => {
-                      if (!connected) return;
-                      handleHome();
-                    }}
-                    sx={{
-                      minWidth: 110,
-                      textTransform: "none",
-                      fontWeight: "bold",
-                    }}
-                  />
                   <Chip
                     label="Set Home"
                     color="primary"
