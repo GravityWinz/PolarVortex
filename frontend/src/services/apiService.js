@@ -840,6 +840,24 @@ export async function stopPlotter() {
   }
 }
 
+export async function stopGcodeStreaming() {
+  try {
+    const response = await fetch(`${BASE_URL}/plotter/gcode/stop`, {
+      method: "POST",
+    });
+    const data = await response.json();
+    if (!response.ok || data.success === false) {
+      throw new Error(
+        data.error || data.detail || "Failed to stop G-code streaming"
+      );
+    }
+    return data;
+  } catch (err) {
+    console.error("Error stopping G-code streaming:", err);
+    throw err;
+  }
+}
+
 export async function sendGcodeCommand(gcode) {
   try {
     const response = await fetch(`${BASE_URL}/plotter/gcode`, {

@@ -479,20 +479,14 @@ def build_vpype_config_content() -> str:
         pen_speed = 2000.0
     draw_speed = min(max(pen_speed, 500.0), 8000.0)
     draw_feed = f"{draw_speed:g}"
-    pen_down_sequence = pen_down
-    
+
     before_print = getattr(gcode, "before_print", None)
     if before_print is None:
         before_print = []
     # Ensure pen is up in document_start and include only pre-print sequence
-    # Replace pen_down commands in before_print with exponential sequence
     doc_start_lines = []
     for line in before_print:
-        if line.strip() == pen_down.strip():
-            # Replace single pen_down with exponential sequence
-            doc_start_lines.append(pen_down_sequence)
-        else:
-            doc_start_lines.append(line)
+        doc_start_lines.append(line)
     # Check if pen_up is already in the lines
     pen_up_in_lines = any(line.strip().startswith(pen_up.strip()) for line in doc_start_lines)
     if not pen_up_in_lines:
@@ -517,7 +511,7 @@ linecollection_start = "{pen_up}\\n"
 # Set draw feed once after pen down.
 segment_first = """
 G0 X{{x:.3f}} Y{{y:.3f}}
-{pen_down_sequence}
+{pen_down}
 G1 F{draw_feed}
 """
 
@@ -542,11 +536,7 @@ M2 ; program end
 def ensure_vpype_config(
     path: Path = DEFAULT_VPYPE_CONFIG,
 ) -> Path:
-    """Ensure vpype config exists and reflects current plotter G-code settings.
-    
-    Args:
-        path: Path to vpype config file
-    """
+    """Ensure vpype config exists and reflects current plotter G-code settings."""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         content = build_vpype_config_content()

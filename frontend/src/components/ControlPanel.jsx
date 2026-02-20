@@ -4,7 +4,6 @@ import {
   ArrowForward,
   ArrowUpward,
   Clear,
-  Home,
   Refresh,
   Send,
   Stop,
@@ -48,6 +47,7 @@ import {
   resolveWsBaseUrl,
   runProjectGcode,
   sendGcodeCommand,
+  stopGcodeStreaming,
   stopPlotter,
   togglePausePlotter,
 } from "../services/apiService";
@@ -860,10 +860,6 @@ export default function ControlPanel({ currentProject }) {
     }
   };
 
-  const handleHome = () => {
-    sendCommand("G28");
-  };
-
   const handleMove = async (x, y) => {
     if (!connected) {
       showSnackbar("Please connect to plotter first", "warning");
@@ -893,10 +889,21 @@ export default function ControlPanel({ currentProject }) {
     }
   };
 
-  const handleStop = () => {
-    stopPlotter().catch((err) => {
-      showSnackbar(`Stop error: ${err.message}`, "error");
+  const handleStopGcodeStreaming = () => {
+    stopProgressPolling();
+    setGcodeRunning(false);
+    setGcodePaused(false);
+    setGcodeProgress({
+      jobId: null,
+      linesSent: 0,
+      linesTotal: 0,
+      progress: 0,
+      status: null,
     });
+    localStorage.removeItem("pv_gcode_progress");
+    stopGcodeStreaming().catch((err) =>
+      showSnackbar(`Stop streaming error: ${err.message}`, "error")
+    );
   };
 
   const handleHomeAxis = (axis) => {
@@ -1088,14 +1095,15 @@ export default function ControlPanel({ currentProject }) {
                         </Button>
                         <Chip
                           icon={<Stop />}
-                          label="Stop"
+                          label="Abort"
                           color="error"
                           variant="outlined"
                           clickable
-                          disabled={!connected}
+                          disabled={!connected || !gcodeRunning}
                           onClick={() => {
                             stopProgressPolling();
                             setGcodeRunning(false);
+                            setGcodePaused(false);
                             setGcodeProgress({
                               jobId: null,
                               linesSent: 0,
@@ -1108,6 +1116,16 @@ export default function ControlPanel({ currentProject }) {
                               showSnackbar(`Stop error: ${err.message}`, "error")
                             );
                           }}
+                          sx={{ fontWeight: "bold", textTransform: "none" }}
+                        />
+                        <Chip
+                          icon={<Stop />}
+                          label="Stop"
+                          color="warning"
+                          variant="outlined"
+                          clickable
+                          disabled={!connected || !gcodeRunning}
+                          onClick={handleStopGcodeStreaming}
                           sx={{ fontWeight: "bold", textTransform: "none" }}
                         />
                         <Chip
@@ -1504,35 +1522,6 @@ export default function ControlPanel({ currentProject }) {
                     alignItems: "center",
                   }}
                 >
-                  <Chip
-                    label="Stop"
-                    color="error"
-                    variant="filled"
-                    icon={<Stop />}
-                    clickable={connected}
-                    onClick={handleStop}
-                    sx={{
-                      minWidth: 110,
-                      textTransform: "none",
-                      fontWeight: "bold",
-                    }}
-                  />
-                  <Chip
-                    label="Auto Home"
-                    color="primary"
-                    variant="filled"
-                    icon={<Home />}
-                    clickable={connected}
-                    onClick={() => {
-                      if (!connected) return;
-                      handleHome();
-                    }}
-                    sx={{
-                      minWidth: 110,
-                      textTransform: "none",
-                      fontWeight: "bold",
-                    }}
-                  />
                   <Chip
                     label="Set Home"
                     color="primary"

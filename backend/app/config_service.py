@@ -369,7 +369,6 @@ class ConfigurationService:
             ],
             "pen_up_command": "M280 P0 S110",
             "pen_down_command": "M280 P0 S130",
-            "draw_speed": 2000.0,
         }
     
     def _validate_and_repair_config(self):
@@ -439,8 +438,8 @@ class ConfigurationService:
                 gcode_sequences.pop('servo_delay_ms', None)
                 plotter['gcode_sequences'] = gcode_sequences
                 needs_repair = True
-            if 'draw_speed' not in gcode_sequences:
-                gcode_sequences['draw_speed'] = 2000.0
+            if 'draw_speed' in gcode_sequences:
+                gcode_sequences.pop('draw_speed', None)
                 plotter['gcode_sequences'] = gcode_sequences
                 needs_repair = True
 
@@ -701,7 +700,6 @@ class ConfigurationService:
             before_print=defaults.get("before_print", []),
             pen_up_command=defaults.get("pen_up_command", "M280 P0 S110"),
             pen_down_command=defaults.get("pen_down_command", "M280 P0 S130"),
-            draw_speed=self._normalize_draw_speed(defaults.get("draw_speed", 2000.0)),
         )
 
     def update_gcode_settings(self, gcode_data: GcodeSettingsUpdate) -> GcodeSettings:
@@ -754,7 +752,6 @@ class ConfigurationService:
                 before_print=gcode_data.get('before_print', []),
                 pen_up_command=gcode_data.get('pen_up_command', "M280 P0 S110"),
                 pen_down_command=gcode_data.get('pen_down_command', "M280 P0 S130"),
-                draw_speed=self._normalize_draw_speed(gcode_data.get('draw_speed', 2000.0)),
             ),
             is_default=plotter_dict['is_default'],
             created_at=datetime.fromisoformat(plotter_dict['created_at']),
@@ -793,7 +790,6 @@ class ConfigurationService:
                     before_print=gcode_data.get('before_print', []),
                     pen_up_command=pen_up,
                     pen_down_command=pen_down,
-                    draw_speed=self._normalize_draw_speed(gcode_data.get('draw_speed', 2000.0)),
                 )
         return None
 
@@ -816,9 +812,6 @@ class ConfigurationService:
                 if 'pen_down_command' in update_payload:
                     if update_payload['pen_down_command'] is not None:
                         existing['pen_down_command'] = update_payload['pen_down_command']
-                if 'draw_speed' in update_payload:
-                    if update_payload['draw_speed'] is not None:
-                        existing['draw_speed'] = self._normalize_draw_speed(update_payload['draw_speed'])
                 plotter['gcode_sequences'] = existing
                 self._save_configurations()
                 return self.get_plotter_gcode_settings(plotter_id)
