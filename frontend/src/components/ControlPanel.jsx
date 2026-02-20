@@ -48,6 +48,7 @@ import {
   resolveWsBaseUrl,
   runProjectGcode,
   sendGcodeCommand,
+  stopGcodeStreaming,
   stopPlotter,
   togglePausePlotter,
 } from "../services/apiService";
@@ -899,6 +900,23 @@ export default function ControlPanel({ currentProject }) {
     });
   };
 
+  const handleStopGcodeStreaming = () => {
+    stopProgressPolling();
+    setGcodeRunning(false);
+    setGcodePaused(false);
+    setGcodeProgress({
+      jobId: null,
+      linesSent: 0,
+      linesTotal: 0,
+      progress: 0,
+      status: null,
+    });
+    localStorage.removeItem("pv_gcode_progress");
+    stopGcodeStreaming().catch((err) =>
+      showSnackbar(`Stop streaming error: ${err.message}`, "error")
+    );
+  };
+
   const handleHomeAxis = (axis) => {
     sendCommand(`G28 ${axis.toUpperCase()}`);
   };
@@ -1088,14 +1106,15 @@ export default function ControlPanel({ currentProject }) {
                         </Button>
                         <Chip
                           icon={<Stop />}
-                          label="Stop"
+                          label="Abort"
                           color="error"
                           variant="outlined"
                           clickable
-                          disabled={!connected}
+                          disabled={!connected || !gcodeRunning}
                           onClick={() => {
                             stopProgressPolling();
                             setGcodeRunning(false);
+                            setGcodePaused(false);
                             setGcodeProgress({
                               jobId: null,
                               linesSent: 0,
@@ -1108,6 +1127,16 @@ export default function ControlPanel({ currentProject }) {
                               showSnackbar(`Stop error: ${err.message}`, "error")
                             );
                           }}
+                          sx={{ fontWeight: "bold", textTransform: "none" }}
+                        />
+                        <Chip
+                          icon={<Stop />}
+                          label="Stop"
+                          color="warning"
+                          variant="outlined"
+                          clickable
+                          disabled={!connected || !gcodeRunning}
+                          onClick={handleStopGcodeStreaming}
                           sx={{ fontWeight: "bold", textTransform: "none" }}
                         />
                         <Chip

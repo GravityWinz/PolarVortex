@@ -455,6 +455,29 @@ class PlotterService:
                         job["finished_at"] = datetime.now().isoformat()
         self.gcode_pause_all.clear()
 
+    async def stop_gcode_streaming(self) -> Dict[str, Any]:
+        """Stop streaming G-code without sending an emergency stop."""
+        try:
+            self.cancel_all_gcode_jobs()
+            self.current_status["drawing"] = False
+            self.current_status["current_command"] = None
+
+            with self._gcode_jobs_lock:
+                canceled_jobs = [
+                    job_id
+                    for job_id, job in self.gcode_jobs.items()
+                    if job.get("status") == "canceled"
+                ]
+
+            return {
+                "success": True,
+                "message": "G-code streaming stopped",
+                "canceled_jobs": canceled_jobs,
+            }
+        except Exception as exc:
+            logger.error("Stop G-code streaming error: %s", exc)
+            return {"success": False, "error": str(exc)}
+
     async def stop_plotter(self) -> Dict[str, Any]:
         """Stop plotter immediately and cancel any running G-code jobs."""
         try:

@@ -1363,6 +1363,11 @@ async def stop_plotter():
     """Stop plotter immediately and cancel any running G-code jobs."""
     return await plotter_service.stop_plotter()
 
+@app.post("/plotter/gcode/stop")
+async def stop_gcode_streaming():
+    """Stop streaming G-code without emergency stop."""
+    return await plotter_service.stop_gcode_streaming()
+
 
 @app.post("/plotter/pause")
 async def pause_plotter():
