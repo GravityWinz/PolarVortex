@@ -195,9 +195,6 @@ class ConfigurationService:
                 "name": "Default Polargraph",
                 "width": 1000.0,
                 "height": 1000.0,
-                "mm_per_rev": 95.0,
-                "steps_per_rev": 200.0,
-                "max_speed": 100.0,
                 "pen_speed": 2000.0,
                 "gcode_sequences": self._get_default_gcode_sequences(),
                 "is_default": True,
@@ -417,13 +414,13 @@ class ConfigurationService:
         for plotter in self.config_data.get('plotters', []):
             required_fields = [
                 'id', 'name', 'width', 'height',
-                'mm_per_rev', 'steps_per_rev', 'pen_speed', 'gcode_sequences'
+                'pen_speed', 'gcode_sequences'
             ]
             for field in required_fields:
                 if field not in plotter:
                     if field == 'id':
                         plotter[field] = str(uuid.uuid4())
-                    elif field in ['width', 'height', 'mm_per_rev', 'steps_per_rev']:
+                    elif field in ['width', 'height']:
                         plotter[field] = 0.0
                     elif field == 'pen_speed':
                         plotter[field] = 2000.0
@@ -500,9 +497,6 @@ class ConfigurationService:
             "name": plotter_data.name,
             "width": plotter_data.width,
             "height": plotter_data.height,
-            "mm_per_rev": plotter_data.mm_per_rev,
-            "steps_per_rev": plotter_data.steps_per_rev,
-            "max_speed": plotter_data.max_speed,
             "pen_speed": plotter_data.pen_speed,
             "gcode_sequences": gcode_sequences,
             "is_default": plotter_data.is_default,
@@ -736,16 +730,13 @@ class ConfigurationService:
         )
     
     def _dict_to_plotter_response(self, plotter_dict: Dict[str, Any]) -> PlotterResponse:
-        """Convert dictionary to PlotterResponse"""
+        """Convert dictionary to PlotterResponse. Legacy keys (mm_per_rev, steps_per_rev, max_speed) are ignored if present."""
         gcode_data = plotter_dict.get('gcode_sequences', self._get_default_gcode_sequences())
         return PlotterResponse(
             id=plotter_dict['id'],
             name=plotter_dict['name'],
             width=plotter_dict['width'],
             height=plotter_dict['height'],
-            mm_per_rev=plotter_dict['mm_per_rev'],
-            steps_per_rev=plotter_dict['steps_per_rev'],
-            max_speed=plotter_dict['max_speed'],
             pen_speed=plotter_dict['pen_speed'],
             gcode_sequences=GcodeSettings(
                 on_connect=gcode_data.get('on_connect', []),
