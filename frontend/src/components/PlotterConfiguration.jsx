@@ -55,16 +55,11 @@ export default function PlotterConfiguration() {
     name: "",
     width: 1000,
     height: 1000,
-    mm_per_rev: 95.0,
-    steps_per_rev: 200.0,
-    max_speed: 100.0,
     pen_speed: 2000.0,
     gcode_pen_up_command: "M280 P0 S110",
     gcode_pen_down_command: "M280 P0 S130",
     gcode_on_connect: "",
     gcode_before_print: "",
-    home_position_x: 0.0,
-    home_position_y: 0.0,
     is_default: false,
   });
 
@@ -98,16 +93,11 @@ export default function PlotterConfiguration() {
       name: "",
       width: 1000,
       height: 1000,
-      mm_per_rev: 95.0,
-      steps_per_rev: 200.0,
-      max_speed: 100.0,
       pen_speed: 2000.0,
       gcode_pen_up_command: "M280 P0 S110",
       gcode_pen_down_command: "M280 P0 S130",
       gcode_on_connect: "",
       gcode_before_print: "",
-      home_position_x: 0.0,
-      home_position_y: 0.0,
       is_default: false,
     });
     setDialogOpen(true);
@@ -119,9 +109,6 @@ export default function PlotterConfiguration() {
       name: plotter.name,
       width: plotter.width,
       height: plotter.height,
-      mm_per_rev: plotter.mm_per_rev,
-      steps_per_rev: plotter.steps_per_rev,
-      max_speed: plotter.max_speed,
       pen_speed: plotter.pen_speed,
       gcode_pen_up_command:
         plotter.gcode_sequences?.pen_up_command || "M280 P0 S110",
@@ -131,8 +118,6 @@ export default function PlotterConfiguration() {
       gcode_before_print: (plotter.gcode_sequences?.before_print || []).join(
         "\n",
       ),
-      home_position_x: plotter.home_position_x,
-      home_position_y: plotter.home_position_y,
       is_default: plotter.is_default,
     });
     setDialogOpen(true);
@@ -247,7 +232,6 @@ export default function PlotterConfiguration() {
             <TableRow>
               <TableCell>Name</TableCell>
               <TableCell>Dimensions (mm)</TableCell>
-              <TableCell>Motor Settings</TableCell>
               <TableCell>Default</TableCell>
               <TableCell>Actions</TableCell>
             </TableRow>
@@ -258,9 +242,6 @@ export default function PlotterConfiguration() {
                 <TableCell>{plotter.name}</TableCell>
                 <TableCell>
                   {plotter.width} × {plotter.height}
-                </TableCell>
-                <TableCell>
-                  {plotter.mm_per_rev}mm/rev, {plotter.steps_per_rev} steps/rev
                 </TableCell>
                 <TableCell>
                   {plotter.is_default ? (
@@ -378,77 +359,10 @@ export default function PlotterConfiguration() {
               <Divider sx={{ my: 2 }} />
             </Grid>
 
-            {/* Motor Settings */}
-            <Grid item xs={12}>
-              <Typography variant="h6" gutterBottom>
-                Motor Settings
-              </Typography>
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                label="mm per revolution"
-                type="number"
-                value={formData.mm_per_rev}
-                onChange={(e) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    mm_per_rev: parseFloat(e.target.value) || 0,
-                  }))
-                }
-                required
-              />
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                label="Steps per revolution"
-                type="number"
-                value={formData.steps_per_rev}
-                onChange={(e) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    steps_per_rev: parseFloat(e.target.value) || 0,
-                  }))
-                }
-                required
-              />
-            </Grid>
-
-            <Grid item xs={12}>
-              <Divider sx={{ my: 2 }} />
-            </Grid>
-
             {/* Speed Settings */}
             <Grid item xs={12}>
               <Typography variant="h6" gutterBottom>
                 Speed Settings
-              </Typography>
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                label="Max Speed (mm/s)"
-                type="number"
-                value={formData.max_speed}
-                onChange={(e) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    max_speed: parseFloat(e.target.value) || 0,
-                  }))
-                }
-                required
-              />
-            </Grid>
-
-            <Grid item xs={12}>
-              <Divider sx={{ my: 2 }} />
-            </Grid>
-
-            {/* Pen Settings */}
-            <Grid item xs={12}>
-              <Typography variant="h6" gutterBottom>
-                Pen Settings
               </Typography>
             </Grid>
             <Grid item xs={12} sm={6}>
@@ -467,6 +381,16 @@ export default function PlotterConfiguration() {
               />
             </Grid>
 
+            <Grid item xs={12}>
+              <Divider sx={{ my: 2 }} />
+            </Grid>
+
+            {/* Pen Settings */}
+            <Grid item xs={12}>
+              <Typography variant="h6" gutterBottom>
+                Pen Settings
+              </Typography>
+            </Grid>
             <Grid item xs={12} sm={6}>
               <TextField
                 fullWidth
@@ -493,47 +417,6 @@ export default function PlotterConfiguration() {
                   }))
                 }
                 helperText="Command sent to lower the pen"
-              />
-            </Grid>
-
-            <Grid item xs={12}>
-              <Divider sx={{ my: 2 }} />
-            </Grid>
-
-            {/* Home Position */}
-            <Grid item xs={12}>
-              <Typography variant="h6" gutterBottom>
-                Home Position
-              </Typography>
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                label="Home X (mm)"
-                type="number"
-                value={formData.home_position_x}
-                onChange={(e) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    home_position_x: parseFloat(e.target.value) || 0,
-                  }))
-                }
-                required
-              />
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                label="Home Y (mm)"
-                type="number"
-                value={formData.home_position_y}
-                onChange={(e) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    home_position_y: parseFloat(e.target.value) || 0,
-                  }))
-                }
-                required
               />
             </Grid>
 
