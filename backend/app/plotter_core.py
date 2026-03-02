@@ -375,6 +375,7 @@ class PlotterCore:
                     time.sleep(0.001)
                 if not self.clear:
                     logger.warning(f"Timeout waiting for 'ok' after command: {command}")
+                    self.clear = True  # Recover from deadlock so send loop can continue
         except DeviceError as e:
             msg = f"Can't write to plotter (disconnected?) {e}"
             logger.error(msg)
