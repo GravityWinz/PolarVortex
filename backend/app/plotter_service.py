@@ -527,7 +527,11 @@ class PlotterService:
             # Use PlotterCore if available
             if self.plotter_core and self.plotter_core.online:
                 if was_paused:
-                    # Resume
+                    # Resume: send M108 to unpause Marlin (stops "paused for user" wait)
+                    try:
+                        self.plotter_core.send_now("M108")
+                    except Exception as exc:
+                        logger.warning("Failed to send M108 resume command via PlotterCore: %s", exc)
                     if self.plotter_core.paused:
                         self.plotter_core.resume()
                     self.gcode_pause_all.clear()
@@ -560,6 +564,11 @@ class PlotterService:
             
             # Fallback to old method
             if was_paused:
+                if self.arduino and getattr(self.arduino, "is_open", False):
+                    try:
+                        self.arduino.write(b"M108\n")
+                    except Exception as exc:
+                        logger.warning("Failed to send M108 resume command: %s", exc)
                 self.gcode_pause_all.clear()
                 with self._gcode_jobs_lock:
                     for job in self.gcode_jobs.values():
