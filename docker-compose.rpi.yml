@@ -47,6 +47,7 @@ services:
       - ./backend/local_storage:/app/local_storage
       - ./backend/logs:/app/logs
     environment:
+      - PYTHONUNBUFFERED=1
       - PYTHONPATH=/app
       - BACKEND_HOST=0.0.0.0
       - BACKEND_PORT=8000
