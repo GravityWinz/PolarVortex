@@ -41,6 +41,8 @@ from .plotter_models import (
 from .plotter_service import plotter_service, GCODE_SEND_DELAY_SECONDS
 from .gcode_analyzer import analyze_gcode_file
 from .svg_analyzer import analyze_svg_file
+from .terrain_models import TerrainRidgelineRequest, TerrainRidgelineResponse
+from .terrain_service import generate_ridgeline_svg
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -1979,6 +1981,32 @@ async def get_svg_generator_details(generator_id: str):
     except Exception as e:
         logger.error(f"Error getting SVG generator info: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/terrain/ridgeline", response_model=TerrainRidgelineResponse)
+async def generate_terrain_ridgeline(request: TerrainRidgelineRequest):
+    """Generate a terrain ridgeline SVG using Mapbox Terrain-RGB."""
+    try:
+        svg, paper = await generate_ridgeline_svg(request)
+        return TerrainRidgelineResponse(
+            success=True,
+            svg=svg,
+            width_mm=paper.width_mm,
+            height_mm=paper.height_mm,
+            paper_name=paper.name,
+        )
+    except Exception as e:
+        logger.error("Terrain ridgeline error", exc_info=True)
+        message = str(e)
+        if "MAPBOX_TOKEN" in message:
+            detail = "Mapbox token is not configured on the server."
+        elif "Bounding box too large" in message:
+            detail = "Selected area is too large. Zoom in or use a smaller box."
+        elif "No paper configurations" in message:
+            detail = "No paper configurations found. Add a paper in Configuration → Papers."
+        else:
+            detail = "Failed to generate terrain SVG. Please try again."
+        raise HTTPException(status_code=500, detail=detail)
 
 @app.post("/projects/{project_id}/generate-svg")
 async def generate_project_svg(

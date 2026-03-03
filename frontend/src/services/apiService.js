@@ -515,6 +515,27 @@ export async function saveProjectSvg(projectId, svgContent, filename) {
   }
 }
 
+// Terrain SVG API
+export async function generateTerrainRidgeline(payload) {
+  try {
+    const response = await fetch(`${BASE_URL}/terrain/ridgeline`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.success === false) {
+      throw new Error(data.detail || data.error || "Terrain SVG generation failed");
+    }
+    return data;
+  } catch (err) {
+    console.error("Error generating terrain SVG:", err);
+    throw err;
+  }
+}
+
 export function getProjectVectorizationSvgUrl(projectId) {
   return `${BASE_URL}/projects/${projectId}/vectorize/export-svg`;
 }

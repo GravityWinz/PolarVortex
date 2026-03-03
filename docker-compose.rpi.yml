@@ -15,8 +15,11 @@ services:
       - VITE_WS_BASE_URL=ws://192.168.11.205:8000
       - CHOKIDAR_USEPOLLING=true
       - WATCHPACK_POLLING=true
+      - MAPBOX_TOKEN=pk.eyJ1IjoibWx1dHplIiwiYSI6ImNta3l4ZDF2NjBjZ2czZ3B6eW1uaXhiMWQifQ.hxh0wTPXHdM-sOewdz7AJA
+      - VITEMAPBOX_TOKEN=pk.eyJ1IjoibWx1dHplIiwiYSI6ImNta3l4ZDF2NjBjZ2czZ3B6eW1uaXhiMWQifQ.hxh0wTPXHdM-sOewdz7AJA
+
     env_file:
-      - env.example
+      - .env
     depends_on:
       backend:
         condition: service_healthy
@@ -56,8 +59,11 @@ services:
       - ARDUINO_PORTS=/dev/serial/by-id/usb-marlinfw.org_Marlin_USB_Device_18FF601AAE299828528F78F9F5001E87-if00,/dev/ttyACM0
       - CORS_ORIGINS=http://192.168.11.205:5173,http://localhost:5173
       - WATCHFILES_FORCE_POLLING=true
+      - MAPBOX_TOKEN=pk.eyJ1IjoibWx1dHplIiwiYSI6ImNta3l4ZDF2NjBjZ2czZ3B6eW1uaXhiMWQifQ.hxh0wTPXHdM-sOewdz7AJA
+      - VITE_MAPBOX_TOKEN=pk.eyJ1IjoibWx1dHplIiwiYSI6ImNta3l4ZDF2NjBjZ2czZ3B6eW1uaXhiMWQifQ.hxh0wTPXHdM-sOewdz7AJA
+
     env_file:
-      - env.example
+      - .env
     devices:
       - /dev/ttyACM0:/dev/ttyACM0 # Alternative Linux Arduino port
       - /dev/ttyACM1:/dev/ttyACM1
