@@ -126,6 +126,17 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 Leave this terminal running. The API will be at `http://<pi-ip>:8000`.
 
+**One-command startup (both backend and frontend, keeps running after terminal closes):**
+
+```bash
+cd ~/PolarVortex
+# Set ARDUINO_PORTS (and optionally PV_CONFIG) in backend/.env or export them first
+chmod +x scripts/start_native.sh
+./scripts/start_native.sh
+```
+
+This starts backend and frontend with `nohup` and writes PIDs and logs under `backend/local_storage/log/`. To stop: `kill $(cat backend/local_storage/log/backend.pid) $(cat backend/local_storage/log/frontend.pid)`.
+
 ## 5. Frontend
 
 ### Option A: Development server (recommended for daily use)

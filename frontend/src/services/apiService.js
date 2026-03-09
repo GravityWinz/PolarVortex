@@ -154,6 +154,16 @@ export async function getProjectFileText(projectId, filename) {
   return text;
 }
 
+export async function getProjectGcodePreviewSvg(projectId, filename) {
+  const safePath = (filename || "").split("/").map(encodeURIComponent).join("/");
+  const url = `${BASE_URL}/projects/${projectId}/images/${safePath}/gcode-preview`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to load G-code preview: ${response.statusText}`);
+  }
+  return response.text();
+}
+
 export async function deleteProjectFile(projectId, filename) {
   const safePath = (filename || "").split("/").map(encodeURIComponent).join("/");
   const url = `${BASE_URL}/projects/${projectId}/images/${safePath}`;
