@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, WebSocket, WebSocketDisconnect, HTTPException, Form, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, Response
 from contextlib import asynccontextmanager
 import serial
 import serial.tools.list_ports
@@ -40,6 +40,7 @@ from .plotter_models import (
 )
 from .plotter_service import plotter_service, GCODE_SEND_DELAY_SECONDS
 from .gcode_analyzer import analyze_gcode_file
+from .gcode_svg import gcode_to_svg_string
 from .svg_analyzer import analyze_svg_file
 
 # Configure logging
@@ -456,6 +457,47 @@ async def get_project_thumbnail(project_id: str):
     except Exception as e:
         logger.error(f"Get project thumbnail error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/projects/{project_id}/images/{filename:path}/gcode-preview")
+async def get_project_gcode_preview(project_id: str, filename: str):
+    """Convert a project G-code file into an SVG preview."""
+    try:
+        _ensure_valid_project_id(project_id)
+        project = project_service.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        if ".." in filename.split("/") or ".." in filename.split("\\"):
+            raise HTTPException(status_code=400, detail="Invalid file path")
+
+        candidate = Path(filename)
+        if candidate.is_absolute() or ".." in candidate.parts:
+            raise HTTPException(status_code=400, detail="Invalid file path")
+
+        ext = candidate.suffix.lower()
+        if ext not in ALLOWED_GCODE_EXTENSIONS:
+            raise HTTPException(status_code=400, detail="File is not a G-code file")
+
+        project_dir = project_service._get_project_directory(project_id).resolve()
+        gcode_path = (project_dir / filename).resolve()
+
+        if project_dir not in gcode_path.parents and project_dir != gcode_path:
+            raise HTTPException(status_code=400, detail="Invalid file path")
+
+        if not gcode_path.exists() or not gcode_path.is_file():
+            raise HTTPException(status_code=404, detail="G-code file not found")
+
+        gcode_text = gcode_path.read_text(encoding="utf-8")
+        svg = gcode_to_svg_string(gcode_text)
+        return Response(content=svg, media_type="image/svg+xml")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"G-code preview error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/projects/{project_id}/images/{filename:path}")
 async def get_project_image(project_id: str, filename: str):
