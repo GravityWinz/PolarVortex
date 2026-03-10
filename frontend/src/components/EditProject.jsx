@@ -55,6 +55,7 @@ import {
   getProjectFileText,
   getProjectFileUrl,
   getProjectGcodeAnalysis,
+  getProjectGcodePreviewSvg,
   getProjectSvgAnalysis,
   createProjectThumbnail,
   renameProjectFile,
@@ -220,57 +221,6 @@ function buildAssetSecondaryText(asset) {
   return parts.length ? parts.join(" • ") : undefined;
 }
 
-function parseGcodeForPreview(content) {
-  let x = 0;
-  let y = 0;
-  const segments = [];
-  let bounds = null;
-
-  const lines = content.split(/\r?\n/);
-  for (const rawLine of lines) {
-    const noComment = rawLine.split(";")[0].trim();
-    if (!noComment) continue;
-
-    const cmdMatch = noComment.match(/\bG0?0\b|\bG0?1\b/i);
-    if (!cmdMatch) continue;
-    const cmd = cmdMatch[0].toUpperCase();
-    const penDown = cmd !== "G0" && cmd !== "G00";
-
-    const xMatch = noComment.match(/X(-?\d+(\.\d+)?)/i);
-    const yMatch = noComment.match(/Y(-?\d+(\.\d+)?)/i);
-    const nextX = xMatch ? parseFloat(xMatch[1]) : x;
-    const nextY = yMatch ? parseFloat(yMatch[1]) : y;
-
-    if (Number.isNaN(nextX) || Number.isNaN(nextY)) {
-      continue;
-    }
-
-    if (nextX === x && nextY === y) {
-      continue;
-    }
-
-    segments.push({
-      from: { x, y },
-      to: { x: nextX, y: nextY },
-      penDown,
-    });
-
-    x = nextX;
-    y = nextY;
-
-    bounds = bounds
-      ? {
-          minX: Math.min(bounds.minX, x),
-          maxX: Math.max(bounds.maxX, x),
-          minY: Math.min(bounds.minY, y),
-          maxY: Math.max(bounds.maxY, y),
-        }
-      : { minX: x, maxX: x, minY: y, maxY: y };
-  }
-
-  return { segments, bounds };
-}
-
 export default function EditProject({ currentProject }) {
   const [assets, setAssets] = useState({ images: [], svgs: [], gcode: [] });
   const [loadingAssets, setLoadingAssets] = useState(false);
@@ -303,10 +253,7 @@ export default function EditProject({ currentProject }) {
     error: "",
   });
   const [deletingFile, setDeletingFile] = useState(null);
-  const [gcodeGeometry, setGcodeGeometry] = useState({
-    segments: [],
-    bounds: null,
-  });
+  const [gcodePreviewSvg, setGcodePreviewSvg] = useState("");
   const [convertDialogOpen, setConvertDialogOpen] = useState(false);
   const [convertTarget, setConvertTarget] = useState(null);
   const [convertOptions, setConvertOptions] = useState({
@@ -343,7 +290,6 @@ export default function EditProject({ currentProject }) {
   const [svgDragging, setSvgDragging] = useState(false);
   const [svgDragStart, setSvgDragStart] = useState({ x: 0, y: 0 });
   const svgContainerRef = useRef(null);
-  const gcodeCanvasRef = useRef(null);
   const gcodeContainerRef = useRef(null);
   const [gcodeDragging, setGcodeDragging] = useState(false);
   const [gcodeDragStart, setGcodeDragStart] = useState({ x: 0, y: 0 });
@@ -472,21 +418,24 @@ export default function EditProject({ currentProject }) {
   useEffect(() => {
     if (!selectedAsset || selectedAsset.type !== "gcode" || !currentProject) {
       setGcodePreview({ loading: false, content: "", error: "" });
+      setGcodePreviewSvg("");
       setGcodeAnalysis({ loading: false, data: null, error: "" });
       setSvgAnalysis({ loading: false, data: null, error: "" });
       return;
     }
 
     let cancelled = false;
-    const loadText = async () => {
+    const load = async () => {
       setGcodePreview({ loading: true, content: "", error: "" });
+      setGcodePreviewSvg("");
       try {
-        const content = await getProjectFileText(
-          currentProject.id,
-          selectedAsset.filename
-        );
+        const [content, svg] = await Promise.all([
+          getProjectFileText(currentProject.id, selectedAsset.filename),
+          getProjectGcodePreviewSvg(currentProject.id, selectedAsset.filename),
+        ]);
         if (!cancelled) {
           setGcodePreview({ loading: false, content, error: "" });
+          setGcodePreviewSvg(svg);
         }
       } catch (err) {
         if (!cancelled) {
@@ -495,25 +444,16 @@ export default function EditProject({ currentProject }) {
             content: "",
             error: err.message || "Failed to load file",
           });
+          setGcodePreviewSvg("");
         }
       }
     };
 
-    loadText();
+    load();
     return () => {
       cancelled = true;
     };
   }, [currentProject, selectedAsset]);
-
-  useEffect(() => {
-    if (selectedAsset?.type !== "gcode" || !gcodePreview.content) {
-      setGcodeGeometry({ segments: [], bounds: null });
-      return;
-    }
-
-    const parsed = parseGcodeForPreview(gcodePreview.content);
-    setGcodeGeometry(parsed);
-  }, [selectedAsset, gcodePreview.content]);
 
   useEffect(() => {
     if (selectedAsset?.type !== "svg") {
@@ -972,118 +912,6 @@ export default function EditProject({ currentProject }) {
     setGcodePan({ x: 0, y: 0 });
   };
 
-  // Draw G-code preview on canvas for performance
-  useEffect(() => {
-    const canvas = gcodeCanvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext("2d");
-    const printableSegments = (gcodeGeometry.segments || []).filter(
-      (seg) => seg.penDown
-    );
-
-    const width = 640;
-    const height = 420;
-    canvas.width = width;
-    canvas.height = height;
-
-    const fillBackground = () => {
-      ctx.clearRect(0, 0, width, height);
-      ctx.fillStyle = "#999999";
-      ctx.fillRect(0, 0, width, height);
-    };
-
-    if (!printableSegments.length) {
-      fillBackground();
-      return;
-    }
-
-    const calcBounds = (segments) => {
-      if (!segments.length) return null;
-      return segments.reduce(
-        (acc, seg) => ({
-          minX: Math.min(acc.minX, seg.from.x, seg.to.x),
-          maxX: Math.max(acc.maxX, seg.from.x, seg.to.x),
-          minY: Math.min(acc.minY, seg.from.y, seg.to.y),
-          maxY: Math.max(acc.maxY, seg.from.y, seg.to.y),
-        }),
-        {
-          minX: Infinity,
-          maxX: -Infinity,
-          minY: Infinity,
-          maxY: -Infinity,
-        }
-      );
-    };
-
-    const bounds = calcBounds(printableSegments);
-    const paperWidth = defaultPaper ? Number(defaultPaper.width) || 0 : 0;
-    const paperHeight = defaultPaper ? Number(defaultPaper.height) || 0 : 0;
-    const paperBox =
-      paperWidth > 0 && paperHeight > 0
-        ? {
-            minX: -paperWidth / 2,
-            maxX: paperWidth / 2,
-            minY: -paperHeight / 2,
-            maxY: paperHeight / 2,
-          }
-        : null;
-
-    const combinedBounds = bounds
-      ? {
-          minX: Math.min(bounds.minX, paperBox ? paperBox.minX : bounds.minX),
-          maxX: Math.max(bounds.maxX, paperBox ? paperBox.maxX : bounds.maxX),
-          minY: Math.min(bounds.minY, paperBox ? paperBox.minY : bounds.minY),
-          maxY: Math.max(bounds.maxY, paperBox ? paperBox.maxY : bounds.maxY),
-        }
-      : paperBox;
-
-    const { minX, maxX, minY, maxY } = combinedBounds || bounds;
-    const padding = 16;
-    const spanX = Math.max(maxX - minX, 1);
-    const spanY = Math.max(maxY - minY, 1);
-    const scaleX = (width - padding * 2) / spanX;
-    const scaleY = (height - padding * 2) / spanY;
-    const baseScale = Math.min(scaleX, scaleY);
-    const scale = baseScale * gcodeZoom;
-    const centerX = (minX + maxX) / 2;
-    const centerY = (minY + maxY) / 2;
-
-    const mapPoint = (x, y) => ({
-      // Positive pan moves the drawing in the same direction as the mouse drag
-      x: width / 2 + (x - centerX + gcodePan.x) * scale,
-      y: height / 2 - (y - centerY - gcodePan.y) * scale,
-    });
-
-    fillBackground();
-
-    // Draw paper outline
-    if (paperBox) {
-      const tl = mapPoint(paperBox.minX, paperBox.minY);
-      const br = mapPoint(paperBox.maxX, paperBox.maxY);
-      ctx.save();
-      ctx.strokeStyle = "#8bc34a";
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([6, 4]);
-      ctx.strokeRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
-      ctx.restore();
-    }
-
-    // Draw segments in a single path for speed
-    ctx.save();
-    ctx.strokeStyle = "#1976d2";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    for (const seg of printableSegments) {
-      const from = mapPoint(seg.from.x, seg.from.y);
-      const to = mapPoint(seg.to.x, seg.to.y);
-      ctx.moveTo(from.x, from.y);
-      ctx.lineTo(to.x, to.y);
-    }
-    ctx.stroke();
-    ctx.restore();
-  }, [gcodeGeometry, gcodeZoom, gcodePan, defaultPaper]);
-
   // SVG pan/zoom handlers
   const handleSvgMouseDown = (e) => {
     if (e.button !== 0) return; // Only left mouse button
@@ -1244,85 +1072,24 @@ export default function EditProject({ currentProject }) {
   };
 
   const renderGcodePlot = () => {
-    const printableSegments = (gcodeGeometry.segments || []).filter(
-      (seg) => seg.penDown
-    );
-
-    const calcBounds = (segments) => {
-      if (!segments.length) return null;
-      return segments.reduce(
-        (acc, seg) => ({
-          minX: Math.min(acc.minX, seg.from.x, seg.to.x),
-          maxX: Math.max(acc.maxX, seg.from.x, seg.to.x),
-          minY: Math.min(acc.minY, seg.from.y, seg.to.y),
-          maxY: Math.max(acc.maxY, seg.from.y, seg.to.y),
-        }),
-        {
-          minX: Infinity,
-          maxX: -Infinity,
-          minY: Infinity,
-          maxY: -Infinity,
-        }
-      );
-    };
-
-    const bounds = calcBounds(printableSegments);
-
-    const paperWidth = defaultPaper ? Number(defaultPaper.width) || 0 : 0;
-    const paperHeight = defaultPaper ? Number(defaultPaper.height) || 0 : 0;
-    const paperBox =
-      paperWidth > 0 && paperHeight > 0
-        ? {
-            minX: -paperWidth / 2,
-            maxX: paperWidth / 2,
-            minY: -paperHeight / 2,
-            maxY: paperHeight / 2,
-          }
-        : null;
-
-    // Expand bounds to include paper rectangle so both fit the viewport
-    const combinedBounds = bounds
-      ? {
-          minX: Math.min(bounds.minX, paperBox ? paperBox.minX : bounds.minX),
-          maxX: Math.max(bounds.maxX, paperBox ? paperBox.maxX : bounds.maxX),
-          minY: Math.min(bounds.minY, paperBox ? paperBox.minY : bounds.minY),
-          maxY: Math.max(bounds.maxY, paperBox ? paperBox.maxY : bounds.maxY),
-        }
-      : paperBox;
-
-    if (!bounds || printableSegments.length === 0) {
+    if (gcodePreview.loading) {
       return (
-        <Alert severity="info" sx={{ mb: 2 }}>
-          No printable moves found (only travel moves present).
-        </Alert>
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
+          <CircularProgress size={18} />
+          <Typography variant="body2">Loading G-code preview…</Typography>
+        </Stack>
       );
     }
 
-    const { minX, maxX, minY, maxY } = combinedBounds || bounds;
-    const width = 640;
-    const height = 420;
-    const padding = 16;
-    const spanX = Math.max(maxX - minX, 1);
-    const spanY = Math.max(maxY - minY, 1);
-    const scaleX = (width - padding * 2) / spanX;
-    const scaleY = (height - padding * 2) / spanY;
-    const baseScale = Math.min(scaleX, scaleY);
-    const scale = baseScale * gcodeZoom;
-    const centerX = (minX + maxX) / 2;
-    const centerY = (minY + maxY) / 2;
-
-    const mapPoint = (x, y) => ({
-      x: width / 2 + (x - centerX - gcodePan.x) * scale,
-      // Flip Y so higher Y is up visually
-      y: height / 2 - (y - centerY - gcodePan.y) * scale,
-    });
+    if (!gcodePreviewSvg) {
+      return null;
+    }
 
     return (
       <Box sx={{ mb: 2 }}>
         <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
           <CodeIcon color="primary" />
           <Typography variant="subtitle1">G-code Plot Preview</Typography>
-          <Chip label={`${printableSegments.length} segments`} size="small" />
           <Box sx={{ flexGrow: 1 }} />
           <Button
             size="small"
@@ -1360,14 +1127,26 @@ export default function EditProject({ currentProject }) {
               cursor: gcodeDragging ? "grabbing" : "grab",
               userSelect: "none",
               overflow: "hidden",
+              bgcolor: "#bdbdbd",
+              borderRadius: 1,
+              "& > div": {
+                display: "flex",
+                justifyContent: "center",
+                alignItems: "center",
+                "& svg": {
+                  display: "block",
+                  maxWidth: "100%",
+                  maxHeight: "440px",
+                  transform: `translate(${gcodePan.x}px, ${gcodePan.y}px) scale(${gcodeZoom})`,
+                  transformOrigin: "center center",
+                  transition: gcodeDragging ? "none" : "transform 0.1s ease-out",
+                },
+              },
             }}
           >
-            <canvas
-              ref={gcodeCanvasRef}
-              style={{
-                width: "100%",
-                height: "100%",
-              }}
+            <div
+              dangerouslySetInnerHTML={{ __html: gcodePreviewSvg }}
+              style={{ width: "100%", display: "flex", justifyContent: "center" }}
             />
           </Box>
         </Paper>

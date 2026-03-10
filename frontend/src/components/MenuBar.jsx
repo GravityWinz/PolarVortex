@@ -25,12 +25,18 @@ import {
 import React from "react";
 import logoImage from "../assets/PolarVortexLogo_small.png";
 
+/** Fallback icon when logo image fails to load (e.g. wrong path in build or dev). */
+const LogoFallbackIcon = (
+  <TimelineIcon sx={{ fontSize: 40, color: "inherit", display: "block" }} />
+);
+
 /**
  * MenuBar component for PolarVortex
  * Provides navigation between different sections of the application
  */
 export default function MenuBar({ currentView, onNavigate, currentProject }) {
   const [drawerOpen, setDrawerOpen] = React.useState(false);
+  const [logoError, setLogoError] = React.useState(false);
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
 
@@ -92,16 +98,23 @@ export default function MenuBar({ currentView, onNavigate, currentProject }) {
               minWidth: 0,
             }}
           >
-            <img
-              src={logoImage}
-              alt="PolarVortex Logo"
-              style={{
-                height: "40px",
-                width: "auto",
-                marginRight: "12px",
-                filter: "brightness(0) invert(1)", // Make logo white for dark background
-              }}
-            />
+            {logoError ? (
+              <Box sx={{ mr: 1.5, display: "flex", alignItems: "center" }}>
+                {LogoFallbackIcon}
+              </Box>
+            ) : (
+              <img
+                src={logoImage}
+                alt="PolarVortex Logo"
+                onError={() => setLogoError(true)}
+                style={{
+                  height: "40px",
+                  width: "auto",
+                  marginRight: "12px",
+                  filter: "brightness(0) invert(1)", // Make logo white for dark background
+                }}
+              />
+            )}
             <Typography variant="h6" component="div">
               PolarVortex
             </Typography>
@@ -167,11 +180,18 @@ export default function MenuBar({ currentView, onNavigate, currentProject }) {
               borderColor: "divider",
             }}
           >
-            <img
-              src={logoImage}
-              alt="PolarVortex Logo"
-              style={{ height: "50px", width: "auto" }}
-            />
+            {logoError ? (
+              <Box sx={{ display: "flex", justifyContent: "center", color: "primary.main" }}>
+                <TimelineIcon sx={{ fontSize: 50 }} />
+              </Box>
+            ) : (
+              <img
+                src={logoImage}
+                alt="PolarVortex Logo"
+                onError={() => setLogoError(true)}
+                style={{ height: "50px", width: "auto" }}
+              />
+            )}
             <Typography variant="h6" sx={{ mt: 1, color: "primary.main" }}>
               PolarVortex
             </Typography>
