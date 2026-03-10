@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 # G-code upload validation
 # txt is excluded to enforce stricter extension checks in tests/CI
 ALLOWED_GCODE_EXTENSIONS = {".gcode", ".nc", ".txt"}
-MAX_GCODE_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
+MAX_GCODE_UPLOAD_SIZE = 25 * 1024 * 1024  # 25MB
 
 # Initialize ImageHelper
 image_helper = ImageHelper()
@@ -850,7 +850,7 @@ async def upload_gcode_to_project(
             raise HTTPException(status_code=400, detail="Empty file")
 
         if len(content) > MAX_GCODE_UPLOAD_SIZE:
-            raise HTTPException(status_code=400, detail="File too large (max 10MB)")
+            raise HTTPException(status_code=400, detail="File too large (max 25MB)")
 
         ext = Path(file.filename or "").suffix.lower()
         if ext not in ALLOWED_GCODE_EXTENSIONS:

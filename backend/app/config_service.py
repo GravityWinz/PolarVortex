@@ -149,7 +149,7 @@ class ConfigurationService:
                 ]
             },
             "image_processing": {
-                "max_file_size": 10485760,
+                "max_file_size": 26214400,  # 25MB
                 "allowed_types": [
                     'image/jpeg',
                     'image/jpg',

@@ -89,9 +89,9 @@ export default function ImageUpload({ project, onUploadComplete }) {
       return;
     }
 
-    // Check file size (max 10MB)
-    if (file.size > 10 * 1024 * 1024) {
-      setErrorMessage("File size must be less than 10MB");
+    // Check file size (max 25MB)
+    if (file.size > 25 * 1024 * 1024) {
+      setErrorMessage("File size must be less than 25MB");
       return;
     }
 
@@ -247,7 +247,7 @@ export default function ImageUpload({ project, onUploadComplete }) {
               <Typography variant="body2" color="text.secondary">
                 {selectedFile
                   ? `${selectedFile.name} (${getFileSize(selectedFile.size)})`
-                  : "Supports JPEG, PNG, GIF up to 10MB"}
+                  : "Supports JPEG, PNG, GIF up to 25MB"}
               </Typography>
             </Box>
           </Paper>

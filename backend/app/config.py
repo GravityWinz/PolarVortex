@@ -35,7 +35,7 @@ class Settings:
     ]
     
     # Image Processing Configuration
-    MAX_FILE_SIZE: int = 10 * 1024 * 1024  # 10MB
+    MAX_FILE_SIZE: int = 25 * 1024 * 1024  # 25MB
     ALLOWED_IMAGE_TYPES: List[str] = [
         'image/jpeg',
         'image/jpg',
@@ -169,7 +169,7 @@ class Config:
                 ]
             },
             "image_processing": {
-                "max_file_size": 10485760,  # 10MB
+                "max_file_size": 26214400,  # 25MB
                 "allowed_types": [
                     'image/jpeg',
                     'image/jpg',
@@ -283,7 +283,7 @@ class Config:
     @property
     def max_file_size(self) -> int:
         """Get maximum file size"""
-        return self.get('image_processing.max_file_size', 10485760)
+        return self.get('image_processing.max_file_size', 26214400)
     
     @property
     def allowed_image_types(self) -> List[str]:

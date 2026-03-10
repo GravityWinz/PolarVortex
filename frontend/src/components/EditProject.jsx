@@ -830,8 +830,8 @@ export default function EditProject({ currentProject }) {
       );
     }
 
-    if (file.size > 10 * 1024 * 1024) {
-      throw new Error("File size must be less than 10MB");
+    if (file.size > 25 * 1024 * 1024) {
+      throw new Error("File size must be less than 25MB");
     }
 
     return { isGcode };
